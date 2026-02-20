@@ -1,0 +1,44 @@
+{
+  "name": "cezih_fhir",
+  "version": "1.0.0",
+  "description": "CEZIH FHIR R4 Integration Service for Private Clinic Certification",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "dev:client": "cd client && npm run dev -- -p 3011",
+    "dev:all": "concurrently \"npm run dev\" \"npm run dev:client\"",
+    "build": "tsc",
+    "build:client": "cd client && npm run build",
+    "start": "node dist/server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "cezih",
+    "fhir",
+    "healthcare",
+    "croatia"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.3.0",
+    "axios": "^1.13.5",
+    "better-sqlite3": "^12.6.2",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "fhir-kit-client": "^1.9.2",
+    "jose": "^6.1.3",
+    "typescript": "^5.9.3",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/uuid": "^10.0.0",
+    "concurrently": "^9.2.1",
+    "nodemon": "^3.1.11",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.21.0"
+  }
+}
