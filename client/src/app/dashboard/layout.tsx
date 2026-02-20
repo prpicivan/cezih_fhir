@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Users, Calendar, Activity, Settings, LogOut, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Users, Calendar, Activity, Settings, LogOut, Menu, X, ShieldCheck, Award } from 'lucide-react';
 import { useState } from 'react';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -14,8 +14,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         { name: 'Pacijenti', href: '/dashboard/patients', icon: Users },
         { name: 'Kalendar', href: '/dashboard/calendar', icon: Calendar },
         { name: 'Klinički dokumenti', href: '/dashboard/documents', icon: Activity },
+        { name: 'Praćenje statusa', href: '/dashboard/audit', icon: ShieldCheck },
         { name: 'Registar (TC 9)', href: '/dashboard/registry', icon: Users },
         { name: 'Postavke', href: '/dashboard/settings', icon: Settings },
+        { name: 'Certifikacija', href: '/dashboard/certification', icon: Award },
     ];
 
     return (

@@ -5,7 +5,10 @@
 import axios from 'axios';
 import { config } from '../config';
 import { authService } from './auth.service';
-import { CEZIH_IDENTIFIERS } from '../types';
+import {
+    CEZIH_IDENTIFIERS,
+    CEZIH_EXTENSIONS
+} from '../types';
 import db from '../db';
 
 export interface PatientDemographics {
@@ -134,7 +137,7 @@ class PatientService {
             (id: any) => id.system === CEZIH_IDENTIFIERS.OIB
         );
         const lastContactExt = resource.extension?.find(
-            (ext: any) => ext.url === 'http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-patient-last-contact'
+            (ext: any) => ext.url === CEZIH_EXTENSIONS.PATIENT_LAST_CONTACT
         );
 
         return {

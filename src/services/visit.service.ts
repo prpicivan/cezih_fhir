@@ -6,9 +6,16 @@ import axios from 'axios';
 import { config } from '../config';
 import { authService } from './auth.service';
 import { signatureService } from './signature.service';
-import { CEZIH_IDENTIFIERS } from '../types';
+import {
+    CEZIH_IDENTIFIERS,
+    CEZIH_EXTENSIONS,
+    ENCOUNTER_CODES,
+    ENCOUNTER_CLASS_SYSTEM,
+    ENCOUNTER_CLASSES
+} from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../db';
+import { auditService } from './audit.service';
 
 export interface VisitData {
     patientMbo: string;
@@ -102,6 +109,9 @@ class VisitService {
                         },
                         source: {
                             endpoint: config.cezih.baseUrl,
+                            name: config.software.instance,
+                            software: config.software.name,
+                            version: config.software.version,
                         },
                         focus: [{ reference: `urn:uuid:encounter-1` }],
                     },
@@ -110,18 +120,70 @@ class VisitService {
                     fullUrl: 'urn:uuid:encounter-1',
                     resource: {
                         resourceType: 'Encounter',
+                        meta: {
+                            profile: [CEZIH_EXTENSIONS.ENCOUNTER_PROFILE]
+                        },
+                        extension: [
+                            {
+                                url: CEZIH_EXTENSIONS.COST_PARTICIPATION,
+                                extension: [
+                                    {
+                                        url: 'oznaka',
+                                        valueCoding: {
+                                            system: ENCOUNTER_CODES.COST_PARTICIPATION_SYSTEM,
+                                            code: 'N' // Default to No (Not self-paying)
+                                        }
+                                    },
+                                    {
+                                        url: 'sifra-oslobodjenja',
+                                        valueCoding: {
+                                            system: ENCOUNTER_CODES.EXEMPTION_REASON_SYSTEM,
+                                            code: '55' // Default to 55 (General exemption)
+                                        }
+                                    }
+                                ]
+                            }
+                        ],
                         status: initialStatus as 'planned' | 'arrived' | 'triaged' | 'in-progress' | 'onleave' | 'finished' | 'cancelled',
                         class: {
-                            system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode',
-                            code: data.class,
+                            system: ENCOUNTER_CLASS_SYSTEM,
+                            code: ENCOUNTER_CLASSES[data.class] || '1',
+                            display: data.class === 'AMB' ? 'Redovni' : data.class === 'EMER' ? 'Hitni' : 'Stacionarni'
                         },
+                        type: [
+                            {
+                                coding: [
+                                    {
+                                        system: ENCOUNTER_CODES.VISIT_TYPE_SYSTEM,
+                                        code: '1' // Example
+                                    }
+                                ]
+                            },
+                            {
+                                coding: [
+                                    {
+                                        system: ENCOUNTER_CODES.VISIT_SUBTYPE_SYSTEM,
+                                        code: '1' // Example
+                                    }
+                                ]
+                            }
+                        ],
                         identifier: [
                             {
-                                system: CEZIH_IDENTIFIERS.LOCAL_VISIT_ID,
+                                system: CEZIH_IDENTIFIERS.VISIT_ID, // Use the proper global one
                                 value: localVisitId,
                             },
                         ],
+                        priority: {
+                            coding: [
+                                {
+                                    system: 'http://terminology.hl7.org/CodeSystem/v3-ActPriority',
+                                    code: 'R'
+                                }
+                            ]
+                        },
                         subject: {
+                            type: 'Patient',
                             identifier: {
                                 system: CEZIH_IDENTIFIERS.MBO,
                                 value: data.patientMbo,
@@ -130,12 +192,20 @@ class VisitService {
                         participant: [
                             {
                                 individual: {
-                                    reference: `Practitioner/${data.practitionerId}`,
+                                    type: 'Practitioner',
+                                    identifier: {
+                                        system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
+                                        value: data.practitionerId,
+                                    },
                                 },
                             },
                         ],
                         serviceProvider: {
-                            reference: `Organization/${data.organizationId}`,
+                            type: 'Organization',
+                            identifier: {
+                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                                value: data.organizationId,
+                            },
                         },
                         period: {
                             start: data.startDate,
@@ -152,13 +222,11 @@ class VisitService {
                         ...(data.diagnosisCode && {
                             diagnosis: [{
                                 condition: {
-                                    display: data.diagnosisDisplay,
-                                },
-                                use: {
-                                    coding: [{
-                                        system: 'http://terminology.hl7.org/CodeSystem/diagnosis-role',
-                                        code: 'billing',
-                                    }],
+                                    type: 'Condition',
+                                    identifier: {
+                                        system: CEZIH_IDENTIFIERS.CASE_ID,
+                                        value: `case-${localVisitId}` // Mock linking
+                                    }
                                 },
                             }],
                         }),
@@ -167,7 +235,8 @@ class VisitService {
             ],
         };
 
-        return this.sendMessage(bundle, userToken);
+        const response = await this.sendMessage(bundle, userToken, 'ENCOUNTER_START', localVisitId);
+        return { ...response, localVisitId };
     }
 
     // ============================================================
@@ -210,6 +279,9 @@ class VisitService {
                     fullUrl: 'urn:uuid:encounter-1',
                     resource: {
                         resourceType: 'Encounter',
+                        meta: {
+                            profile: [CEZIH_EXTENSIONS.ENCOUNTER_PROFILE]
+                        },
                         identifier: [
                             {
                                 system: CEZIH_IDENTIFIERS.VISIT_ID,
@@ -222,7 +294,13 @@ class VisitService {
                         }),
                         ...(data.diagnosisCode && {
                             diagnosis: [{
-                                condition: { display: data.diagnosisDisplay },
+                                condition: {
+                                    type: 'Condition',
+                                    identifier: {
+                                        system: CEZIH_IDENTIFIERS.CASE_ID,
+                                        value: `case-${visitId}`
+                                    }
+                                }
                             }],
                         }),
                     },
@@ -230,7 +308,7 @@ class VisitService {
             ],
         };
 
-        return this.sendMessage(bundle, userToken);
+        return this.sendMessage(bundle, userToken, 'ENCOUNTER_UPDATE', visitId);
     }
 
     // ============================================================
@@ -272,6 +350,9 @@ class VisitService {
                     fullUrl: 'urn:uuid:encounter-1',
                     resource: {
                         resourceType: 'Encounter',
+                        meta: {
+                            profile: [CEZIH_EXTENSIONS.ENCOUNTER_PROFILE]
+                        },
                         identifier: [
                             {
                                 system: CEZIH_IDENTIFIERS.VISIT_ID,
@@ -287,13 +368,16 @@ class VisitService {
             ],
         };
 
-        return this.sendMessage(bundle, userToken);
+        return this.sendMessage(bundle, userToken, 'REALIZATION', visitId);
     }
 
-    private async sendMessage(bundle: any, userToken: string): Promise<any> {
+    private async sendMessage(bundle: any, userToken: string, action: string, visitId?: string): Promise<any> {
+        let bundleToSend = bundle;
+        let finalResponse: any = null;
+        let errorMessage: string | undefined;
+
         try {
             // Sign the bundle before sending (CEZIH requires JWS digital signature)
-            let bundleToSend = bundle;
             try {
                 if (signatureService.isAvailable()) {
                     const { bundle: signedBundle } = signatureService.signBundle(bundle);
@@ -304,7 +388,7 @@ class VisitService {
                 }
             } catch (signError: any) {
                 console.error('[VisitService] Signing failed:', signError.message);
-                console.warn('[VisitService] Proceeding with unsigned bundle');
+                errorMessage = `Signing failed: ${signError.message}`;
             }
 
             const headers = authService.getUserAuthHeaders(userToken);
@@ -312,16 +396,29 @@ class VisitService {
             const response = await axios.post(url, bundleToSend, { headers });
 
             console.log('[VisitService] Message sent successfully');
-            return response.data;
+            finalResponse = response.data;
         } catch (error: any) {
             console.warn('[VisitService] CEZIH send failed (expected without VPN).');
+            errorMessage = error.message;
             // Return a mock success response so the UI doesn't break
-            return {
+            finalResponse = {
                 resourceType: 'Bundle',
                 type: 'message',
                 entry: [{ resource: { resourceType: 'MessageHeader', response: { code: 'ok' } } }]
             };
+        } finally {
+            // ASYNC Log to Audit service
+            auditService.log({
+                visitId,
+                action,
+                direction: 'OUTGOING',
+                status: errorMessage && !finalResponse ? 'ERROR' : 'SUCCESS',
+                payload_req: bundleToSend,
+                payload_res: finalResponse,
+                error_msg: errorMessage
+            });
         }
+        return finalResponse;
     }
 }
 

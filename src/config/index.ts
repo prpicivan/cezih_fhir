@@ -31,6 +31,13 @@ export const config = {
         name: process.env.ORGANIZATION_NAME || 'Privatna poliklinika',
     },
 
+    // Software Metadata (for CEZIH identification)
+    software: {
+        name: process.env.SOFTWARE_NAME || 'WBS_fhir',
+        version: process.env.SOFTWARE_VERSION || '1.0.0.',
+        instance: process.env.SOFTWARE_INSTANCE || 'Poliklinika-Test-01',
+    },
+
     // Digital Signature (JWS)
     signing: {
         certPath: process.env.SIGNING_CERT_PATH || '',

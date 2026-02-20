@@ -9,3 +9,4 @@ export { visitService } from './visit.service';
 export { caseService } from './case.service';
 export { clinicalDocumentService } from './clinical-document.service';
 export { settingsService } from './settings.service';
+export { auditService } from './audit.service';

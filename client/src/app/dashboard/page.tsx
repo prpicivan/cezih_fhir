@@ -1,11 +1,37 @@
 'use client';
 
 import Link from 'next/link';
-import { Users, Calendar, FileText, UserPlus, Activity, Clock, LogOut } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Users, Calendar, FileText, UserPlus, Activity, Clock, LogOut, CheckCircle, XCircle } from 'lucide-react';
 
 export default function DashboardPage() {
+    const searchParams = useSearchParams();
+    const [showSuccess, setShowSuccess] = useState(false);
+
+    useEffect(() => {
+        if (searchParams.get('sessionId')) {
+            setShowSuccess(true);
+            // Hide after 5 seconds
+            const timer = setTimeout(() => setShowSuccess(false), 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [searchParams]);
+
     return (
         <div className="space-y-8">
+            {showSuccess && (
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-xl flex items-center justify-between animate-in fade-in slide-in-from-top-4 duration-500">
+                    <div className="flex items-center gap-3">
+                        <CheckCircle className="w-5 h-5 text-emerald-600" />
+                        <span className="font-medium">Prijava uspješna! Dobrodošli u WBS_fhir sustav.</span>
+                    </div>
+                    <button onClick={() => setShowSuccess(false)} className="text-emerald-400 hover:text-emerald-600">
+                        <XCircle className="w-4 h-4" />
+                    </button>
+                </div>
+            )}
+
             {/* Welcome Section */}
             <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-8 text-white shadow-lg">
                 <h1 className="text-3xl font-bold mb-2">Dobrodošli, Dr. Horvat 👋</h1>
@@ -123,6 +149,59 @@ export default function DashboardPage() {
                     </Link>
                 </div>
             </div>
+
+            {/* Terminology & Maintenance */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                    <div className="font-semibold text-slate-800 flex items-center gap-2">
+                        <Database className="w-4 h-4 text-slate-500" />
+                        Održavanje i sinkronizacija
+                    </div>
+                </div>
+                <div className="p-6">
+                    <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                        <div className="flex-1">
+                            <h4 className="font-medium text-slate-900">Nacionalni šifrarnici (MKB-10, Postupci)</h4>
+                            <p className="text-sm text-slate-500">Sinkronizacija lokalne baze s CEZIH terminološkim servisima (IHE SVCM).</p>
+                        </div>
+                        <SyncButton />
+                    </div>
+                </div>
+            </div>
         </div>
     );
 }
+
+function SyncButton() {
+    const [syncing, setSyncing] = useState(false);
+    const [lastSync, setLastSync] = useState<string | null>(null);
+
+    const handleSync = async () => {
+        setSyncing(true);
+        try {
+            const res = await fetch('/api/terminology/sync', { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                setLastSync(new Date().toLocaleString('hr-HR'));
+                alert(`Sinkronizacija uspješna! Dohvaćeno ${data.codeSystems} sustava kodova.`);
+            }
+        } catch (err) {
+            alert('Greška pri sinkronizaciji.');
+        } finally {
+            setSyncing(false);
+        }
+    };
+
+    return (
+        <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg transition-colors font-medium border border-slate-200 disabled:opacity-50"
+        >
+            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing ? 'Sinkronizacija...' : 'Sinkroniziraj odmah'}
+        </button>
+    );
+}
+
+import { Database, RefreshCw } from 'lucide-react';

@@ -44,6 +44,10 @@ export const CEZIH_IDENTIFIERS = {
  */
 export const CEZIH_EXTENSIONS = {
     PATIENT_LAST_CONTACT: 'http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-patient-last-contact',
+    ENCOUNTER_PROFILE: 'http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-encounter',
+    COST_PARTICIPATION: 'http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-troskovi-sudjelovanje',
+    RELATED_CASE: 'http://fhir.cezih.hr/specifikacije/StructureDefinition/vezani-slucaj',
+    ANNOTATION_TYPE: 'http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-annotation-type',
 } as const;
 
 /**
@@ -77,6 +81,19 @@ export const DOCUMENT_CODES = {
     SECTION_ACTIVITY: '12',             // Djelatnost
     SECTION_MEDICAL_INFO: '18',         // Medicinska informacija
     SECTION_ATTACHMENTS: '16',          // Priloženi dokumenti
+} as const;
+
+/**
+ * Encounter & Case Coding Systems
+ */
+export const ENCOUNTER_CODES = {
+    COST_PARTICIPATION_SYSTEM: 'http://fhir.cezih.hr/specifikacije/CodeSystem/sudjelovanje-u-troskovima',
+    EXEMPTION_REASON_SYSTEM: 'http://fhir.cezih.hr/specifikacije/CodeSystem/sifra-oslobodjenja-od-sudjelovanja-u-troskovima',
+    VISIT_TYPE_SYSTEM: 'http://fhir.cezih.hr/specifikacije/CodeSystem/vrsta-posjete',
+    VISIT_SUBTYPE_SYSTEM: 'http://fhir.cezih.hr/specifikacije/CodeSystem/hr-tip-posjete',
+    ICD10_HR: 'http://fhir.cezih.hr/specifikacije/CodeSystem/icd10-hr',
+    ANNOTATION_TYPE_SYSTEM: 'http://fhir.cezih.hr/specifikacije/CodeSystem/annotation-type',
+    RELATIONSHIP_TYPE_SYSTEM: 'http://fhir.cezih.hr/specifikacije/CodeSystem/relationship-type',
 } as const;
 
 /**

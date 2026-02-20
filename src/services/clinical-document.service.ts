@@ -7,13 +7,16 @@ import { patientService } from './patient.service';
 import { visitService } from './visit.service';
 import {
     CEZIH_IDENTIFIERS,
+    CEZIH_EXTENSIONS,
     ClinicalDocumentType,
     DOCUMENT_CODES,
+    ENCOUNTER_CODES,
     ENCOUNTER_CLASSES,
     ENCOUNTER_CLASS_SYSTEM
 } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../db';
+import { auditService } from './audit.service';
 
 export interface ClinicalDocumentData {
     type: ClinicalDocumentType;
@@ -23,8 +26,17 @@ export interface ClinicalDocumentData {
     visitId?: string;
     caseId?: string;
     title: string;
-    content: string;          // The actual clinical content (narrative)
-    diagnosisCode?: string;
+
+    // Structured Clinical Content
+    anamnesis?: string;       // Anamneza
+    status?: string;          // Status
+    finding?: string;         // Nalaz
+    recommendation?: string;  // Preporuka i terapija
+
+    // Legacy support or fallback
+    content?: string;
+
+    diagnosisCode?: string;   // MKB-10
     diagnosisDisplay?: string;
     procedureCode?: string;
     procedureDisplay?: string;
@@ -43,7 +55,12 @@ class ClinicalDocumentService {
 
     getDocuments(params: { patientMbo?: string }): any[] {
         let sql = `
-            SELECT d.*, p.firstName, p.lastName 
+            SELECT 
+                d.id, d.patientMbo, d.visitId, d.type, d.status, 
+                d.anamnesis, d.status_text, d.finding, d.recommendation, 
+                d.diagnosisCode, d.diagnosisDisplay, d.content,
+                d.createdAt, d.sentAt,
+                p.firstName, p.lastName 
             FROM documents d 
             LEFT JOIN patients p ON d.patientMbo = p.mbo 
             WHERE 1=1
@@ -84,8 +101,13 @@ class ClinicalDocumentService {
         // Save to Local DB
         try {
             const stmt = db.prepare(`
-                INSERT INTO documents (id, patientMbo, visitId, type, status, content, createdAt, sentAt)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO documents (
+                    id, patientMbo, visitId, type, status, 
+                    anamnesis, status_text, finding, recommendation, 
+                    diagnosisCode, diagnosisDisplay, content, 
+                    createdAt, sentAt
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `);
             stmt.run(
                 documentOid,
@@ -93,7 +115,13 @@ class ClinicalDocumentService {
                 data.visitId || null,
                 data.type,
                 'sent',
-                data.content,
+                data.anamnesis || null,
+                data.status || null,
+                data.finding || null,
+                data.recommendation || null,
+                data.diagnosisCode || null,
+                data.diagnosisDisplay || null,
+                data.content || null,
                 new Date().toISOString(),
                 new Date().toISOString()
             );
@@ -147,17 +175,32 @@ class ClinicalDocumentService {
             ],
         };
 
+        let responseData: any = null;
+        let errorMessage: string | undefined;
+
         try {
             const headers = authService.getUserAuthHeaders(userToken);
             const url = `${config.cezih.fhirUrl}`;
             const response = await axios.post(url, mhdBundle, { headers });
 
             console.log(`[ClinicalDocumentService] Document sent: ${data.type}, OID: ${documentOid}`);
-            return { ...response.data, documentOid };
+            responseData = response.data;
         } catch (error: any) {
             console.warn('[ClinicalDocumentService] CEZIH send failed (expected without VPN).');
-            return { success: true, documentOid, mock: true };
+            errorMessage = error.message;
+            responseData = { success: true, documentOid, mock: true };
+        } finally {
+            auditService.log({
+                visitId: data.visitId,
+                action: 'SEND_FINDING',
+                direction: 'OUTGOING',
+                status: errorMessage && !responseData?.success ? 'ERROR' : 'SUCCESS',
+                payload_req: mhdBundle,
+                payload_res: responseData,
+                error_msg: errorMessage
+            });
         }
+        return { ...responseData, documentOid };
     }
 
     // ============================================================
@@ -184,8 +227,13 @@ class ClinicalDocumentService {
             db.prepare('UPDATE documents SET status = ? WHERE id = ?').run('replaced', originalDocumentOid);
 
             const stmt = db.prepare(`
-                INSERT INTO documents (id, patientMbo, visitId, type, status, content, createdAt, sentAt)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO documents (
+                    id, patientMbo, visitId, type, status, 
+                    anamnesis, status_text, finding, recommendation, 
+                    diagnosisCode, diagnosisDisplay, content, 
+                    createdAt, sentAt
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `);
             stmt.run(
                 newDocumentOid,
@@ -193,7 +241,13 @@ class ClinicalDocumentService {
                 data.visitId || null,
                 data.type,
                 'sent',
-                data.content,
+                data.anamnesis || null,
+                data.status || null,
+                data.finding || null,
+                data.recommendation || null,
+                data.diagnosisCode || null,
+                data.diagnosisDisplay || null,
+                data.content || null,
                 new Date().toISOString(),
                 new Date().toISOString()
             );
@@ -248,13 +302,27 @@ class ClinicalDocumentService {
             ],
         };
 
+        let responseData: any = null;
+        let errorMessage: string | undefined;
+
         try {
             const headers = authService.getUserAuthHeaders(userToken);
-            const response = await axios.post(config.cezih.fhirUrl, mhdBundle, { headers });
-            return { ...response.data, documentOid: newDocumentOid, replacedOid: originalDocumentOid };
+            responseData = (await axios.post(config.cezih.fhirUrl, mhdBundle, { headers })).data;
         } catch (error: any) {
-            return { success: true, documentOid: newDocumentOid, replacedOid: originalDocumentOid, mock: true };
+            errorMessage = error.message;
+            responseData = { success: true, documentOid: newDocumentOid, replacedOid: originalDocumentOid, mock: true };
+        } finally {
+            auditService.log({
+                visitId: data.visitId,
+                action: 'REPLACE_DOCUMENT',
+                direction: 'OUTGOING',
+                status: errorMessage && !responseData?.success ? 'ERROR' : 'SUCCESS',
+                payload_req: mhdBundle,
+                payload_res: responseData,
+                error_msg: errorMessage
+            });
         }
+        return { ...responseData, documentOid: newDocumentOid, replacedOid: originalDocumentOid };
     }
 
     // ============================================================
@@ -274,29 +342,69 @@ class ClinicalDocumentService {
         const cancelBundle = {
             resourceType: 'Bundle',
             id: bundleId,
-            type: 'transaction',
+            type: 'message', // Cancellation in CEZIH requires a signed message bundle
             entry: [
                 {
+                    fullUrl: `urn:uuid:${uuidv4()}`,
+                    resource: {
+                        resourceType: 'MessageHeader',
+                        id: uuidv4(),
+                        eventCoding: {
+                            system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/message-events',
+                            code: 'document-cancel',
+                        },
+                        source: {
+                            endpoint: config.cezih.baseUrl,
+                            name: config.software.instance,
+                            software: config.software.name,
+                            version: config.software.version,
+                        },
+                        focus: [{ reference: `urn:uuid:doc-ref-cancel` }],
+                    },
+                },
+                {
+                    fullUrl: `urn:uuid:doc-ref-cancel`,
                     resource: {
                         resourceType: 'DocumentReference',
                         masterIdentifier: { value: documentOid },
                         status: 'entered-in-error',
                     },
-                    request: {
-                        method: 'PUT',
-                        url: `DocumentReference?identifier=${documentOid}`,
-                    },
                 },
             ],
         };
 
+        // Sign the cancel bundle
+        let finalCancelBundle = cancelBundle;
+        try {
+            if (signatureService.isAvailable()) {
+                const { bundle: signedDoc } = signatureService.signBundle(cancelBundle, `Practitioner/unknown`);
+                finalCancelBundle = signedDoc;
+                console.log('[ClinicalDocumentService] Cancel Document Bundle signed successfully');
+            }
+        } catch (signError: any) {
+            console.error('[ClinicalDocumentService] Cancel signing failed:', signError.message);
+        }
+
+        let responseData: any = null;
+        let errorMessage: string | undefined;
+
         try {
             const headers = authService.getUserAuthHeaders(userToken);
-            const response = await axios.post(config.cezih.fhirUrl, cancelBundle, { headers });
-            return response.data;
+            responseData = (await axios.post(`${config.cezih.fhirUrl}/$process-message`, finalCancelBundle, { headers })).data;
         } catch (error: any) {
-            return { success: true, id: documentOid, status: 'cancelled', mock: true };
+            errorMessage = error.message;
+            responseData = { success: true, id: documentOid, status: 'cancelled', mock: true };
+        } finally {
+            auditService.log({
+                action: 'CANCEL_DOCUMENT',
+                direction: 'OUTGOING',
+                status: errorMessage && !responseData?.success ? 'ERROR' : 'SUCCESS',
+                payload_req: finalCancelBundle,
+                payload_res: responseData,
+                error_msg: errorMessage
+            });
         }
+        return responseData;
     }
 
     // ============================================================
@@ -343,9 +451,10 @@ class ClinicalDocumentService {
         const roleUuid = `urn:uuid:${uuidv4()}`;    // PractitionerRole? Optional, sticking to simplified
 
         const entries: any[] = [];
+        const conditionUuid = `urn:uuid:${uuidv4()}`;
 
         // 1. Composition Resource (Must be first)
-        const composition = {
+        const composition: any = {
             resourceType: 'Composition',
             status: 'final',
             type: {
@@ -360,46 +469,120 @@ class ClinicalDocumentService {
             },
             date: data.date,
             author: [
-                { reference: practitionerUuid, display: 'Dr. Ivan Horvat' },
-                { reference: organizationUuid, display: 'Ordinacija opće medicine' }
+                {
+                    type: 'Practitioner',
+                    identifier: {
+                        system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
+                        value: data.practitionerId
+                    }
+                },
+                {
+                    type: 'Organization',
+                    identifier: {
+                        system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                        value: data.organizationId
+                    }
+                }
             ],
             title: data.title,
-            section: [
-                // Section 1: Djelatnost (Required)
-                {
-                    title: 'Djelatnost',
-                    code: {
-                        coding: [{
-                            system: DOCUMENT_CODES.SECTION_SYSTEM,
-                            code: DOCUMENT_CODES.SECTION_ACTIVITY,
-                            display: 'Djelatnost'
-                        }]
-                    },
-                    entry: [{ reference: serviceUuid }]
+            section: []
+        };
+
+        // Section: Djelatnost (Required)
+        composition.section.push({
+            title: 'Djelatnost',
+            code: {
+                coding: [{
+                    system: DOCUMENT_CODES.SECTION_SYSTEM,
+                    code: DOCUMENT_CODES.SECTION_ACTIVITY,
+                    display: 'Djelatnost'
+                }]
+            },
+            entry: [{ reference: serviceUuid }]
+        });
+
+        // Section: Medicinska informacija / Dijagnoza
+        if (data.diagnosisCode) {
+            composition.section.push({
+                title: 'Dijagnoza',
+                code: {
+                    coding: [{
+                        system: DOCUMENT_CODES.SECTION_SYSTEM,
+                        code: DOCUMENT_CODES.SECTION_MEDICAL_INFO,
+                        display: 'Medicinska informacija'
+                    }]
                 },
-                // Section 2: Medicinska informacija (Required)
-                // Note: Ideally references Condition, Procedure, Observation. 
-                // For now enclosing text in an Observation or just text section if permitted.
-                // Simplifier example used Observation for Narrative.
-                {
-                    title: 'Medicinska informacija',
-                    code: {
+                entry: [{ reference: conditionUuid }]
+            });
+
+            // Add Condition Resource to Bundle
+            entries.push({
+                fullUrl: conditionUuid,
+                resource: {
+                    resourceType: 'Condition',
+                    clinicalStatus: {
                         coding: [{
-                            system: DOCUMENT_CODES.SECTION_SYSTEM,
-                            code: DOCUMENT_CODES.SECTION_MEDICAL_INFO,
-                            display: 'Medicinska informacija'
+                            system: 'http://terminology.hl7.org/CodeSystem/condition-clinical',
+                            code: 'active'
                         }]
                     },
+                    verificationStatus: {
+                        coding: [{
+                            system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status',
+                            code: 'confirmed'
+                        }]
+                    },
+                    category: [{
+                        coding: [{
+                            system: 'http://terminology.hl7.org/CodeSystem/condition-category',
+                            code: 'encounter-diagnosis',
+                            display: 'Encounter Diagnosis'
+                        }]
+                    }],
+                    code: {
+                        coding: [{
+                            system: ENCOUNTER_CODES.ICD10_HR,
+                            code: data.diagnosisCode,
+                            display: data.diagnosisDisplay
+                        }]
+                    },
+                    subject: {
+                        type: 'Patient',
+                        identifier: {
+                            system: CEZIH_IDENTIFIERS.MBO,
+                            value: data.patientMbo
+                        }
+                    },
+                    encounter: { reference: encounterUuid },
+                    recordedDate: data.date
+                }
+            });
+        }
+
+        // Add Narrative Sections
+        const sectionMapping = [
+            { title: 'Anamneza', content: data.anamnesis },
+            { title: 'Status', content: data.status },
+            { title: 'Nalaz', content: data.finding || data.content },
+            { title: 'Preporuka i terapija', content: data.recommendation }
+        ];
+
+        for (const sec of sectionMapping) {
+            if (sec.content) {
+                composition.section.push({
+                    title: sec.title,
                     text: {
                         status: 'generated',
-                        div: `<div xmlns="http://www.w3.org/1999/xhtml">${data.content}</div>`
-                    },
-                    entry: [
-                        // Optionally add structured resources here if available
-                    ]
-                }
-            ] as any[]
-        };
+                        div: `<div xmlns="http://www.w3.org/1999/xhtml"><strong>${sec.title}:</strong><p>${sec.content}</p></div>`
+                    }
+                });
+            }
+        }
+
+        entries.unshift({
+            fullUrl: `urn:uuid:${documentOid}`,
+            resource: composition
+        });
 
         // Section 3: Priloženi dokumenti (Optional, if attachments exist)
         if (data.attachments && data.attachments.length > 0) {
@@ -444,8 +627,16 @@ class ClinicalDocumentService {
         entries.push({
             fullUrl: patientUuid,
             resource: {
-                resourceType: 'Patient',
-                identifier: [{ system: CEZIH_IDENTIFIERS.MBO, value: patient.mbo }],
+                extension: [
+                    {
+                        url: CEZIH_EXTENSIONS.PATIENT_LAST_CONTACT,
+                        valueDate: new Date().toISOString().split('T')[0]
+                    }
+                ],
+                identifier: [
+                    { system: CEZIH_IDENTIFIERS.MBO, value: patient.mbo },
+                    { system: CEZIH_IDENTIFIERS.UNIQUE_PATIENT_ID, value: uuidv4() }
+                ],
                 name: patient.name.given ? [{ family: patient.name.family, given: patient.name.given }] : [],
                 birthDate: patient.birthDate,
                 gender: patient.gender
@@ -497,9 +688,20 @@ class ClinicalDocumentService {
                         code: classCode,
                         display: 'Ostalo' // Simplified display
                     },
-                    subject: { reference: patientUuid },
-                    participant: [{ individual: { reference: practitionerUuid } }],
-                    serviceProvider: { reference: organizationUuid },
+                    subject: {
+                        type: 'Patient',
+                        identifier: { system: CEZIH_IDENTIFIERS.MBO, value: visit.patientMbo }
+                    },
+                    participant: [{
+                        individual: {
+                            type: 'Practitioner',
+                            identifier: { system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER, value: visit.practitionerId || '1234567' }
+                        }
+                    }],
+                    serviceProvider: {
+                        type: 'Organization',
+                        identifier: { system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE, value: visit.organizationId || '999999999' }
+                    },
                     period: {
                         start: visit.startDateTime,
                         end: visit.endDateTime || new Date().toISOString()

@@ -112,7 +112,7 @@ app.get('/', (_req, res) => {
 });
 
 // Start server
-app.listen(config.port, () => {
+app.listen(config.port, '127.0.0.1', () => {
     console.log(`
 ╔══════════════════════════════════════════════════╗
 ║     CEZIH FHIR Integration Service              ║

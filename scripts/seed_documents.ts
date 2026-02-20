@@ -8,7 +8,7 @@ const docs = [
         id: '2.16.840.1.113883.3.1937.777.1.1.1', // Mock OID
         patientMbo: '223344551', // Luka Lukić
         visitId: null,
-        type: 'LJEKARSKI_NALAZ',
+        type: 'MEDICINSKI_NALAZ',
         status: 'sent',
         content: JSON.stringify({ resourceType: 'Bundle', type: 'document' }),
         createdAt: new Date().toISOString(),

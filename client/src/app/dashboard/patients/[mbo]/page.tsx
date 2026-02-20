@@ -187,7 +187,7 @@ export default function PatientHistoryPage() {
                                         <td className="px-4 py-2 font-medium">{vis.doctorName}</td>
                                         <td className="px-4 py-2">
                                             <span className={`px-2 py-0.5 rounded-full text-xs ${vis.status === 'finished' ? 'bg-green-100 text-green-800' :
-                                                    vis.status === 'in-progress' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100'
+                                                vis.status === 'in-progress' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100'
                                                 }`}>
                                                 {vis.status === 'finished' ? 'Završeno' :
                                                     vis.status === 'in-progress' ? 'U tijeku' : 'Planirano'}
@@ -217,7 +217,13 @@ export default function PatientHistoryPage() {
                                     <h3 className="font-bold">{c.title}</h3>
                                     <div className="text-xs text-gray-500">Status: {c.status} | Od: {new Date(c.start).toLocaleDateString()}</div>
                                 </div>
-                                <button onClick={() => handleCloseCase(c.id)} className="text-xs text-red-600 border border-red-200 px-2 py-1 rounded hover:bg-red-50">Zatvori</button>
+                                <button
+                                    onClick={() => handleCloseCase(c.id)}
+                                    disabled={c.status === 'finished'}
+                                    className="text-xs text-red-600 border border-red-200 px-2 py-1 rounded hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:text-gray-400 disabled:border-gray-200"
+                                >
+                                    Zatvori
+                                </button>
                             </div>
                         ))}
                     </div>

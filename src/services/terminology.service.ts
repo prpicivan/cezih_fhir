@@ -5,6 +5,7 @@
 import axios from 'axios';
 import { config } from '../config';
 import { authService } from './auth.service';
+import db from '../db';
 
 interface FhirBundle {
     resourceType: 'Bundle';
@@ -45,14 +46,29 @@ class TerminologyService {
 
             const codeSystems = response.data.entry?.map(e => e.resource) || [];
 
-            // Cache the code systems
+            // Cache and Persist the code systems
+            const insertStmt = db.prepare('INSERT OR REPLACE INTO terminology_concepts (system, code, display, version) VALUES (?, ?, ?, ?)');
+            const syncStmt = db.prepare('INSERT OR REPLACE INTO terminology_sync (system, lastSync) VALUES (?, ?)');
+
             for (const cs of codeSystems) {
                 if (cs.url) {
                     this.cachedCodeSystems.set(cs.url, cs);
+
+                    // Persist concepts if available
+                    if (cs.concept) {
+                        const transaction = db.transaction((concepts: any[]) => {
+                            for (const concept of concepts) {
+                                insertStmt.run(cs.url, concept.code, concept.display, cs.version || '1.0');
+                            }
+                        });
+                        transaction(cs.concept);
+                    }
+
+                    syncStmt.run(cs.url, new Date().toISOString());
                 }
             }
 
-            console.log(`[TerminologyService] Synced ${codeSystems.length} CodeSystems`);
+            console.log(`[TerminologyService] Synced and Persisted ${codeSystems.length} CodeSystems`);
             return codeSystems;
         } catch (error: any) {
             console.error('[TerminologyService] Failed to sync CodeSystems:', error.message);
@@ -126,8 +142,18 @@ class TerminologyService {
 
     /**
      * Look up a concept in a CodeSystem.
+     * Check DB first, then cache.
      */
     lookupConcept(codeSystemUrl: string, code: string): { code: string; display: string } | undefined {
+        // 1. Try DB first
+        try {
+            const dbConcept = db.prepare('SELECT code, display FROM terminology_concepts WHERE system = ? AND code = ?').get(codeSystemUrl, code) as any;
+            if (dbConcept) return dbConcept;
+        } catch (err) {
+            console.warn('[TerminologyService] DB lookup failed:', err);
+        }
+
+        // 2. Fallback to cache
         const cs = this.cachedCodeSystems.get(codeSystemUrl);
         if (!cs?.concept) return undefined;
 
@@ -143,6 +169,20 @@ class TerminologyService {
         };
 
         return findConcept(cs.concept);
+    }
+
+    /**
+     * Search concepts in a CodeSystem from the database.
+     */
+    searchConcepts(system: string, query: string, limit: number = 50): any[] {
+        const sql = `
+            SELECT code, display 
+            FROM terminology_concepts 
+            WHERE system = ? AND (LOWER(code) LIKE ? OR LOWER(display) LIKE ?)
+            LIMIT ?
+        `;
+        const q = `%${query.toLowerCase()}%`;
+        return db.prepare(sql).all(system, q, q, limit);
     }
 }
 

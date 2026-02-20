@@ -84,6 +84,16 @@ class AuthService {
      * the user is redirected to Certilia mobile.ID login form.
      */
     getCertiliaAuthUrl(state: string): string {
+        // For development/testing without VPN, we can return a local callback URL
+        if (process.env.MOCK_AUTH === 'true') {
+            const mockParams = new URLSearchParams({
+                code: 'mock_code_' + Math.random().toString(36).substring(7),
+                state,
+                mock: 'true'
+            });
+            return `${config.auth.redirectUri}?${mockParams.toString()}`;
+        }
+
         const params = new URLSearchParams({
             response_type: 'code',
             client_id: config.auth.clientId,
@@ -101,6 +111,20 @@ class AuthService {
      * Exchange authorization code for tokens (used by both Smart Card and Certilia flows).
      */
     async exchangeAuthCode(code: string): Promise<CezihTokenResponse> {
+        // Handle mock codes
+        if (code.startsWith('mock_code_')) {
+            console.log('[AuthService] Using MOCK user token exchange');
+            return {
+                access_token: 'mock_access_token_' + Math.random().toString(36).substring(7),
+                expires_in: 3600,
+                refresh_expires_in: 7200,
+                refresh_token: 'mock_refresh_token',
+                token_type: 'Bearer',
+                'not-before-policy': 0,
+                session_state: 'mock_session'
+            };
+        }
+
         try {
             const params = new URLSearchParams();
             params.append('grant_type', 'authorization_code');

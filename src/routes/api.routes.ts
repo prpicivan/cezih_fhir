@@ -13,7 +13,11 @@ import {
     caseService,
     clinicalDocumentService,
     settingsService,
+    auditService,
 } from '../services';
+import db from '../db/index';
+import { ENCOUNTER_CODES } from '../types';
+import certificationRoutes from './certification.routes';
 
 const router = Router();
 
@@ -32,6 +36,10 @@ router.get('/health', (_req: Request, res: Response) => {
         },
     });
 });
+
+// Certification Test Bench Routes
+// ============================================================
+router.use('/certification', certificationRoutes);
 
 // ============================================================
 // Auth Routes (Test Cases 1-3)
@@ -71,9 +79,12 @@ router.get('/auth/callback', async (req: Request, res: Response) => {
         const tokenResponse = await authService.exchangeAuthCode(code as string);
         const sessionId = state as string || 'default';
         authService.storeUserSession(sessionId, tokenResponse.access_token, tokenResponse.expires_in);
-        res.json({ success: true, sessionId });
+
+        // Redirect back to frontend dashboard
+        // Assuming frontend is at http://localhost:3011
+        res.redirect('http://localhost:3011/dashboard?sessionId=' + sessionId);
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.redirect('http://localhost:3011/?error=' + encodeURIComponent(error.message));
     }
 });
 
@@ -127,6 +138,38 @@ router.get('/terminology/value-sets', async (req: Request, res: Response) => {
             : undefined;
         const valueSets = await terminologyService.syncValueSets(lastUpdated);
         res.json({ success: true, count: valueSets.length, valueSets });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.get('/terminology/diagnoses', async (req: Request, res: Response) => {
+    try {
+        const query = (req.query.q as string || '').toLowerCase();
+        const results = terminologyService.searchConcepts(ENCOUNTER_CODES.ICD10_HR, query);
+        res.json({ success: true, count: results.length, results });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ============================================================
+// Audit & Telemetry Routes
+// ============================================================
+router.get('/audit/logs', (req: Request, res: Response) => {
+    try {
+        const limit = parseInt(req.query.limit as string) || 100;
+        const logs = auditService.getAllLogs(limit);
+        res.json({ success: true, count: logs.length, logs });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.get('/audit/logs/:visitId', (req: Request, res: Response) => {
+    try {
+        const logs = auditService.getLogsByVisit(req.params.visitId as string);
+        res.json({ success: true, count: logs.length, logs });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
