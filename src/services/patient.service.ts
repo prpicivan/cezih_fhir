@@ -24,6 +24,7 @@ export interface PatientDemographics {
     birthDate: string;
     deceasedDateTime?: string;
     lastContact?: string;
+    lastSyncAt?: string;
     active: boolean;
     raw: any; // Full FHIR Patient resource
 }
@@ -101,15 +102,60 @@ class PatientService {
             const response = await axios.get(url, { headers });
 
             if (response.data.resourceType === 'Patient') {
-                return [this.mapPatient(response.data)];
+                const patient = this.mapPatient(response.data);
+                this.saveOrUpdatePatient(patient);
+                return [patient];
             }
-            return (response.data.entry || []).map((e: any) => this.mapPatient(e.resource));
+            const patients = (response.data.entry || []).map((e: any) => this.mapPatient(e.resource));
+            patients.forEach((p: PatientDemographics) => this.saveOrUpdatePatient(p));
+            return patients;
         } catch (error: any) {
             console.error('[PatientService] Failed to search patients:', error.message);
-            // Don't throw if just API failed but maybe local had nothing
-            // But since local check is first, if API fails, we throw.
             throw error;
         }
+    }
+
+    private saveOrUpdatePatient(patient: PatientDemographics) {
+        if (!patient.mbo) return;
+        try {
+            const now = new Date().toISOString();
+            const stmt = db.prepare(`
+                INSERT INTO patients (mbo, oib, firstName, lastName, dateOfBirth, gender, lastSyncAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(mbo) DO UPDATE SET
+                    oib = excluded.oib,
+                    firstName = excluded.firstName,
+                    lastName = excluded.lastName,
+                    dateOfBirth = excluded.dateOfBirth,
+                    gender = excluded.gender,
+                    lastSyncAt = ?
+            `);
+            stmt.run(
+                patient.mbo,
+                patient.oib || null,
+                patient.name.given[0] || '',
+                patient.name.family || '',
+                patient.birthDate || null,
+                patient.gender || null,
+                now,
+                now
+            );
+        } catch (err: any) {
+            console.error('[PatientService] DB Sync failed:', err.message);
+        }
+    }
+
+    async getLocalPatients(search?: string): Promise<PatientDemographics[]> {
+        let sql = 'SELECT * FROM patients';
+        const params: any[] = [];
+        if (search) {
+            sql += ` WHERE firstName LIKE ? OR lastName LIKE ? OR mbo LIKE ? OR oib LIKE ?`;
+            const wildcard = `%${search}%`;
+            params.push(wildcard, wildcard, wildcard, wildcard);
+        }
+        sql += ' ORDER BY lastName ASC, firstName ASC';
+        const rows = db.prepare(sql).all(...params) as any[];
+        return rows.map(r => this.mapLocalPatient(r));
     }
 
     private mapLocalPatient(row: any): PatientDemographics {
@@ -124,6 +170,7 @@ class PatientService {
             },
             gender: row.gender,
             birthDate: row.dateOfBirth,
+            lastSyncAt: row.lastSyncAt,
             active: true,
             raw: { resourceType: 'Patient', ...row }
         };

@@ -14,6 +14,11 @@ function ClinicalWorkspace() {
     const router = useRouter();
     const patientId = searchParams.get('patientId');
     const mbo = searchParams.get('mbo');
+    const patientMbo = searchParams.get('patientMbo');
+    const caseIdParam = searchParams.get('caseId');
+
+    // Final effective identifiers
+    const effectiveMbo = patientMbo || mbo;
 
     const [visitStatus, setVisitStatus] = useState<'idle' | 'active' | 'finished'>('idle');
     const [visitId, setVisitId] = useState<string | null>(null);
@@ -95,11 +100,12 @@ function ClinicalWorkspace() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    patientMbo: mbo,
+                    patientMbo: effectiveMbo,
                     practitionerId: 'practitioner-1', // Mock ID
                     organizationId: 'org-1', // Mock ID
                     startDate: new Date(startDate).toISOString(),
-                    class: visitType
+                    class: visitType,
+                    caseId: caseIdParam || undefined
                 })
             });
             const data = await res.json();
@@ -133,10 +139,11 @@ function ClinicalWorkspace() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     type,
-                    patientMbo: mbo,
+                    patientMbo: effectiveMbo,
                     practitionerId: 'practitioner-1',
                     organizationId: 'org-1',
                     visitId: visitId,
+                    caseId: caseIdParam || undefined,
                     title: 'Medicinski nalaz',
                     anamnesis,
                     status: physicalStatus,
@@ -229,7 +236,7 @@ function ClinicalWorkspace() {
                     <div>
                         <h1 className="text-2xl font-bold text-slate-800">Radni prostor liječnika</h1>
                         <div className="flex items-center gap-2 text-sm text-slate-500">
-                            <User className="w-4 h-4" /> Pacijent MBO: <span className="font-mono font-medium text-slate-700">{mbo || 'Nepoznato'}</span>
+                            <User className="w-4 h-4" /> Pacijent MBO: <span className="font-mono font-medium text-slate-700">{effectiveMbo || 'Nepoznato'}</span>
                         </div>
                     </div>
                 </div>

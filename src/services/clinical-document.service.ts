@@ -356,7 +356,7 @@ class ClinicalDocumentService {
                         source: {
                             endpoint: config.cezih.baseUrl,
                             name: config.software.instance,
-                            software: config.software.name,
+                            software: `${config.software.name}_${config.software.company}`,
                             version: config.software.version,
                         },
                         focus: [{ reference: `urn:uuid:doc-ref-cancel` }],

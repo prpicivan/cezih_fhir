@@ -33,7 +33,8 @@ export const config = {
 
     // Software Metadata (for CEZIH identification)
     software: {
-        name: process.env.SOFTWARE_NAME || 'WBS_fhir',
+        name: process.env.SOFTWARE_NAME || 'CezihFhir',
+        company: process.env.ORGANIZATION_NAME || 'WBS',
         version: process.env.SOFTWARE_VERSION || '1.0.0.',
         instance: process.env.SOFTWARE_INSTANCE || 'Poliklinika-Test-01',
     },

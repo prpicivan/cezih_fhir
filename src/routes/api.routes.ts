@@ -18,6 +18,7 @@ import {
 import db from '../db/index';
 import { ENCOUNTER_CODES } from '../types';
 import certificationRoutes from './certification.routes';
+import patientRoutes from './patient.routes';
 
 const router = Router();
 
@@ -202,39 +203,9 @@ router.get('/registry/practitioners', async (req: Request, res: Response) => {
     }
 });
 
+// Patient Routes (Test Cases 10, 11 + Registry/Chart)
 // ============================================================
-// Patient Routes (Test Cases 10, 11)
-// ============================================================
-
-router.get('/patient/search', async (req: Request, res: Response) => {
-    try {
-        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
-        const { mbo, oib } = req.query;
-
-        let patients;
-        if (mbo) {
-            patients = await patientService.searchByMbo(mbo as string, userToken);
-        } else if (oib) {
-            patients = await patientService.searchByOib(oib as string, userToken);
-        } else {
-            return res.status(400).json({ error: 'Provide mbo or oib query parameter' });
-        }
-
-        res.json({ success: true, count: patients.length, patients });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-router.post('/patient/foreigner/register', async (req: Request, res: Response) => {
-    try {
-        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
-        const result = await patientService.registerForeigner(req.body, userToken);
-        res.json({ success: true, result });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
+router.use('/patient', patientRoutes);
 
 // ============================================================
 // Visit Routes (Test Cases 12-14)

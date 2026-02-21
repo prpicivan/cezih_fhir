@@ -29,6 +29,7 @@ export interface VisitData {
     diagnosisCode?: string;
     diagnosisDisplay?: string;
     class: 'AMB' | 'IMP' | 'EMER'; // ambulatory, inpatient, emergency
+    caseId?: string;
 }
 
 class VisitService {
@@ -110,7 +111,7 @@ class VisitService {
                         source: {
                             endpoint: config.cezih.baseUrl,
                             name: config.software.instance,
-                            software: config.software.name,
+                            software: `${config.software.name}_${config.software.company}`,
                             version: config.software.version,
                         },
                         focus: [{ reference: `urn:uuid:encounter-1` }],
@@ -219,13 +220,13 @@ class VisitService {
                                 }],
                             }],
                         }),
-                        ...(data.diagnosisCode && {
+                        ...(data.caseId && {
                             diagnosis: [{
                                 condition: {
                                     type: 'Condition',
                                     identifier: {
                                         system: CEZIH_IDENTIFIERS.CASE_ID,
-                                        value: `case-${localVisitId}` // Mock linking
+                                        value: data.caseId
                                     }
                                 },
                             }],
@@ -271,6 +272,9 @@ class VisitService {
                         },
                         source: {
                             endpoint: config.cezih.baseUrl,
+                            name: config.software.instance,
+                            software: `${config.software.name}_${config.software.company}`,
+                            version: config.software.version,
                         },
                         focus: [{ reference: `urn:uuid:encounter-1` }],
                     },
@@ -342,6 +346,9 @@ class VisitService {
                         },
                         source: {
                             endpoint: config.cezih.baseUrl,
+                            name: config.software.instance,
+                            software: `${config.software.name}_${config.software.company}`,
+                            version: config.software.version,
                         },
                         focus: [{ reference: `urn:uuid:encounter-1` }],
                     },

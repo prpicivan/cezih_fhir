@@ -21,9 +21,19 @@ export function initDatabase() {
       dateOfBirth TEXT,
       gender TEXT,
       address TEXT,
-      city TEXT
+      city TEXT,
+      lastSyncAt TEXT
     );
+  `);
 
+  // Ensure lastSyncAt exist for existing databases
+  try {
+    db.exec('ALTER TABLE patients ADD COLUMN lastSyncAt TEXT');
+  } catch (e) {
+    // Column might already exist
+  }
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS visits (
       id TEXT PRIMARY KEY,
       patientMbo TEXT,
