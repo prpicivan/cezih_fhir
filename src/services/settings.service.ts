@@ -34,6 +34,21 @@ class SettingsService {
 
         return { success: true, timestamp: now };
     }
+
+    getMenuConfig() {
+        const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('menu_config') as { value: string };
+        if (row && row.value) {
+            const parsed = JSON.parse(row.value);
+            // Handle both flat array and { config: [...] } wrapper
+            return Array.isArray(parsed) ? parsed : (parsed.config || []);
+        }
+        return [];
+    }
+
+    updateMenuConfig(newConfig: any[]) {
+        db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('menu_config', JSON.stringify(newConfig));
+        return { success: true };
+    }
 }
 
 export const settingsService = new SettingsService();

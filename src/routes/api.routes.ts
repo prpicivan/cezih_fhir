@@ -275,6 +275,24 @@ router.post('/settings/sync', async (_req: Request, res: Response) => {
     }
 });
 
+router.get('/settings/menu', (_req: Request, res: Response) => {
+    try {
+        const config = settingsService.getMenuConfig();
+        res.json({ success: true, config });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.post('/settings/menu', (req: Request, res: Response) => {
+    try {
+        const result = settingsService.updateMenuConfig(req.body);
+        res.json(result);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // ============================================================
 // Case Routes (Test Cases 15-17)
 // ============================================================
@@ -319,7 +337,8 @@ router.post('/document/send', async (req: Request, res: Response) => {
         const result = await clinicalDocumentService.sendDocument(req.body, userToken);
         res.json({ success: true, result });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        const isValidationError = error.message?.includes('Validacijske pogreške');
+        res.status(isValidationError ? 400 : 500).json({ error: error.message });
     }
 });
 
@@ -330,7 +349,8 @@ router.post('/document/replace', async (req: Request, res: Response) => {
         const result = await clinicalDocumentService.replaceDocument(originalDocumentOid, data, userToken);
         res.json({ success: true, result });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        const isValidationError = error.message?.includes('Validacijske pogreške');
+        res.status(isValidationError ? 400 : 500).json({ error: error.message });
     }
 });
 
@@ -349,7 +369,9 @@ router.get('/document/search', async (req: Request, res: Response) => {
     try {
         const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
         const documents = await clinicalDocumentService.searchDocuments({
-            patientMbo: req.query.patientMbo as string
+            patientMbo: req.query.patientMbo as string,
+            id: (req.query.id || req.query.oid) as string,
+            status: req.query.status as string
         }, userToken);
         res.json({ success: true, count: documents.length, documents });
     } catch (error: any) {

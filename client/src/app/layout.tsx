@@ -2,8 +2,11 @@ import './globals.css';
 import type { Metadata, Viewport } from 'next';
 
 export const metadata: Metadata = {
-    title: 'CEZIH PIS - Certifikacija',
-    description: 'Sustav za upravljanje poliklinikom',
+    title: 'WBS_FHIR',
+    description: 'Sustav za digitalnu razmjenu medicinske dokumentacije s CEZIH sustavom',
+    icons: {
+        icon: '/wbs-logo.png',
+    },
 };
 
 export const viewport: Viewport = {

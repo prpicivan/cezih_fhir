@@ -40,7 +40,7 @@ router.get('/:mbo/chart', async (req: Request, res: Response) => {
         }
 
         // 2. Aggregate Clinical Data
-        const documents = clinicalDocumentService.getDocuments({ patientMbo: mbo });
+        const documents = await clinicalDocumentService.searchDocuments({ patientMbo: mbo }, userToken);
         const cases = await caseService.getPatientCases(mbo, userToken);
         const visits = visitService.getVisits(mbo);
 
@@ -49,6 +49,7 @@ router.get('/:mbo/chart', async (req: Request, res: Response) => {
             chart: {
                 patient,
                 lastDocument: documents[0] || null,
+                allDocuments: documents,
                 activeCases: cases.filter(c => c.status === 'active'),
                 recentVisits: visits.slice(0, 5)
             }

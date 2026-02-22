@@ -182,7 +182,21 @@ class TerminologyService {
             LIMIT ?
         `;
         const q = `%${query.toLowerCase()}%`;
-        return db.prepare(sql).all(system, q, q, limit);
+        const results = db.prepare(sql).all(system, q, q, limit);
+
+        // Fallback for ICD-10 to legacy diagnoses table if empty
+        if (results.length === 0 && system === 'http://fhir.cezih.hr/specifikacije/CodeSystem/icd10-hr') {
+            console.log('[TerminologyService] Falling back to legacy diagnoses table');
+            const fallbackSql = `
+                SELECT code, display 
+                FROM diagnoses 
+                WHERE LOWER(code) LIKE ? OR LOWER(display) LIKE ?
+                LIMIT ?
+            `;
+            return db.prepare(fallbackSql).all(q, q, limit);
+        }
+
+        return results;
     }
 }
 

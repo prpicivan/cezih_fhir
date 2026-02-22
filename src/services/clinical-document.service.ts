@@ -17,6 +17,7 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import db from '../db';
 import { auditService } from './audit.service';
+import { validationService } from './validation.service';
 
 export interface ClinicalDocumentData {
     type: ClinicalDocumentType;
@@ -46,6 +47,9 @@ export interface ClinicalDocumentData {
         data: string;            // Base64-encoded
         title: string;
     }>;
+    closeVisit?: boolean;         // New field for G9 shortcut
+    foreignerId?: string;       // For TC 11
+    foreignerType?: 'putovnica' | 'EKZO';
 }
 
 class ClinicalDocumentService {
@@ -53,16 +57,19 @@ class ClinicalDocumentService {
     // Local DB Methods
     // ============================================================
 
-    getDocuments(params: { patientMbo?: string }): any[] {
+    getDocuments(params: { patientMbo?: string; id?: string; status?: string }): any[] {
         let sql = `
             SELECT 
                 d.id, d.patientMbo, d.visitId, d.type, d.status, 
                 d.anamnesis, d.status_text, d.finding, d.recommendation, 
-                d.diagnosisCode, d.diagnosisDisplay, d.content,
+                COALESCE(d.diagnosisCode, '') as diagnosisCode,
+                COALESCE(d.diagnosisDisplay, v.diagnosis, '') as diagnosisDisplay,
+                d.content,
                 d.createdAt, d.sentAt,
                 p.firstName, p.lastName 
             FROM documents d 
             LEFT JOIN patients p ON d.patientMbo = p.mbo 
+            LEFT JOIN visits v ON d.visitId = v.id
             WHERE 1=1
         `;
         const args: any[] = [];
@@ -70,6 +77,16 @@ class ClinicalDocumentService {
         if (params.patientMbo) {
             sql += ' AND d.patientMbo = ?';
             args.push(params.patientMbo);
+        }
+
+        if (params.id) {
+            sql += ' AND d.id = ?';
+            args.push(params.id);
+        }
+
+        if (params.status && params.status !== 'all') {
+            sql += ' AND d.status = ?';
+            args.push(params.status);
         }
 
         sql += ' ORDER BY d.createdAt DESC';
@@ -85,13 +102,21 @@ class ClinicalDocumentService {
     // ============================================================
 
     async sendDocument(data: ClinicalDocumentData, userToken: string): Promise<any> {
+        // Step 0: Validate Data
+        const validation = validationService.validateDocument(data);
+        if (!validation.isValid) {
+            throw new Error(`Validacijske pogreške: ${validation.errors.join(', ')}`);
+        }
+
         // Step 1: Generate OID and IDs
         const documentOid = await oidService.generateSingleOid();
         const bundleId = uuidv4();
 
         // Step 2: Fetch related data for full Bundle construction
-        const patient = (await patientService.searchByMbo(data.patientMbo, userToken))[0];
-        if (!patient) throw new Error(`Patient with MBO ${data.patientMbo} not found`);
+        // Use either patientMbo or fallback to foreignerId
+        const patientId = data.patientMbo || data.foreignerId || '';
+        const patient = (await patientService.searchByMbo(patientId, userToken))[0];
+        if (!patient) throw new Error(`Pacijent nije pronađen (ID: ${patientId})`);
 
         let visit: any = null;
         if (data.visitId) {
@@ -192,6 +217,7 @@ class ClinicalDocumentService {
         } finally {
             auditService.log({
                 visitId: data.visitId,
+                patientMbo: data.patientMbo,
                 action: 'SEND_FINDING',
                 direction: 'OUTGOING',
                 status: errorMessage && !responseData?.success ? 'ERROR' : 'SUCCESS',
@@ -200,6 +226,18 @@ class ClinicalDocumentService {
                 error_msg: errorMessage
             });
         }
+
+        // Step 6: Optional Auto-Close Visit
+        if (data.closeVisit && data.visitId) {
+            try {
+                const endDate = new Date().toISOString();
+                await visitService.closeVisit(data.visitId, endDate, userToken);
+                console.log('[ClinicalDocumentService] Visit auto-closed:', data.visitId);
+            } catch (closeError: any) {
+                console.warn('[ClinicalDocumentService] Auto-close visit failed:', closeError.message);
+            }
+        }
+
         return { ...responseData, documentOid };
     }
 
@@ -212,6 +250,11 @@ class ClinicalDocumentService {
         data: ClinicalDocumentData,
         userToken: string
     ): Promise<any> {
+        // Step 0: Validate Data
+        const validation = validationService.validateDocument(data);
+        if (!validation.isValid) {
+            throw new Error(`Validacijske pogreške: ${validation.errors.join(', ')}`);
+        }
         const newDocumentOid = await oidService.generateSingleOid();
         const bundleId = uuidv4();
 
@@ -314,6 +357,7 @@ class ClinicalDocumentService {
         } finally {
             auditService.log({
                 visitId: data.visitId,
+                patientMbo: data.patientMbo,
                 action: 'REPLACE_DOCUMENT',
                 direction: 'OUTGOING',
                 status: errorMessage && !responseData?.success ? 'ERROR' : 'SUCCESS',
@@ -395,7 +439,9 @@ class ClinicalDocumentService {
             errorMessage = error.message;
             responseData = { success: true, id: documentOid, status: 'cancelled', mock: true };
         } finally {
+            const document = this.getDocument(documentOid);
             auditService.log({
+                patientMbo: document?.patientMbo,
                 action: 'CANCEL_DOCUMENT',
                 direction: 'OUTGOING',
                 status: errorMessage && !responseData?.success ? 'ERROR' : 'SUCCESS',
@@ -411,8 +457,74 @@ class ClinicalDocumentService {
     // Test Case 21 & 22: Search & Retrieval
     // ============================================================
 
-    async searchDocuments(params: { patientMbo?: string }, userToken: string): Promise<any[]> {
-        return this.getDocuments({ patientMbo: params.patientMbo });
+    async searchDocuments(params: { patientMbo?: string; id?: string; status?: string }, userToken: string): Promise<any[]> {
+        const localDocs = this.getDocuments({ patientMbo: params.patientMbo, id: params.id, status: params.status });
+
+        // If we have an ID but no MBO, we can search by masterIdentifier/OID
+        // If we have MBO, we search by patient index
+        if (!params.patientMbo && !params.id) {
+            return localDocs;
+        }
+
+        try {
+            const headers = authService.getUserAuthHeaders(userToken);
+            let url = `${config.cezih.fhirUrl}/DocumentReference?status=current`;
+
+            if (params.id) {
+                // Search by OID (masterIdentifier)
+                url += `&identifier=urn:ietf:rfc:3986|urn:oid:${params.id}`;
+            } else if (params.patientMbo) {
+                // Search by Patient MBO
+                url += `&patient.identifier=${CEZIH_IDENTIFIERS.MBO}|${params.patientMbo}`;
+            }
+
+            console.log(`[ClinicalDocumentService] Searching CEZIH documents: ${params.id ? `OID ${params.id}` : `MBO ${params.patientMbo}`}`);
+            const response = await axios.get(url, { headers });
+
+            const remoteDocs = (response.data.entry || []).map((e: any) => this.mapRemoteDocument(e.resource));
+
+            // Merge local and remote documents, avoiding duplicates by masterIdentifier/OID
+            const docMap = new Map();
+            [...localDocs, ...remoteDocs].forEach(doc => {
+                const id = doc.id;
+                if (!docMap.has(id)) {
+                    docMap.set(id, doc);
+                }
+            });
+
+            return Array.from(docMap.values());
+        } catch (error: any) {
+            console.warn('[ClinicalDocumentService] CEZIH Search failed (likely VPN). Returning local results only.');
+            return localDocs;
+        }
+    }
+
+    private mapRemoteDocument(resource: any): any {
+        // Map FHIR DocumentReference to internal Document schema
+        const doc: any = {
+            id: resource.masterIdentifier?.value || resource.id,
+            patientMbo: resource.subject?.identifier?.value,
+            type: resource.type?.coding?.[0]?.code,
+            status: resource.status === 'current' ? 'sent' : resource.status,
+            createdAt: resource.date,
+            sentAt: resource.date,
+            title: resource.description || 'Remote Document',
+            isRemote: true,
+            contentUrl: resource.content?.[0]?.attachment?.url,
+            diagnosisCode: '',
+            diagnosisDisplay: ''
+        };
+
+        // Try to find diagnosis in category or context
+        const diagnosisCoding = resource.category?.find((c: any) => c.coding?.[0]?.system?.includes('icd10'))?.coding?.[0]
+            || resource.context?.related?.find((r: any) => r.identifier?.system?.includes('icd10'))?.identifier;
+
+        if (diagnosisCoding) {
+            doc.diagnosisCode = diagnosisCoding.code || diagnosisCoding.value;
+            doc.diagnosisDisplay = diagnosisCoding.display;
+        }
+
+        return doc;
     }
 
     async retrieveDocument(documentUrl: string, userToken: string): Promise<any> {
@@ -424,12 +536,72 @@ class ClinicalDocumentService {
 
         try {
             const headers = authService.getUserAuthHeaders(userToken);
+            console.log(`[ClinicalDocumentService] Retrieving remote document: ${documentUrl}`);
             const response = await axios.get(documentUrl, { headers });
-            return response.data;
+
+            let resource = response.data;
+
+            // If it's a Binary resource, we need to decode it
+            if (resource.resourceType === 'Binary') {
+                if (resource.contentType === 'application/fhir+json' || resource.contentType === 'application/json') {
+                    const decoded = Buffer.from(resource.data, 'base64').toString('utf8');
+                    resource = JSON.parse(decoded);
+                } else {
+                    // It's a PDF or something else, return as is (client will handle)
+                    return resource;
+                }
+            }
+
+            // If it's a Document Bundle, map it to our internal format
+            if (resource.resourceType === 'Bundle' && resource.type === 'document') {
+                return {
+                    ...this.mapRemoteBundle(resource),
+                    isRemote: true,
+                    fullResource: resource
+                };
+            }
+
+            return resource;
         } catch (error: any) {
             console.error('[ClinicalDocumentService] Failed to retrieve document:', error.message);
             throw error;
         }
+    }
+
+    private mapRemoteBundle(bundle: any): any {
+        const composition = bundle.entry?.find((e: any) => e.resource?.resourceType === 'Composition')?.resource;
+        if (!composition) return {};
+
+        const result: any = {
+            anamnesis: '',
+            finding: '',
+            recommendation: '',
+            status: '',
+            diagnosisCode: '',
+            diagnosisDisplay: '',
+            createdAt: composition.date,
+            title: composition.title
+        };
+
+        // Extract narrative sections from Composition
+        composition.section?.forEach((sec: any) => {
+            const title = sec.title?.toLowerCase() || '';
+            // Basic HTML strip for simplicity in our UI
+            const text = sec.text?.div?.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() || '';
+
+            if (title.includes('anamneza')) result.anamnesis = text;
+            if (title.includes('status') || title.includes('nalaz')) result.finding = text;
+            if (title.includes('preporuka')) result.recommendation = text;
+        });
+
+        // Extract diagnosis from Condition resource in the bundle
+        const condition = bundle.entry?.find((e: any) => e.resource?.resourceType === 'Condition')?.resource;
+        if (condition) {
+            result.diagnosisCode = condition.code?.coding?.[0]?.code;
+            result.diagnosisDisplay = condition.code?.coding?.[0]?.display;
+        }
+
+        return result;
     }
 
     // ============================================================

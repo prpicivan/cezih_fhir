@@ -236,7 +236,7 @@ class VisitService {
             ],
         };
 
-        const response = await this.sendMessage(bundle, userToken, 'ENCOUNTER_START', localVisitId);
+        const response = await this.sendMessage(bundle, userToken, 'ENCOUNTER_START', localVisitId, data.patientMbo);
         return { ...response, localVisitId };
     }
 
@@ -312,7 +312,7 @@ class VisitService {
             ],
         };
 
-        return this.sendMessage(bundle, userToken, 'ENCOUNTER_UPDATE', visitId);
+        return this.sendMessage(bundle, userToken, 'ENCOUNTER_UPDATE', visitId, data.patientMbo);
     }
 
     // ============================================================
@@ -375,10 +375,12 @@ class VisitService {
             ],
         };
 
-        return this.sendMessage(bundle, userToken, 'REALIZATION', visitId);
+        // We need patientMbo for logging, get it from local DB if not provided
+        const visit = this.getVisit(visitId);
+        return this.sendMessage(bundle, userToken, 'REALIZATION', visitId, visit?.patientMbo);
     }
 
-    private async sendMessage(bundle: any, userToken: string, action: string, visitId?: string): Promise<any> {
+    private async sendMessage(bundle: any, userToken: string, action: string, visitId?: string, patientMbo?: string): Promise<any> {
         let bundleToSend = bundle;
         let finalResponse: any = null;
         let errorMessage: string | undefined;
@@ -417,6 +419,7 @@ class VisitService {
             // ASYNC Log to Audit service
             auditService.log({
                 visitId,
+                patientMbo,
                 action,
                 direction: 'OUTGOING',
                 status: errorMessage && !finalResponse ? 'ERROR' : 'SUCCESS',

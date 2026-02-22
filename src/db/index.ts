@@ -26,9 +26,15 @@ export function initDatabase() {
     );
   `);
 
-  // Ensure lastSyncAt exist for existing databases
+  // Ensure columns exist for existing databases
   try {
     db.exec('ALTER TABLE patients ADD COLUMN lastSyncAt TEXT');
+  } catch (e) {
+    // Column might already exist
+  }
+
+  try {
+    db.exec('ALTER TABLE audit_logs ADD COLUMN patientMbo TEXT');
   } catch (e) {
     // Column might already exist
   }
@@ -89,6 +95,7 @@ export function initDatabase() {
     CREATE TABLE IF NOT EXISTS audit_logs (
         id TEXT PRIMARY KEY,
         visitId TEXT,
+        patientMbo TEXT,
         action TEXT,
         direction TEXT, -- 'OUTGOING', 'INCOMING'
         status TEXT, -- 'SUCCESS', 'ERROR'
@@ -96,7 +103,8 @@ export function initDatabase() {
         payload_res TEXT, -- JSON string
         error_msg TEXT,
         timestamp TEXT,
-        FOREIGN KEY(visitId) REFERENCES visits(id)
+        FOREIGN KEY(visitId) REFERENCES visits(id),
+        FOREIGN KEY(patientMbo) REFERENCES patients(mbo)
     );
 
     CREATE TABLE IF NOT EXISTS terminology_concepts (
@@ -124,12 +132,21 @@ export function initDatabase() {
   }
 
   // Seed some settings
-  const settingsCount = db.prepare('SELECT count(*) as count FROM settings').get() as { count: number };
-  if (settingsCount.count === 0) {
-    const insert = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');
-    insert.run('terminology_last_sync', new Date().toISOString());
-    insert.run('cezih_environment', 'TEST');
-  }
+  const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+  insertSetting.run('terminology_last_sync', new Date().toISOString());
+  insertSetting.run('cezih_environment', 'TEST');
+
+  const defaultMenu = [
+    { id: 'dashboard', name: 'Nadzorna ploča', href: '/dashboard', icon: 'LayoutDashboard', isVisible: true, orderIndex: 0 },
+    { id: 'patients', name: 'Pacijenti', href: '/dashboard/patients', icon: 'Users', isVisible: true, orderIndex: 1 },
+    { id: 'calendar', name: 'Kalendar', href: '/dashboard/calendar', icon: 'Calendar', isVisible: true, orderIndex: 2 },
+    { id: 'documents', name: 'Klinički dokumenti', href: '/dashboard/documents', icon: 'Activity', isVisible: true, orderIndex: 3 },
+    { id: 'audit', name: 'Praćenje statusa', href: '/dashboard/audit', icon: 'ShieldCheck', isVisible: true, orderIndex: 4 },
+    { id: 'registry', name: 'Registar (TC 9)', href: '/dashboard/registry', icon: 'Users', isVisible: true, orderIndex: 5 },
+    { id: 'settings', name: 'Postavke', href: '/dashboard/settings', icon: 'Settings', isVisible: true, orderIndex: 6 },
+    { id: 'certification', name: 'Certifikacija', href: '/dashboard/certification', icon: 'Award', isVisible: true, orderIndex: 7 },
+  ];
+  insertSetting.run('menu_config', JSON.stringify(defaultMenu));
 }
 
 export default db;

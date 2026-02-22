@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Shield, Smartphone, ArrowRight, CheckCircle, XCircle, Activity } from 'lucide-react';
+import { Shield, Smartphone, ArrowRight, CheckCircle, XCircle } from 'lucide-react';
+import Image from 'next/image';
 
 export default function LoginPage() {
     const router = useRouter();
@@ -60,12 +61,18 @@ export default function LoginPage() {
             <div className="max-w-md w-full bg-white rounded-xl shadow-lg overflow-hidden border border-slate-200">
 
                 {/* Header */}
-                <div className="bg-blue-600 p-8 text-center text-white">
-                    <div className="mx-auto bg-blue-500 w-16 h-16 rounded-full flex items-center justify-center mb-4 shadow-inner">
-                        <Activity className="w-8 h-8 text-white" />
+                <div className="bg-white p-8 text-center">
+                    <div className="mx-auto w-16 h-16 rounded-full flex items-center justify-center mb-4">
+                        <Image
+                            src="/wbs-logo.png"
+                            alt="WBS Logo"
+                            width={64}
+                            height={64}
+                            className="object-contain"
+                        />
                     </div>
-                    <h1 className="text-2xl font-bold mb-2">CEZIH PIS</h1>
-                    <p className="text-blue-100 text-sm">Sustav za upravljanje poliklinikom</p>
+                    <h1 className="text-2xl font-bold mb-1 text-black">WBS_FHIR</h1>
+                    <p className="text-slate-500 text-sm">Sustav za digitalnu razmjenu medicinske dokumentacije s CEZIH sustavom</p>
                 </div>
 
                 {/* System Status */}

@@ -2,23 +2,58 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Users, Calendar, Activity, Settings, LogOut, Menu, X, ShieldCheck, Award } from 'lucide-react';
-import { useState } from 'react';
+import {
+    LayoutDashboard,
+    Users,
+    Calendar,
+    Activity,
+    Settings,
+    LogOut,
+    Menu,
+    X,
+    ShieldCheck,
+    Award
+} from 'lucide-react';
+import { useState, useEffect } from 'react';
+import Image from 'next/image';
+
+const iconMap: Record<string, any> = {
+    LayoutDashboard,
+    Users,
+    Calendar,
+    Activity,
+    Settings,
+    ShieldCheck,
+    Award
+};
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+    const [navigation, setNavigation] = useState<any[]>([]);
 
-    const navigation = [
-        { name: 'Nadzorna ploča', href: '/dashboard', icon: LayoutDashboard },
-        { name: 'Pacijenti', href: '/dashboard/patients', icon: Users },
-        { name: 'Kalendar', href: '/dashboard/calendar', icon: Calendar },
-        { name: 'Klinički dokumenti', href: '/dashboard/documents', icon: Activity },
-        { name: 'Praćenje statusa', href: '/dashboard/audit', icon: ShieldCheck },
-        { name: 'Registar (TC 9)', href: '/dashboard/registry', icon: Users },
-        { name: 'Postavke', href: '/dashboard/settings', icon: Settings },
-        { name: 'Certifikacija', href: '/dashboard/certification', icon: Award },
-    ];
+    useEffect(() => {
+        const fetchMenu = async () => {
+            try {
+                const res = await fetch('/api/settings/menu');
+                const data = await res.json();
+                if (data.success) {
+                    // Filter visible items and sort by orderIndex
+                    const menu = data.config
+                        .filter((item: any) => item.isVisible)
+                        .sort((a: any, b: any) => a.orderIndex - b.orderIndex)
+                        .map((item: any) => ({
+                            ...item,
+                            icon: iconMap[item.icon] || LayoutDashboard
+                        }));
+                    setNavigation(menu);
+                }
+            } catch (err) {
+                console.error('Failed to fetch menu', err);
+            }
+        };
+        fetchMenu();
+    }, []);
 
     return (
         <div className="min-h-screen bg-slate-50 font-sans">
@@ -30,10 +65,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                         {/* Logo & Desktop Nav */}
                         <div className="flex">
                             <div className="flex-shrink-0 flex items-center gap-2">
-                                <div className="bg-blue-600 p-1.5 rounded-lg">
-                                    <Activity className="h-6 w-6 text-white" />
-                                </div>
-                                <span className="font-bold text-xl text-slate-800 tracking-tight">CEZIH PIS</span>
+                                <Image
+                                    src="/wbs-logo.png"
+                                    alt="WBS Logo"
+                                    width={32}
+                                    height={32}
+                                    className="object-contain"
+                                />
+                                <span className="font-bold text-xl text-black tracking-tight">WBS_FHIR</span>
                             </div>
 
                             <div className="hidden md:ml-8 md:flex md:space-x-1">
@@ -41,7 +80,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                                     const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
                                     return (
                                         <Link
-                                            key={item.name}
+                                            key={item.id}
                                             href={item.href}
                                             className={`inline-flex items-center px-4 pt-1 border-b-2 text-sm font-medium transition-colors ${isActive
                                                 ? 'border-blue-600 text-blue-600'
@@ -92,7 +131,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                                 const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
                                 return (
                                     <Link
-                                        key={item.name}
+                                        key={item.id}
                                         href={item.href}
                                         onClick={() => setIsMobileMenuOpen(false)}
                                         className={`block pl-3 pr-4 py-2 border-l-4 text-base font-medium ${isActive
@@ -124,7 +163,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </nav>
 
             {/* Main Content */}
-            <main className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+            <main className="max-w-[1600px] mx-auto py-8 px-4 sm:px-6 lg:px-8">
                 {children}
             </main>
         </div>

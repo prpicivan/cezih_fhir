@@ -139,7 +139,7 @@ class CaseService {
             ],
         };
 
-        return this.sendMessage(bundle, userToken, 'CASE_CREATE', localCaseId);
+        return this.sendMessage(bundle, userToken, 'CASE_CREATE', localCaseId, data.patientMbo);
     }
 
     // ============================================================
@@ -213,10 +213,11 @@ class CaseService {
             ],
         };
 
-        return this.sendMessage(bundle, userToken, 'CASE_UPDATE', caseId);
+        // For logging we need patientMbo, let's get it from data if provided or skip (Case doesn't have it easily available on update if not passed)
+        return this.sendMessage(bundle, userToken, 'CASE_UPDATE', caseId, data.patientMbo);
     }
 
-    private async sendMessage(bundle: any, userToken: string, action: string, caseId?: string): Promise<any> {
+    private async sendMessage(bundle: any, userToken: string, action: string, caseId?: string, patientMbo?: string): Promise<any> {
         console.log('[CaseService] sendMessage entered');
         let bundleToSend = bundle;
         let finalResponse: any = null;
@@ -259,6 +260,7 @@ class CaseService {
             // ASYNC Log to Audit service
             auditService.log({
                 visitId: undefined, // Health case logging might not have a visitId yet
+                patientMbo,
                 action,
                 direction: 'OUTGOING',
                 status: errorMessage && !finalResponse ? 'ERROR' : 'SUCCESS',

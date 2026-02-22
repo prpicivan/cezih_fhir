@@ -3,6 +3,7 @@ import db from '../db/index';
 
 export interface AuditLogEntry {
     visitId?: string;
+    patientMbo?: string;
     action: string;
     direction: 'OUTGOING' | 'INCOMING';
     status: 'SUCCESS' | 'ERROR';
@@ -33,14 +34,15 @@ export class AuditService {
 
             const sql = `
                 INSERT INTO audit_logs (
-                    id, visitId, action, direction, status, 
+                    id, visitId, patientMbo, action, direction, status, 
                     payload_req, payload_res, error_msg, timestamp
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `;
 
             db.prepare(sql).run(
                 id,
                 entry.visitId || null,
+                entry.patientMbo || null,
                 entry.action,
                 entry.direction,
                 entry.status,
@@ -61,7 +63,19 @@ export class AuditService {
     }
 
     public getAllLogs(limit: number = 100): any[] {
-        return db.prepare('SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT ?').all(limit);
+        const sql = `
+            SELECT 
+                a.*, 
+                p.firstName, 
+                p.lastName, 
+                p.oib, 
+                p.mbo as patientMboJoined
+            FROM audit_logs a
+            LEFT JOIN patients p ON a.patientMbo = p.mbo
+            ORDER BY a.timestamp DESC 
+            LIMIT ?
+        `;
+        return db.prepare(sql).all(limit);
     }
 }
 

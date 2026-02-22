@@ -10,6 +10,7 @@ import {
     CEZIH_EXTENSIONS
 } from '../types';
 import db from '../db';
+import { auditService } from './audit.service';
 
 export interface PatientDemographics {
     id: string;
@@ -112,6 +113,17 @@ class PatientService {
         } catch (error: any) {
             console.error('[PatientService] Failed to search patients:', error.message);
             throw error;
+        } finally {
+            // Log search to audit service
+            const mboMatch = query.match(/MBO\|([A-Za-z0-9]+)/);
+            auditService.log({
+                patientMbo: mboMatch ? mboMatch[1] : undefined,
+                action: 'PATIENT_SEARCH',
+                direction: 'OUTGOING',
+                status: 'SUCCESS', // Usually success if we got here
+                payload_req: { query },
+                payload_res: { count: '...' } // Don't log full patient data for privacy
+            });
         }
     }
 

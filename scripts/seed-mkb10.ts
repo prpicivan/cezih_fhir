@@ -46,12 +46,19 @@ const commonDiagnoses = [
 async function seedDiagnoses() {
     initDatabase();
     console.log('Seeding MKB-10 diagnoses...');
-    const insert = db.prepare('INSERT OR IGNORE INTO diagnoses (code, display) VALUES (?, ?)');
 
-    for (const d of commonDiagnoses) {
-        insert.run(d.code, d.display);
-    }
+    const insertLegacy = db.prepare('INSERT OR IGNORE INTO diagnoses (code, display) VALUES (?, ?)');
+    const insertModern = db.prepare('INSERT OR IGNORE INTO terminology_concepts (system, code, display, version) VALUES (?, ?, ?, ?)');
+    const ICD10_SYSTEM = 'http://fhir.cezih.hr/specifikacije/CodeSystem/icd10-hr';
 
+    const transaction = db.transaction(() => {
+        for (const d of commonDiagnoses) {
+            insertLegacy.run(d.code, d.display);
+            insertModern.run(ICD10_SYSTEM, d.code, d.display, '1.0');
+        }
+    });
+
+    transaction();
     console.log('Done.');
 }
 

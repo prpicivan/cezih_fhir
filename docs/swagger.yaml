@@ -1,0 +1,106 @@
+openapi: 3.0.0
+info:
+  title: WBS_FHIR G9 Integration API
+  description: API for integrating private polyclinics with the national CEZIH FHIR system.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3010/api
+    description: Local Middleware Server
+
+paths:
+  /auth/system-token:
+    post:
+      summary: Get System Token
+      description: Returns a JWT for system-to-system authentication (back-end tasks).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  token:
+                    type: string
+
+  /patient/search:
+    get:
+      summary: Search Patient
+      parameters:
+        - name: mbo
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of matching patients
+
+  /visit/create:
+    post:
+      summary: Create Visit (Encounter Start)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [patientMbo, class]
+              properties:
+                patientMbo:
+                  type: string
+                class:
+                  type: string
+                  enum: [AMB, EMER, VR]
+      responses:
+        '200':
+          description: Visit created
+
+  /document/send:
+    post:
+      summary: Send Clinical Document
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [patientMbo, type, diagnosisCode]
+              properties:
+                patientMbo:
+                  type: string
+                visitId:
+                  type: string
+                closeVisit:
+                  type: boolean
+                type:
+                  type: string
+                  enum: [AMBULATORY_REPORT, DISCHARGE_SUMMARY]
+                diagnosisCode:
+                  type: string
+                anamnesis:
+                  type: string
+                  maxLength: 4000
+                finding:
+                  type: string
+                  maxLength: 4000
+      responses:
+        '200':
+          description: Document sent successfully
+        '400':
+          description: Validation error
+
+  /terminology/diagnoses:
+    get:
+      summary: Search Diagnoses (MKB-10)
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of diagnoses

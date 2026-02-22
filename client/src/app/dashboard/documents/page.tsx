@@ -22,21 +22,31 @@ export default function DocumentsPage() {
 
     const fetchDocuments = () => {
         setLoading(true);
-        // Use empty params to get all
         const queryParams = new URLSearchParams();
-        if (getMboFromSearch(searchTerm)) queryParams.append('patientMbo', getMboFromSearch(searchTerm));
+
+        const mbo = getMboFromSearch(searchTerm);
+        const oid = getOidFromSearch(searchTerm);
+
+        console.log('[DEBUG] Search:', { searchTerm, mbo, oid, statusFilter });
+
+        if (mbo) queryParams.append('patientMbo', mbo);
+        if (oid) queryParams.append('id', oid);
         if (statusFilter !== 'all') queryParams.append('status', statusFilter);
 
-        fetch(`/api/document/search?${queryParams.toString()}`)
+        const url = `/api/document/search?${queryParams.toString()}`;
+        console.log('[DEBUG] URL:', url);
+
+        fetch(url)
             .then(res => res.json())
             .then(data => {
+                console.log('[DEBUG] Result:', data);
                 if (data.success) {
                     setDocuments(data.documents);
                 }
                 setLoading(false);
             })
             .catch(err => {
-                console.error('Failed to fetch documents:', err);
+                console.error('[DEBUG] Error:', err);
                 setLoading(false);
             });
     };
@@ -46,8 +56,21 @@ export default function DocumentsPage() {
     }, [statusFilter]);
 
     const getMboFromSearch = (term: string) => {
-        // Simple heuristic: if numeric and length 9, assume MBO
-        return term.match(/^\d{9}$/) ? term : '';
+        const clean = term.trim();
+        return clean.match(/^\d{9}$/) ? clean : '';
+    };
+
+    const getOidFromSearch = (term: string) => {
+        const clean = term.trim().toLowerCase();
+
+        let oidPart = clean;
+        if (oidPart.startsWith('urn:oid:')) oidPart = oidPart.substring(8);
+        if (oidPart.startsWith('oru:')) oidPart = oidPart.substring(4).trim();
+
+        const match = oidPart.match(/2\.16\.[0-9.]+/);
+        if (match) return match[0];
+
+        return '';
     };
 
     const handleSearch = (e: React.FormEvent) => {
@@ -168,7 +191,7 @@ export default function DocumentsPage() {
                         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                         <input
                             type="text"
-                            placeholder="Pretraži po MBO pacijenta..."
+                            placeholder="Pretraži po MBO (9 zam.) ili OID-u (2.16...)"
                             className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}

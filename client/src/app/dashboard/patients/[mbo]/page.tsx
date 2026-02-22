@@ -16,8 +16,10 @@ export default function PatientChartPage() {
     const mbo = params.mbo as string;
 
     const [chartData, setChartData] = useState<any>(null);
+    const [viewingDocument, setViewingDocument] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
+    const [retrieving, setRetrieving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     const fetchChartData = async () => {
@@ -27,6 +29,7 @@ export default function PatientChartPage() {
             const data = await res.json();
             if (data.success) {
                 setChartData(data.chart);
+                setViewingDocument(data.chart.lastDocument);
             } else {
                 setError(data.error || 'Greška pri dohvaćanju kartona.');
             }
@@ -60,6 +63,27 @@ export default function PatientChartPage() {
         router.push(`/dashboard/visit/new?${query.toString()}`);
     };
 
+    const handleRetrieve = async (doc: any) => {
+        if (!doc.isRemote || (doc.anamnesis && doc.finding)) {
+            setViewingDocument(doc);
+            return;
+        }
+
+        setRetrieving(true);
+        try {
+            const url = doc.contentUrl || `urn:oid:${doc.id}`;
+            const res = await fetch(`/api/document/retrieve?url=${encodeURIComponent(url)}`);
+            const data = await res.json();
+            if (data.success) {
+                setViewingDocument(data.document);
+            }
+        } catch (err) {
+            console.error("Failed to retrieve", err);
+        } finally {
+            setRetrieving(false);
+        }
+    };
+
     if (loading) {
         return (
             <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
@@ -82,7 +106,7 @@ export default function PatientChartPage() {
         );
     }
 
-    const { patient, lastDocument, activeCases, recentVisits } = chartData;
+    const { patient, activeCases, recentVisits, allDocuments } = chartData;
 
     return (
         <div className="space-y-6">
@@ -143,26 +167,31 @@ export default function PatientChartPage() {
                         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                             <h2 className="font-black text-slate-800 flex items-center gap-2">
                                 <FileText className="w-5 h-5 text-blue-600" />
-                                Zadnji medicinski nalaz
+                                {viewingDocument?.isRemote ? 'Udaljeni klinički dokument (CEZIH)' : 'Medicinski nalaz'}
                             </h2>
-                            {lastDocument && (
-                                <button className="text-blue-600 hover:text-blue-700 text-sm font-bold flex items-center gap-1">
-                                    <Download className="w-4 h-4" /> Preuzmi PDF
-                                </button>
+                            {viewingDocument?.isRemote && (
+                                <span className="bg-blue-50 text-blue-600 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-tighter border border-blue-100">
+                                    Dohvaćeno putem ITI-68
+                                </span>
                             )}
                         </div>
 
                         <div className="flex-1 p-8">
-                            {lastDocument ? (
+                            {retrieving ? (
+                                <div className="h-full flex flex-col items-center justify-center py-20 gap-4">
+                                    <RefreshCw className="w-10 h-10 text-blue-500 animate-spin" />
+                                    <p className="font-bold text-slate-400">Dohvaćam puni sadržaj dokumenta...</p>
+                                </div>
+                            ) : viewingDocument ? (
                                 <div className="space-y-8 max-w-2xl mx-auto">
                                     <div className="flex justify-between items-end border-b pb-4 border-slate-100">
                                         <div>
                                             <p className="text-[10px] uppercase font-bold text-slate-400">Vrsta dokumenta</p>
-                                            <p className="font-bold text-slate-900">{lastDocument.type}</p>
+                                            <p className="font-bold text-slate-900">{viewingDocument.type}</p>
                                         </div>
                                         <div className="text-right">
                                             <p className="text-[10px] uppercase font-bold text-slate-400">Datum izdavanja</p>
-                                            <p className="font-bold text-slate-900">{new Date(lastDocument.createdAt).toLocaleDateString('hr-HR')}</p>
+                                            <p className="font-bold text-slate-900">{new Date(viewingDocument.createdAt).toLocaleDateString('hr-HR')}</p>
                                         </div>
                                     </div>
 
@@ -173,7 +202,7 @@ export default function PatientChartPage() {
                                                 Anamneza i anamnestički podaci
                                             </h3>
                                             <p className="text-slate-700 leading-relaxed font-medium bg-slate-50 p-4 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
-                                                {lastDocument.anamnesis || 'Pacijent se javlja na redovitu kontrolu. Subjektivno bez tegoba.'}
+                                                {viewingDocument.anamnesis || (viewingDocument.isRemote ? 'Sadržaj se učitava...' : 'Nema podataka o anamnezi.')}
                                             </p>
                                         </div>
 
@@ -183,14 +212,17 @@ export default function PatientChartPage() {
                                                 Klinički nalaz i status
                                             </h3>
                                             <p className="text-slate-700 leading-relaxed font-medium bg-slate-50 p-4 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
-                                                {lastDocument.finding || 'Uredan nalaz organskih sustava.'}
+                                                {viewingDocument.finding || (viewingDocument.isRemote ? 'Sadržaj se učitava...' : 'Nema podataka o nalazu.')}
                                             </p>
                                         </div>
 
                                         <div className="pt-4 flex items-center justify-between p-4 bg-slate-900 rounded-2xl text-white shadow-xl shadow-slate-200">
                                             <div>
                                                 <p className="text-[10px] uppercase font-bold text-slate-400 leading-none mb-1">Dijagnoza (MKB-10)</p>
-                                                <p className="text-lg font-black tracking-tight">{lastDocument.diagnosisCode} - {lastDocument.diagnosisName || 'Nešpecifični simptomi'}</p>
+                                                <p className="text-lg font-black tracking-tight">
+                                                    {viewingDocument.diagnosisCode ? `${viewingDocument.diagnosisCode} - ` : ''}
+                                                    {viewingDocument.diagnosisDisplay || (viewingDocument.diagnosisCode ? '' : 'Nije navedena')}
+                                                </p>
                                             </div>
                                             <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center">
                                                 <Activity className="w-6 h-6 text-emerald-400" />
@@ -215,6 +247,40 @@ export default function PatientChartPage() {
 
                 {/* RIGHT: SECONDARY FOCUS - ACTIVE PROBLEMS & RECENT ACTIVITY */}
                 <aside className="space-y-6">
+                    {/* Povijest dokumenata */}
+                    <section className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+                        <div className="p-5 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between">
+                            <h3 className="font-black text-slate-800 flex items-center gap-2">
+                                <History className="w-5 h-5 text-blue-500" />
+                                Povijest dokumenata
+                            </h3>
+                            <span className="bg-slate-200 text-slate-600 text-[10px] font-black px-2 py-0.5 rounded-full">TC 21/22</span>
+                        </div>
+                        <div className="p-2 space-y-1">
+                            {allDocuments && allDocuments.length > 0 ? (
+                                allDocuments.map((doc: any) => (
+                                    <button
+                                        key={doc.id}
+                                        onClick={() => handleRetrieve(doc)}
+                                        className={`w-full text-left p-3 rounded-2xl transition-all flex items-center gap-3 group ${viewingDocument?.id === doc.id ? 'bg-blue-50 border border-blue-100' : 'hover:bg-slate-50 border border-transparent'}`}
+                                    >
+                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${viewingDocument?.id === doc.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400 group-hover:bg-white group-hover:text-blue-600'}`}>
+                                            <FileText className="w-5 h-5" />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className={`font-bold text-xs truncate ${viewingDocument?.id === doc.id ? 'text-blue-900' : 'text-slate-700'}`}>{doc.type || 'Nalaz'}</p>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase">{new Date(doc.createdAt).toLocaleDateString('hr-HR')}</p>
+                                        </div>
+                                        {doc.isRemote && (
+                                            <div className="ml-auto w-2 h-2 bg-blue-400 rounded-full" title="Udaljeni dokument"></div>
+                                        )}
+                                    </button>
+                                ))
+                            ) : (
+                                <p className="text-center py-6 text-xs text-slate-400 italic">Nema dostupnih dokumenata.</p>
+                            )}
+                        </div>
+                    </section>
                     {/* Active Problems (Episodes of Care) */}
                     <section className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
                         <div className="p-5 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between">
@@ -274,7 +340,7 @@ export default function PatientChartPage() {
                         </div>
                     </section>
                 </aside>
-            </div>
-        </div>
+            </div >
+        </div >
     );
 }
