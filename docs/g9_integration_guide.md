@@ -3,7 +3,7 @@
 Dobrodošli u službeni vodič za integraciju G9 aplikacija s **WBS_FHIR** middleware-om.
 
 ## 📖 Uvod i Svrha
-Ovaj sustav služi kao posrednik (Black Box) koji preuzima svu kompleksnost komunikacije s nacionalnim **CEZIH FHIR** sustavom. Primarna svrha middleware-a je omogućiti privatnim zdravstvenim ustanovama (koje ne koriste standardne HZZO usluge e-Uputnica/e-Recept) praćenje:
+Ovaj sustav služi kao posrednik (Black Box) koji preuzima svu kompleksnost komunikacije s nacionalnim **CEZIH FHIR** sustavom. Primarna svrha middleware-a je omogućiti privatnim zdravstvenim ustanovama (koje ne koriste standardne HZZO usluge e-Uputnica/e-Recept) razmjenu digitalnih medicinskih podataka s CEZIH sustavom:
 - **Dolazaka pacijenata** u ustanovu.
 - **Dugotrajnih epizoda liječenja** (Slučajeva).
 - **Pojedinačnih posjeta** (Ambulantnih pregleda).
@@ -68,7 +68,48 @@ graph TD
     end
 ```
 
-## 🌍 3. Strani državljani (Foreign Citizens)
+## 🏥 4. Složeni Slučaj: Sistematski pregled (Systematic Review)
+
+Sistematski pregled predstavlja paket više postupaka, različitih liječnika i zasebnih kliničkih dokumenata, povezanih unutar jedne koordinacijske točke.
+
+### Vizualni Prikaz Tjeka Rada
+
+```mermaid
+graph TD
+    subgraph G9 Application Layer
+    GS[Start Episode: Systematski pregled] --> GV[Start Visit: 22.02.2024]
+    GV --> D1[Dr. A: Oftalmolški nalaz]
+    GV --> D2[Dr. B: Ultrazvuk abdomena]
+    GV --> D3[Lab: Biokemijski nalazi]
+    D1 & D2 & D3 --> D4[Dr. Internist: Završno mišljenje]
+    D4 --> GC[Close Visit & Episode]
+    end
+
+    subgraph WBS_FHIR Middleware
+    M1[ITI-65 Bundle 1: Signed Dr. A]
+    M2[ITI-65 Bundle 2: Signed Dr. B]
+    M3[ITI-65 Bundle 3: Lab Results]
+    M4[ITI-65 Bundle 4: Signed Internist]
+    end
+
+    D1 --> M1
+    D2 --> M2
+    D3 --> M3
+    D4 --> M4
+
+    M1 & M2 & M3 & M4 --> CEZIH((CEZIH e-Karton))
+```
+
+### Tehnička Implementacija za G9:
+
+1.  **Grupiranje**: Kreirajte jedan `EpisodeOfCare` na početku dana. To je "mapa" u koju se spremaju svi budući nalazi.
+2.  **Konkurentnost**: Više liječnika (sa različitih radnih stanica) može slati dokumente neovisno, koristeći isti `visitId` i `caseId`.
+3.  **Odgovornost**: Svaki liječnik potpisuje **samo svoj dokument**. Middleware se brine da se potpis ispravno upakira u odgovarajući JWS bundle.
+4.  **Consolidation**: Završni "Internistički nalaz" može u tekstu referencirati OID-ove prethodno poslanih dokumenata kako bi se pružio ujedinjeni pacijentov prikaz.
+
+---
+
+## 🌍 5. Strani državljani (Foreign Citizens)
 
 Middleware podržava **TC 11** (Registracija stranaca) za pacijente bez HR osiguranja.
 
@@ -88,7 +129,7 @@ G9 aplikacija mora koristiti:
 }
 ```
 
-## 🔐 4. Autentifikacija i Sigurnost
+## 🔐 6. Autentifikacija i Sigurnost
 
 Middleware automatski upravlja digitalnim potpisivanjem i JWS tokenima.
 
@@ -97,54 +138,89 @@ Middleware automatski upravlja digitalnim potpisivanjem i JWS tokenima.
 
 ---
 
-## 🧪 5. Katalog Testnih Slučajeva (Request/Response)
+## 🧪 7. Katalog Testnih Slučajeva (Request/Response)
 
-Ovdje su navedeni konkretni primjeri za svih 22 testna slučaja potrebna za certifikaciju.
+Službeni katalog od 22 testna slučaja (TC) potrebnih za certifikaciju. Svi zahtjevi se šalju na `http://localhost:3010/api`.
 
-### A. Infrastruktura i Registri (TC 1-9)
-| TC | Opis | Request | Response Setup |
+### 7.1 Autentifikacija i Autorizacija (TC 1-5)
+| TC | Naziv | Endpoint | Opis |
 | :--- | :--- | :--- | :--- |
-| **TC 3** | System Auth | `POST /api/auth/system-token` | `{ "success": true, "token": ... }` |
-| **TC 6** | OID Gen | `POST /api/oid/generate` | `{ "success": true, "oids": [...] }` |
-| **TC 7** | Terminology | `POST /api/terminology/sync` | Sinkronizacija CodeSystema. |
-| **TC 9** | Registri | `GET /api/registry/organizations` | Lista ustanova (mCSD). |
+| **TC 1** | Smart Card Auth | `GET /auth/smartcard` | Inicijalizacija prijave fizičkom karticom. |
+| **TC 2** | Certilia mobile.ID | `GET /auth/certilia` | Inicijalizacija prijave preko mobitela. |
+| **TC 3** | System Auth | `POST /auth/system-token` | M2M autentifikacija za pozadinske procese. |
+| **TC 4** | Sign (Smart Card) | `POST /sign/smartcard` | Digitalno potpisivanje fizičkom karticom. |
+| **TC 5** | Sign (Mobile Cloud) | `POST /sign/certilia` | Digitalno potpisivanje u oblaku (Certilia). |
 
-### B. Pacijenti, Posjeti i Slučajevi (TC 10-17)
+### 7.2 Infrastruktura i Registri (TC 6-9)
+| TC | Naziv | Endpoint | Opis |
+| :--- | :--- | :--- | :--- |
+| **TC 6** | OID Generiranje | `POST /oid/generate` | Generiranje jedinstvenih OID-ova za dokumente. |
+| **TC 7** | Sync CodeSystems | `POST /terminology/sync` | Sinkronizacija šifrarnika (ITI-96). |
+| **TC 8** | Sync ValueSets | `GET /terminology/value-sets` | Dohvat dozvoljenih vrijednosti (ITI-95). |
+| **TC 9** | Registar (mCSD) | `GET /registry/organizations` | Pretraga zdravstvenih ustanova. |
+
+### 7.3 Pacijenti i Registracija (TC 10-11)
 ```json
-// TC 12: Start Visit (POST /api/visit/create)
-{
-  "patientMbo": "123456789",
-  "startDate": "2024-02-22T10:00:00Z",
-  "class": "AMB"
-}
-// Response: { "success": true, "visitId": "2c5... " }
+// TC 10: Pretraga pacijenta (GET /api/patient/search?mbo=123456789)
+// Vraća podatke iz nacionalnog registra pacijenata.
 
-// TC 14: Close Visit (POST /api/visit/:id/close)
-{ "endDate": "2024-02-22T11:00:00Z" }
+// TC 11: Registracija stranca (POST /api/patient/foreigner/register)
+{
+  "name": {"family": "Doe", "given": ["John"]},
+  "birthDate": "1980-01-01",
+  "nationality": "DE",
+  "passportNumber": "XYZ123456"
+}
 ```
 
-### C. Klinička Dokumentacija (TC 18-22)
+### 7.4 Posjeti i Slučajevi (TC 12-17)
 ```json
-// TC 18: Slanje Nalaza (POST /api/document/send)
+// TC 12: Kreiranje posjete (POST /api/visit/create)
+{ "patientMbo": "123456789", "startDate": "2024-02-22T10:00:00Z", "class": "AMB" }
+
+// TC 13: Ažuriranje posjete (PUT /api/visit/:id)
+{ "diagnosisCode": "M17.1" }
+
+// TC 14: Zatvaranje posjete (POST /api/visit/:id/close)
+{ "endDate": "2024-02-22T11:00:00Z" }
+
+// TC 15: Dohvat slučajeva (GET /api/case/patient/:mbo)
+// Vraća povijest slučajeva (EpisodeOfCare) za pacijenta.
+
+// TC 16: Kreiranje slučaja (POST /api/case/create)
+{ "patientMbo": "123456789", "title": "Fizikalna terapija", "startDate": "2024-02-22..." }
+
+// TC 17: Ažuriranje slučaja (PUT /api/case/:id)
+{ "status": "finished", "endDate": "..." }
+```
+
+### 7.5 Klinička Dokumentacija (TC 18-22)
+```json
+// TC 18: Slanje dokumenta (POST /api/document/send)
 {
   "type": "AMBULATORY_REPORT",
   "patientMbo": "123456789",
-  "visitId": "...",
-  "closeVisit": true, // Shortcut za TC 14
   "anamnesis": "Pacijent žali na...",
-  "diagnosisCode": "J00"
+  "diagnosisCode": "J00",
+  "closeVisit": true
 }
 
-// TC 19: Ispravak/Zamjena (POST /api/document/replace)
-{
-  "originalDocumentOid": "1.2.3.4...",
-  "anamnesis": "Dodatne informacije..."
-}
+// TC 19: Zamjena dokumenta (POST /api/document/replace)
+{ "originalDocumentOid": "1.2.3...", "anamnesis": "Ispravljen nalaz..." }
+
+// TC 20: Storno dokumenta (POST /api/document/cancel)
+{ "documentOid": "1.2.3..." }
+
+// TC 21: Pretraga dokumenata (GET /api/document/search?patientMbo=123456789)
+// Vraća listu svih poslanih dokumenata za pacijenta (ITI-67).
+
+// TC 22: Dohvat dokumenta (GET /api/document/retrieve?url=urn:oid:1.2.3...)
+// Vraća dekodirani sadržaj dokumenta u JSON formatu (ITI-68).
 ```
 
 ---
 
-## 🔎 6. Napredno Pretraživanje i Dohvat
+## 🔎 8. Napredno Pretraživanje i Dohvat
 
 *   **Pretraga po OID-u**: `GET /api/document/search?oid=1.2.3...`
 *   **Dohvat Sadržaja (ITI-68)**: `GET /api/document/retrieve?url=urn:oid:1.2.3...`
@@ -152,7 +228,7 @@ Ovdje su navedeni konkretni primjeri za svih 22 testna slučaja potrebna za cert
 
 ---
 
-## 🚫 7. Poslovna Pravila i Validacija (Strict)
+## 🚫 9. Poslovna Pravila i Validacija (Strict)
 
 1.  **MKB-10 Filter**: Zahtjev se odbija ako dijagnoza nije u važećem šifrarniku.
 2.  **Text Limits**: Polja `anamnesis`, `finding`, `recommendation` max **4000 znakova**.
@@ -162,7 +238,7 @@ Ovdje su navedeni konkretni primjeri za svih 22 testna slučaja potrebna za cert
 
 ---
 
-## 🚀 9. CURL API Reference
+## 🚀 10. CURL API Reference
 
 G9 developeri mogu koristiti ove naredbe za brzo testiranje integracije iz terminala.
 

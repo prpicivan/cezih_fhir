@@ -157,21 +157,85 @@ Hosting in a Croatian data center (HT, A1, Setcor) often simplifies the **CEZIH 
 
 ---
 
+---
+
+## 9. Solution Designs: Implementation Blueprints
+
+Here are the two primary architectural paths for the `cezih_fhir` middleware.
+
+### 🏢 Solution 1: Cloud-Native (Vercel + Certilia mobile.ID)
+Recommended for modern, low-maintenance setups and multi-location polyclinics.
+
+```mermaid
+sequenceDiagram
+    participant Doc as Doctor (Web/G9)
+    participant Vercel as VBS_FHIR (Vercel)
+    participant Mobile as Doctor Phone (Certilia App)
+    participant CEZIH as CEZIH FHIR (National)
+
+    Doc->>Vercel: POST /api/document/send (with closeVisit=true)
+    Vercel->>Vercel: Generate OID & Map to FHIR
+    Vercel->>Mobile: JSON Push Notification (Sign Request)
+    Mobile->>Doc: Biometric Unlock / PIN
+    Doc->>Mobile: Approve Signature
+    Mobile-->>Vercel: Signed JWS Signature
+    Vercel->>CEZIH: FHIR Bundle + Signature (ITI-65)
+    CEZIH-->>Vercel: Success (200 OK)
+    Vercel-->>Doc: Document Registered & Visit Closed
+```
+
+- **Infrastructure**: Vercel (Edge Functions) + Neon/Supabase (DB).
+- **Signing**: Remote via Certilia Backend.
+- **Maintenance**: Extremely Low (No hardware).
+
+---
+
+### 🏥 Solution 2: On-Premise (Local Central Server + Workstation Agents)
+Required when physical smart cards are mandatory or international cloud hosting is restricted.
+
+```mermaid
+sequenceDiagram
+    participant Doc as Doctor PC (G9 Web)
+    participant Bridge as Sign-Bridge (Localhost:4321)
+    participant Central as Central Middleware (Local Data Center)
+    participant Card as Physical Smart Card (USB)
+    participant CEZIH as CEZIH FHIR (National)
+
+    Doc->>Central: Fetch "Data to Sign" (Hash)
+    Central-->>Doc: Return SHA-256 Hash
+    Doc->>Bridge: POST /sign (Hash)
+    Bridge->>Card: Trigger PKCS#11 
+    Card-->>Doc: Prompt for PIN (Hardware Reader)
+    Bridge-->>Doc: Return JWS Signature
+    Doc->>Central: POST /document/send (Payload + Signature)
+    Central->>CEZIH: Forward Signed Bundle to CEZIH
+    CEZIH-->>Central: 200 OK
+    Central-->>Doc: Final Confirmation
+```
+
+- **Infrastructure**: Local Server (Docker/VM) + Workstation Bridge installs.
+- **Signing**: Physical Smart Cards via USB readers.
+- **Maintenance**: High (Hardware readers + workstation software agents).
+
+---
+
+## Proposed Roadmap
+
 ## Proposed Roadmap
 
 ### Phase 1: Database Migration
-- [ ] Replace `better-sqlite3` with a Postgres client.
+- [x] Create `ValidationService` for middleware-side pre-validation.
+- [ ] Replace `better-sqlite3` with a Postgres client (Neon/Supabase).
 - [ ] Add `organization_id` to schema for multi-tenancy.
-- [ ] Connect to Neon/Supabase.
 
 ### Phase 2: Certilia Implementation
 - [ ] Finalize [Certilia](file:///Users/ivanprpic/Desktop/Projekti/cezih_fhir/src/services/auth.service.ts#81-109) signing logic in [signature.service.ts](file:///Users/ivanprpic/Desktop/Projekti/cezih_fhir/src/services/signature.service.ts).
-- [ ] Remove `pkcs11js` dependency.
+- [ ] Update `Sign-Bridge` to support multi-OS (Mac/Win).
 
-### Phase 3: Deployment
+### Phase 3: Deployment & Certification
 - [ ] Connect GitHub repo to Vercel.
-- [ ] Configure Environment Variables in Vercel Dashboard.
-- [ ] Deploy and verify `/health` and `/terminology/sync` endpoints.
+- [ ] Complete all 22 CEZIH Test Cases in Pilot Environment.
+- [ ] Production Whitelisting (Croatian IP).
 
 ---
 
