@@ -78,14 +78,35 @@ class PatientService {
         return this.searchPatients(`identifier=${identifiers}`, userToken);
     }
 
-    private async searchPatients(query: string, userToken: string): Promise<PatientDemographics[]> {
+    async searchRemoteByMbo(mbo: string, userToken: string): Promise<PatientDemographics[]> {
+        return this.searchPatients(
+            `identifier=${CEZIH_IDENTIFIERS.MBO}|${mbo}`,
+            userToken,
+            false // autoSave = false for pure remote lookup
+        );
+    }
+
+    /**
+     * Explicitly sync a patient by MBO from CEZIH to local DB.
+     */
+    async syncPatient(mbo: string, userToken: string): Promise<PatientDemographics> {
+        console.log('[PatientService] Explicit sync for MBO:', mbo);
+        const results = await this.searchPatients(
+            `identifier=${CEZIH_IDENTIFIERS.MBO}|${mbo}`,
+            userToken,
+            true // autoSave = true
+        );
+        if (results.length === 0) {
+            throw new Error(`Patient with MBO ${mbo} not found on CEZIH.`);
+        }
+        return results[0];
+    }
+
+    private async searchPatients(query: string, userToken: string, autoSave: boolean = true): Promise<PatientDemographics[]> {
         try {
-            // 1. Try Local DB first (Mock Mode / Hybrid)
-            // Extract MBO/OIB from query string roughly
-            // Query format: identifier=http://fhir.hr/Id/mbo|123456789
-            // Query format: identifier=http://fhir.hr/Id/mbo|123456789
+            // 1. Try Local DB first (Mock Mode / Hybrid) unless explicitly searching remote
             const idMatch = query.match(/\|([A-Za-z0-9]+)/);
-            if (idMatch) {
+            if (idMatch && autoSave) {
                 const idValue = idMatch[1];
                 const stmt = db.prepare('SELECT * FROM patients WHERE mbo = ? OR oib = ?');
                 const localPatient = stmt.get(idValue, idValue) as any;
@@ -100,15 +121,38 @@ class PatientService {
             const headers = authService.getUserAuthHeaders(userToken);
             const url = `${config.cezih.fhirUrl}/Patient?${query}`;
 
+            // MOCK MODE: If MBO is 000000000, return a mock patient for demonstration
+            if (query.includes('000000000')) {
+                console.log('[PatientService] MOCK MODE: Returning demo patient for MBO 000000000');
+                const mockPatient: PatientDemographics = {
+                    id: 'MOCK-000000000',
+                    mbo: '000000000',
+                    oib: '99999999999',
+                    name: {
+                        text: 'Marko Marković (DEMO)',
+                        family: 'Marković',
+                        given: ['Marko', '(DEMO)']
+                    },
+                    gender: 'male',
+                    birthDate: '1975-05-15',
+                    active: true,
+                    raw: { resourceType: 'Patient' }
+                };
+                return [mockPatient];
+            }
+
+            console.log('[PatientService] Searching CEZIH:', url);
             const response = await axios.get(url, { headers });
 
             if (response.data.resourceType === 'Patient') {
                 const patient = this.mapPatient(response.data);
-                this.saveOrUpdatePatient(patient);
+                if (autoSave) this.saveOrUpdatePatient(patient);
                 return [patient];
             }
             const patients = (response.data.entry || []).map((e: any) => this.mapPatient(e.resource));
-            patients.forEach((p: PatientDemographics) => this.saveOrUpdatePatient(p));
+            if (autoSave) {
+                patients.forEach((p: PatientDemographics) => this.saveOrUpdatePatient(p));
+            }
             return patients;
         } catch (error: any) {
             console.error('[PatientService] Failed to search patients:', error.message);

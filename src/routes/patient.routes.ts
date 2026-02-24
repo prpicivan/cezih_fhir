@@ -61,6 +61,32 @@ router.get('/:mbo/chart', async (req: Request, res: Response) => {
 
 // Re-export old search and register for compatibility if needed, 
 // but we'll likely move them all here.
+router.get('/search-remote', async (req: Request, res: Response) => {
+    try {
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
+        const mbo = req.query.mbo as string | undefined;
+        if (!mbo) return res.status(400).json({ error: 'MBO is required' });
+
+        const patients = await patientService.searchRemoteByMbo(mbo, userToken);
+        res.json({ success: true, count: patients.length, patients });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.post('/sync', async (req: Request, res: Response) => {
+    try {
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
+        const { mbo } = req.body;
+        if (!mbo) return res.status(400).json({ error: 'MBO is required' });
+
+        const patient = await patientService.syncPatient(mbo, userToken);
+        res.json({ success: true, patient });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 router.get('/search', async (req: Request, res: Response) => {
     try {
         const userToken = req.headers.authorization?.replace('Bearer ', '') || '';

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Search, UserPlus, FileText, CheckCircle2, Clock, ChevronRight } from 'lucide-react';
+import { Search, UserPlus, FileText, CheckCircle2, Clock, ChevronRight, XCircle, RefreshCw, Save } from 'lucide-react';
 
 export default function PatientsPage() {
     const [searchTerm, setSearchTerm] = useState('');
@@ -31,6 +31,63 @@ export default function PatientsPage() {
         return () => clearTimeout(timer);
     }, [searchTerm]);
 
+    const [isRegModalOpen, setIsRegModalOpen] = useState(false);
+    const [regMbo, setRegMbo] = useState('');
+    const [remotePatient, setRemotePatient] = useState<any>(null);
+    const [regLoading, setRegLoading] = useState(false);
+    const [regError, setRegError] = useState<string | null>(null);
+
+    const handleRemoteLookup = async () => {
+        if (!regMbo || regMbo.length !== 9) {
+            setRegError('Molim unesite ispravan MBO (9 znamenki)');
+            return;
+        }
+        setRegLoading(true);
+        setRegError(null);
+        try {
+            const res = await fetch(`/api/patient/search-remote?mbo=${regMbo}`);
+            const data = await res.json();
+            if (data.success && data.patients.length > 0) {
+                setRemotePatient(data.patients[0]);
+            } else {
+                setRegError('Pacijent nije pronađen na CEZIH-u.');
+            }
+        } catch (err) {
+            setRegError('Greška pri dohvaćanju podataka.');
+        } finally {
+            setRegLoading(false);
+        }
+    };
+
+    const handleSync = async () => {
+        if (!remotePatient) return;
+        setRegLoading(true);
+        setRegError(null);
+        try {
+            const res = await fetch('/api/patient/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mbo: remotePatient.mbo })
+            });
+            const data = await res.json();
+            if (data.success) {
+                setIsRegModalOpen(false);
+                setRegMbo('');
+                setRemotePatient(null);
+                // Refresh list
+                const resList = await fetch(`/api/patient/registry?q=${encodeURIComponent(searchTerm)}`);
+                const dataList = await resList.json();
+                if (dataList.success) setPatients(dataList.patients);
+            } else {
+                setRegError(data.error || 'Greška pri spremanju.');
+            }
+        } catch (err) {
+            setRegError('Greška pri spremanju.');
+        } finally {
+            setRegLoading(false);
+        }
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -38,13 +95,22 @@ export default function PatientsPage() {
                     <h1 className="text-2xl font-bold text-slate-800">Registar pacijenata</h1>
                     <p className="text-slate-500">Centralno upravljanje identitetom i sinkronizacija s CEZIH sustavom</p>
                 </div>
-                <Link
-                    href="/dashboard/patients/register-foreigner"
-                    className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-medium transition-all shadow-sm shadow-blue-200"
-                >
-                    <UserPlus className="w-4 h-4" />
-                    Registracija stranca (TC 11)
-                </Link>
+                <div className="flex flex-wrap gap-3">
+                    <button
+                        onClick={() => setIsRegModalOpen(true)}
+                        className="flex items-center justify-center gap-2 bg-white border border-blue-600 text-blue-600 hover:bg-blue-50 px-4 py-2.5 rounded-xl font-medium transition-all shadow-sm"
+                    >
+                        <Search className="w-4 h-4" />
+                        Registracija pacijenta (TC 10)
+                    </button>
+                    <Link
+                        href="/dashboard/patients/register-foreigner"
+                        className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-medium transition-all shadow-sm shadow-blue-200"
+                    >
+                        <UserPlus className="w-4 h-4" />
+                        Registracija stranca (TC 11)
+                    </Link>
+                </div>
             </div>
 
             {/* Global Search Bar */}
@@ -65,6 +131,91 @@ export default function PatientsPage() {
                     </div>
                 )}
             </div>
+
+            {/* Registration Modal (TC 10) */}
+            {isRegModalOpen && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden">
+                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-blue-50">
+                            <h3 className="font-bold text-blue-900 flex items-center gap-2">
+                                <Search className="w-5 h-5" />
+                                Registracija s CEZIH-a (TC 10)
+                            </h3>
+                            <button onClick={() => { setIsRegModalOpen(false); setRemotePatient(null); setRegMbo(''); setRegError(null); }} className="text-slate-400 hover:text-slate-600">
+                                <XCircle className="w-6 h-6" />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            {!remotePatient ? (
+                                <>
+                                    <p className="text-sm text-slate-600">Unesite MBO pacijenta za provjeru u centralnom CEZIH registru.</p>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-bold text-slate-500 uppercase">MBO (9 znamenki)</label>
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="text"
+                                                maxLength={9}
+                                                className="flex-1 border rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono"
+                                                placeholder="npr. 123456789"
+                                                value={regMbo}
+                                                onChange={(e) => setRegMbo(e.target.value.replace(/\D/g, ''))}
+                                            />
+                                            <button
+                                                onClick={handleRemoteLookup}
+                                                disabled={regLoading || regMbo.length !== 9}
+                                                className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                                            >
+                                                {regLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                                                Dohvati
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {regError && <div className="p-3 bg-red-50 text-red-700 text-xs rounded-lg border border-red-100">{regError}</div>}
+                                </>
+                            ) : (
+                                <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+                                    <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-2xl">
+                                        <div className="text-xs font-bold text-emerald-600 uppercase mb-3">Pronađen pacijent</div>
+                                        <div className="flex items-start gap-4">
+                                            <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600 font-bold text-xl uppercase">
+                                                {remotePatient.name.family[0]}
+                                            </div>
+                                            <div>
+                                                <div className="font-bold text-slate-900 text-lg">
+                                                    {remotePatient.name.given.join(' ')} {remotePatient.name.family}
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2 text-xs">
+                                                    <div><span className="text-slate-400">MBO:</span> <span className="font-mono">{remotePatient.mbo}</span></div>
+                                                    <div><span className="text-slate-400">OIB:</span> <span className="font-mono">{remotePatient.oib || 'N/A'}</span></div>
+                                                    <div><span className="text-slate-400">Datum rođ:</span> <span>{new Date(remotePatient.birthDate).toLocaleDateString('hr-HR')}</span></div>
+                                                    <div><span className="text-slate-400">Spol:</span> <span>{remotePatient.gender}</span></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-3 pt-2">
+                                        <button
+                                            onClick={() => setRemotePatient(null)}
+                                            className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-600"
+                                        >
+                                            Natrag
+                                        </button>
+                                        <button
+                                            onClick={handleSync}
+                                            disabled={regLoading}
+                                            className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 shadow-md shadow-blue-200 flex items-center justify-center gap-2"
+                                        >
+                                            {regLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                            Spremi u registar
+                                        </button>
+                                    </div>
+                                    {regError && <div className="p-3 bg-red-50 text-red-700 text-xs rounded-lg border border-red-100">{regError}</div>}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Results Grid */}
             {patients.length > 0 ? (
@@ -132,3 +283,4 @@ export default function PatientsPage() {
         </div>
     );
 }
+
