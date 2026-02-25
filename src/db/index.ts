@@ -39,6 +39,27 @@ export function initDatabase() {
     // Column might already exist
   }
 
+  // Migration: recreate audit_logs without FK constraints if they exist
+  // FK constraints block inserts when visitId/patientMbo not in local DB
+  try {
+    const info = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='audit_logs'").get() as any;
+    if (info?.sql?.includes('FOREIGN KEY')) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS audit_logs_new (
+          id TEXT PRIMARY KEY, visitId TEXT, patientMbo TEXT,
+          action TEXT, direction TEXT, status TEXT,
+          payload_req TEXT, payload_res TEXT, error_msg TEXT, timestamp TEXT
+        );
+        INSERT OR IGNORE INTO audit_logs_new SELECT id, visitId, patientMbo, action, direction, status, payload_req, payload_res, error_msg, timestamp FROM audit_logs;
+        DROP TABLE audit_logs;
+        ALTER TABLE audit_logs_new RENAME TO audit_logs;
+      `);
+      console.log('[DB] Migrated audit_logs: removed FK constraints');
+    }
+  } catch (e) {
+    console.error('[DB] Migration audit_logs failed:', e);
+  }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS visits (
       id TEXT PRIMARY KEY,
@@ -94,17 +115,15 @@ export function initDatabase() {
 
     CREATE TABLE IF NOT EXISTS audit_logs (
         id TEXT PRIMARY KEY,
-        visitId TEXT,
-        patientMbo TEXT,
+        visitId TEXT,        -- no FK: G9 visitIds may not exist in middleware DB
+        patientMbo TEXT,     -- no FK: patientMbo may not exist in middleware DB
         action TEXT,
-        direction TEXT, -- 'OUTGOING', 'INCOMING'
-        status TEXT, -- 'SUCCESS', 'ERROR'
-        payload_req TEXT, -- JSON string
-        payload_res TEXT, -- JSON string
+        direction TEXT,
+        status TEXT,
+        payload_req TEXT,
+        payload_res TEXT,
         error_msg TEXT,
-        timestamp TEXT,
-        FOREIGN KEY(visitId) REFERENCES visits(id),
-        FOREIGN KEY(patientMbo) REFERENCES patients(mbo)
+        timestamp TEXT
     );
 
     CREATE TABLE IF NOT EXISTS terminology_concepts (
