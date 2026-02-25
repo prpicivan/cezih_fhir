@@ -255,8 +255,8 @@ router.post('/visit/:id/start', async (req: Request, res: Response) => {
 router.post('/visit/:id/close', async (req: Request, res: Response) => {
     try {
         const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
-        const { endDate } = req.body;
-        const result = await visitService.closeVisit(req.params.id as string, endDate, userToken);
+        const { endDate, patientMbo } = req.body;
+        const result = await visitService.closeVisit(req.params.id as string, endDate, userToken, patientMbo);
         res.json({ success: true, result });
     } catch (error: any) {
         res.status(500).json({ error: error.message });

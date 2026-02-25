@@ -399,7 +399,7 @@ class VisitService {
     // Test Case 14: Close Visit (FHIR Messaging)
     // ============================================================
 
-    async closeVisit(visitId: string, endDate: string, userToken: string): Promise<any> {
+    async closeVisit(visitId: string, endDate: string, userToken: string, patientMbo?: string): Promise<any> {
         const messageId = uuidv4();
 
         // Update Local DB
@@ -455,9 +455,9 @@ class VisitService {
             ],
         };
 
-        // We need patientMbo for logging, get it from local DB if not provided
-        const visit = this.getVisit(visitId);
-        return this.sendMessage(bundle, userToken, 'REALIZATION', visitId, visit?.patientMbo);
+        // Use provided patientMbo (from G9 body); fallback to local DB lookup
+        const resolvedPatientMbo = patientMbo ?? this.getVisit(visitId)?.patientMbo;
+        return this.sendMessage(bundle, userToken, 'REALIZATION', visitId, resolvedPatientMbo);
     }
 
     private async sendMessage(bundle: any, userToken: string, action: string, visitId?: string, patientMbo?: string): Promise<any> {
