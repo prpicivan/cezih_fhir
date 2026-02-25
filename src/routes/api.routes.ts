@@ -242,6 +242,16 @@ router.put('/visit/:id', async (req: Request, res: Response) => {
     }
 });
 
+router.post('/visit/:id/start', async (req: Request, res: Response) => {
+    try {
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
+        const result = await visitService.startVisit(req.params.id as string, req.body, userToken);
+        res.json({ success: true, result });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 router.post('/visit/:id/close', async (req: Request, res: Response) => {
     try {
         const userToken = req.headers.authorization?.replace('Bearer ', '') || '';

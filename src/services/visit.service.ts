@@ -73,6 +73,17 @@ class VisitService {
 
         // 1. Save to Local DB
         try {
+            // Ensure the patient exists in the local DB (FK constraint).
+            // We use INSERT OR IGNORE so existing records are not overwritten.
+            db.prepare(`
+                INSERT OR IGNORE INTO patients (mbo, firstName, lastName)
+                VALUES (?, ?, ?)
+            `).run(
+                data.patientMbo,
+                (data as any).patientName?.split(' ').slice(1).join(' ') || null,
+                (data as any).patientName?.split(' ')[0] || null,
+            );
+
             const stmt = db.prepare(`
                 INSERT INTO visits (id, patientMbo, status, startDateTime, endDateTime, type, priority, doctorName)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -90,8 +101,6 @@ class VisitService {
             console.log('[VisitService] Saved visit to local DB:', localVisitId);
         } catch (dbError: any) {
             console.error('[VisitService] DB Error:', dbError.message);
-            // Continue to try sending message even if DB fails? Or throw?
-            // Throwing is safer.
             throw new Error(`Database error: ${dbError.message}`);
         }
 
@@ -238,6 +247,77 @@ class VisitService {
 
         const response = await this.sendMessage(bundle, userToken, 'ENCOUNTER_START', localVisitId, data.patientMbo);
         return { ...response, localVisitId };
+    }
+
+    // ============================================================
+    // ENCOUNTER_START: planned → in-progress
+    // ============================================================
+
+    async startVisit(visitId: string, data: { patientMbo?: string; startTimestamp?: string }, userToken: string): Promise<any> {
+        const messageId = uuidv4();
+
+        // Update Local DB status
+        try {
+            db.prepare('UPDATE visits SET status = ? WHERE id = ?').run('in-progress', visitId);
+            console.log('[VisitService] Started visit in local DB:', visitId);
+        } catch (dbError) {
+            console.error('[VisitService] DB Start Error', dbError);
+        }
+
+        const bundle = {
+            resourceType: 'Bundle',
+            type: 'message',
+            entry: [
+                {
+                    fullUrl: `urn:uuid:${messageId}`,
+                    resource: {
+                        resourceType: 'MessageHeader',
+                        id: messageId,
+                        eventCoding: {
+                            system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/message-events',
+                            code: 'encounter-start',
+                        },
+                        source: {
+                            endpoint: config.cezih.baseUrl,
+                            name: config.software.instance,
+                            software: `${config.software.name}_${config.software.company}`,
+                            version: config.software.version,
+                        },
+                        focus: [{ reference: `urn:uuid:encounter-1` }],
+                    },
+                },
+                {
+                    fullUrl: 'urn:uuid:encounter-1',
+                    resource: {
+                        resourceType: 'Encounter',
+                        meta: {
+                            profile: [CEZIH_EXTENSIONS.ENCOUNTER_PROFILE]
+                        },
+                        identifier: [
+                            {
+                                system: CEZIH_IDENTIFIERS.VISIT_ID,
+                                value: visitId,
+                            },
+                        ],
+                        status: 'in-progress',
+                        period: {
+                            start: data.startTimestamp || new Date().toISOString(),
+                        },
+                        ...(data.patientMbo && {
+                            subject: {
+                                type: 'Patient',
+                                identifier: {
+                                    system: CEZIH_IDENTIFIERS.MBO,
+                                    value: data.patientMbo,
+                                },
+                            },
+                        }),
+                    },
+                },
+            ],
+        };
+
+        return this.sendMessage(bundle, userToken, 'ENCOUNTER_START', visitId, data.patientMbo);
     }
 
     // ============================================================
