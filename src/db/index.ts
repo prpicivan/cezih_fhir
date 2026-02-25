@@ -60,6 +60,27 @@ export function initDatabase() {
     console.error('[DB] Migration audit_logs failed:', e);
   }
 
+  // Migration: recreate documents without FK constraints if they exist
+  try {
+    const docInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='documents'").get() as any;
+    if (docInfo?.sql?.includes('FOREIGN KEY')) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS documents_new (
+          id TEXT PRIMARY KEY, patientMbo TEXT, visitId TEXT,
+          type TEXT, status TEXT, anamnesis TEXT, status_text TEXT,
+          finding TEXT, recommendation TEXT, diagnosisCode TEXT,
+          diagnosisDisplay TEXT, content TEXT, createdAt TEXT, sentAt TEXT
+        );
+        INSERT OR IGNORE INTO documents_new SELECT id, patientMbo, visitId, type, status, anamnesis, status_text, finding, recommendation, diagnosisCode, diagnosisDisplay, content, createdAt, sentAt FROM documents;
+        DROP TABLE documents;
+        ALTER TABLE documents_new RENAME TO documents;
+      `);
+      console.log('[DB] Migrated documents: removed FK constraints');
+    }
+  } catch (e) {
+    console.error('[DB] Migration documents failed:', e);
+  }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS visits (
       id TEXT PRIMARY KEY,
@@ -77,20 +98,18 @@ export function initDatabase() {
     CREATE TABLE IF NOT EXISTS documents (
       id TEXT PRIMARY KEY, -- OID
       patientMbo TEXT,
-      visitId TEXT,
-      type TEXT, -- 'MEDICINSKI_NALAZ', 'UPUTNICA', 'RECEPT'
-      status TEXT, -- 'sent', 'cancelled', 'replaced'
+      visitId TEXT,        -- no FK: G9 visitIds may not exist in middleware DB
+      type TEXT,
+      status TEXT,
       anamnesis TEXT,
       status_text TEXT,
       finding TEXT,
       recommendation TEXT,
       diagnosisCode TEXT,
       diagnosisDisplay TEXT,
-      content TEXT, -- Legacy combined content
+      content TEXT,
       createdAt TEXT,
-      sentAt TEXT,
-      FOREIGN KEY(patientMbo) REFERENCES patients(mbo),
-      FOREIGN KEY(visitId) REFERENCES visits(id)
+      sentAt TEXT
     );
 
     CREATE TABLE IF NOT EXISTS cases (

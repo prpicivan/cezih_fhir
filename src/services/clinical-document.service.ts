@@ -215,7 +215,7 @@ class ClinicalDocumentService {
             errorMessage = error.message;
             responseData = { success: true, documentOid, mock: true };
         } finally {
-            auditService.log({
+            await auditService.log({
                 visitId: data.visitId,
                 patientMbo: data.patientMbo,
                 action: 'SEND_FINDING',
@@ -227,16 +227,8 @@ class ClinicalDocumentService {
             });
         }
 
-        // Step 6: Optional Auto-Close Visit
-        if (data.closeVisit && data.visitId) {
-            try {
-                const endDate = new Date().toISOString();
-                await visitService.closeVisit(data.visitId, endDate, userToken);
-                console.log('[ClinicalDocumentService] Visit auto-closed:', data.visitId);
-            } catch (closeError: any) {
-                console.warn('[ClinicalDocumentService] Auto-close visit failed:', closeError.message);
-            }
-        }
+        // Note: visit closing (REALIZATION) is handled by G9 app's document/route.ts
+        // Do NOT call closeVisit here to avoid duplicate REALIZATION in audit log
 
         return { ...responseData, documentOid };
     }
