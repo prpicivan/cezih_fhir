@@ -496,8 +496,8 @@ class VisitService {
                 entry: [{ resource: { resourceType: 'MessageHeader', response: { code: 'ok' } } }]
             };
         } finally {
-            // ASYNC Log to Audit service
-            auditService.log({
+            // Await the audit log write so it's not dropped as fire-and-forget
+            await auditService.log({
                 visitId,
                 patientMbo,
                 action,
