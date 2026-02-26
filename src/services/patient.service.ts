@@ -152,6 +152,7 @@ class PatientService {
             }
 
             console.log('[PatientService] Searching CEZIH:', url);
+            console.log('[PatientService] Headers:', JSON.stringify(Object.keys(headers)));
             const response = await axios.get(url, { headers });
 
             if (response.data.resourceType === 'Patient') {
@@ -166,6 +167,11 @@ class PatientService {
             return patients;
         } catch (error: any) {
             console.error('[PatientService] Failed to search patients:', error.message);
+            if (error.response) {
+                console.error('[PatientService] Status:', error.response.status);
+                console.error('[PatientService] Response data:', JSON.stringify(error.response.data)?.substring(0, 500));
+                console.error('[PatientService] Response headers:', JSON.stringify(error.response.headers)?.substring(0, 300));
+            }
             throw error;
         } finally {
             // Log outgoing query to CEZIH (or mock) for the audit trail

@@ -1,27 +1,59 @@
 /**
  * CEZIH Authentication Service
- * Handles OAuth2 Client Credentials (Test Case 3)
- * and OpenID Connect Authorization Code Flow (Test Cases 1, 2)
+ * 
+ * Two auth mechanisms:
+ * 1. System Auth (OAuth2 Client Credentials) — for OID, terminology, etc.
+ * 2. Gateway Auth (OpenID Agent proxy) — for user-level FHIR services.
+ *    The CEZIH gateway handles OIDC internally via its own proxy (services_proxy).
+ *    Our app follows the redirect chain to get the auth URL, opens it in the browser,
+ *    and captures the session cookies after user authenticates.
  */
-import axios from 'axios';
+import axios, { AxiosInstance } from 'axios';
 import { config } from '../config';
 import { CezihTokenResponse } from '../types';
 
+// ============================================================
+// Types
+// ============================================================
+
+export interface GatewayAuthInitResult {
+    /** The final URL to open in the browser for user authentication */
+    authUrl: string;
+    /** The method detected (smartcard or certilia) */
+    method: 'smartcard' | 'certilia';
+    /** All cookies gathered along the redirect chain (send back to POST /auth/session) */
+    chainCookies: string[];
+    /** The original gateway URL that was probed */
+    gatewayUrl: string;
+}
+
+export interface GatewaySession {
+    /** All cookies needed to make authenticated requests to the gateway */
+    cookies: string[];
+    /** When this session was established */
+    createdAt: number;
+    /** mod_auth_openid_session value if extracted */
+    sessionToken?: string;
+}
+
+// ============================================================
+// Auth Service
+// ============================================================
+
 class AuthService {
+    // --- System Auth ---
     private systemToken: string | null = null;
     private systemTokenExpiry: number = 0;
-    private userSessions: Map<string, { token: string; expiry: number }> = new Map();
+
+    // --- Gateway Auth ---
+    private gatewaySession: GatewaySession | null = null;
+    private pendingAuthState: Map<string, { chainCookies: string[]; gatewayUrl: string }> = new Map();
 
     // ============================================================
-    // Test Case 3: Information System Authentication (OAuth2 Client Credentials)
+    // System Auth (OAuth2 Client Credentials — unchanged)
     // ============================================================
 
-    /**
-     * Get system-level access token using OAuth2 Client Credentials Grant.
-     * Used for: OID retrieval, terminology sync (no end-user context needed).
-     */
     async getSystemToken(): Promise<string> {
-        // Return cached token if still valid (with 30s buffer)
         if (this.systemToken && Date.now() < this.systemTokenExpiry - 30000) {
             return this.systemToken;
         }
@@ -35,14 +67,11 @@ class AuthService {
             const response = await axios.post<CezihTokenResponse>(
                 config.auth.tokenUrl,
                 params.toString(),
-                {
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                }
+                { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
             );
 
             this.systemToken = response.data.access_token;
             this.systemTokenExpiry = Date.now() + response.data.expires_in * 1000;
-
             console.log('[AuthService] System token obtained, expires in', response.data.expires_in, 'seconds');
             return this.systemToken;
         } catch (error: any) {
@@ -51,107 +80,135 @@ class AuthService {
         }
     }
 
-    // ============================================================
-    // Test Case 1: End-User Auth via Smart Card (OpenID Connect)
-    // ============================================================
-
-    /**
-     * Generate the authorization URL for Smart Card authentication.
-     * The Gx application redirects the user to this URL, which triggers
-     * TLS client certificate selection (smart card).
-     */
-    getSmartCardAuthUrl(state: string): string {
-        const params = new URLSearchParams({
-            response_type: 'code',
-            client_id: config.auth.clientId,
-            redirect_uri: config.auth.redirectUri,
-            state,
-            scope: 'openid',
-            // Smart card auth: TLS mutual auth triggers certificate selection
-            acr_values: 'urn:cezih:auth:smartcard',
-        });
-
-        return `${config.auth.oidcAuthUrl}?${params.toString()}`;
+    async getSystemAuthHeaders(): Promise<Record<string, string>> {
+        const token = await this.getSystemToken();
+        return {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/fhir+json',
+        };
     }
 
     // ============================================================
-    // Test Case 2: End-User Auth via Certilia mobile.ID (OpenID Connect + 2FA)
+    // Gateway Auth — Initiate (probe gateway → follow redirects → return auth URL)
     // ============================================================
 
     /**
-     * Generate the authorization URL for Certilia mobile.ID 2FA authentication.
-     * No client certificate is sent during TLS handshake; instead,
-     * the user is redirected to Certilia mobile.ID login form.
+     * Initiate gateway-based user authentication.
+     * 
+     * The browser must open the gateway URL directly so it follows all redirects
+     * and accumulates cookies at each domain (gateway, SSO, Certilia).
+     * 
+     * For smart card: gateway → SSO (TLS cert handshake) → session
+     * For certilia: gateway → SSO → broker → Certilia IDP → login form → session
      */
-    getCertiliaAuthUrl(state: string): string {
-        // For development/testing without VPN, we can return a local callback URL
-        if (process.env.MOCK_AUTH === 'true') {
-            const mockParams = new URLSearchParams({
-                code: 'mock_code_' + Math.random().toString(36).substring(7),
-                state,
-                mock: 'true'
-            });
-            return `${config.auth.redirectUri}?${mockParams.toString()}`;
-        }
+    async initiateGatewayAuth(method: 'smartcard' | 'certilia' = 'certilia'): Promise<GatewayAuthInitResult> {
+        const gatewayUrl = `${config.cezih.baseUrl}/services-router/gateway`;
+        console.log(`[AuthService] Initiating gateway auth (${method})...`);
 
-        const params = new URLSearchParams({
-            response_type: 'code',
-            client_id: config.auth.clientId,
-            redirect_uri: config.auth.redirectUri,
-            state,
-            scope: 'openid',
-            // Certilia mobile.ID: no TLS client cert, use 2FA instead
-            acr_values: 'urn:cezih:auth:certilia',
-        });
-
-        return `${config.auth.oidcAuthUrl}?${params.toString()}`;
-    }
-
-    /**
-     * Exchange authorization code for tokens (used by both Smart Card and Certilia flows).
-     */
-    async exchangeAuthCode(code: string): Promise<CezihTokenResponse> {
-        // Handle mock codes
-        if (code.startsWith('mock_code_')) {
-            console.log('[AuthService] Using MOCK user token exchange');
-            return {
-                access_token: 'mock_access_token_' + Math.random().toString(36).substring(7),
-                expires_in: 3600,
-                refresh_expires_in: 7200,
-                refresh_token: 'mock_refresh_token',
-                token_type: 'Bearer',
-                'not-before-policy': 0,
-                session_state: 'mock_session'
-            };
-        }
-
+        // Verify gateway is reachable
         try {
-            const params = new URLSearchParams();
-            params.append('grant_type', 'authorization_code');
-            params.append('client_id', config.auth.clientId);
-            params.append('client_secret', config.auth.clientSecret);
-            params.append('code', code);
-            params.append('redirect_uri', config.auth.redirectUri);
+            const probe = await axios.get(gatewayUrl, {
+                maxRedirects: 0,
+                validateStatus: () => true,
+            });
+            console.log('[AuthService] Gateway probe:', probe.status);
 
-            const response = await axios.post<CezihTokenResponse>(
-                config.auth.tokenUrl,
-                params.toString(),
-                {
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            if (probe.status !== 302) {
+                // If 200, gateway might already have a session
+                if (probe.status === 200) {
+                    console.log('[AuthService] Gateway returned 200 — may already be authenticated');
+                } else {
+                    console.log('[AuthService] Warning: unexpected gateway status:', probe.status);
                 }
-            );
-
-            console.log('[AuthService] User token obtained via authorization code');
-            return response.data;
+            }
         } catch (error: any) {
-            console.error('[AuthService] Failed to exchange auth code:', error.response?.data || error.message);
-            throw new Error('Failed to exchange authorization code: ' + (error.response?.data?.error_description || error.message));
+            throw new Error(`Cannot reach CEZIH gateway: ${error.message}`);
+        }
+
+        // Return the gateway URL for the browser to open directly.
+        // The browser will follow all redirects and accumulate cookies naturally.
+        console.log(`[AuthService] ✅ Returning gateway URL for browser-based ${method} auth`);
+
+        return {
+            authUrl: gatewayUrl,
+            method,
+            chainCookies: [], // Browser handles cookies directly
+            gatewayUrl,
+        };
+    }
+
+    // ============================================================
+    // Gateway Auth — Store Session
+    // ============================================================
+
+    /**
+     * Store gateway session cookies after successful browser authentication.
+     * The frontend sends back the cookies it captured from the auth flow.
+     */
+    storeGatewaySession(cookies: string[], sessionToken?: string): void {
+        this.gatewaySession = {
+            cookies,
+            createdAt: Date.now(),
+            sessionToken,
+        };
+        console.log('[AuthService] ✅ Gateway session stored');
+        console.log('[AuthService] Cookies:', cookies.length);
+        if (sessionToken) {
+            console.log('[AuthService] Session token:', sessionToken.substring(0, 20) + '...');
         }
     }
 
     /**
-     * Store a user session token for subsequent API calls.
+     * Check if we have a valid gateway session.
      */
+    hasGatewaySession(): boolean {
+        if (!this.gatewaySession) return false;
+        // Sessions are typically valid for a few hours
+        const maxAge = 4 * 60 * 60 * 1000; // 4 hours
+        return Date.now() - this.gatewaySession.createdAt < maxAge;
+    }
+
+    /**
+     * Get headers for authenticated gateway FHIR requests.
+     * Uses the mod_auth_openid_session header + cookies.
+     */
+    getGatewayAuthHeaders(): Record<string, string> {
+        if (!this.gatewaySession) {
+            throw new Error('No active gateway session. Please authenticate first.');
+        }
+
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/fhir+json',
+            Cookie: this.gatewaySession.cookies.join('; '),
+        };
+
+        if (this.gatewaySession.sessionToken) {
+            headers[config.auth.ssoSessionHeader] = this.gatewaySession.sessionToken;
+        }
+
+        return headers;
+    }
+
+    /**
+     * Get current session status.
+     */
+    getSessionStatus(): { authenticated: boolean; method?: string; createdAt?: number } {
+        if (!this.hasGatewaySession()) {
+            return { authenticated: false };
+        }
+        return {
+            authenticated: true,
+            method: 'gateway',
+            createdAt: this.gatewaySession!.createdAt,
+        };
+    }
+
+    // ============================================================
+    // Legacy support: User sessions via tokens (for backward compat)
+    // ============================================================
+
+    private userSessions: Map<string, { token: string; expiry: number }> = new Map();
+
     storeUserSession(sessionId: string, token: string, expiresIn: number): void {
         this.userSessions.set(sessionId, {
             token,
@@ -159,9 +216,6 @@ class AuthService {
         });
     }
 
-    /**
-     * Retrieve a valid user session token.
-     */
     getUserToken(sessionId: string): string | null {
         const session = this.userSessions.get(sessionId);
         if (!session || Date.now() >= session.expiry) {
@@ -171,18 +225,14 @@ class AuthService {
         return session.token;
     }
 
-    /**
-     * Create axios headers with the appropriate authorization.
-     */
-    async getSystemAuthHeaders(): Promise<Record<string, string>> {
-        const token = await this.getSystemToken();
-        return {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/fhir+json',
-        };
-    }
-
     getUserAuthHeaders(userToken: string): Record<string, string> {
+        // If we have a gateway session (from Certilia or Smart Card),
+        // use gateway cookies — not Bearer token
+        if (this.hasGatewaySession()) {
+            return this.getGatewayAuthHeaders();
+        }
+
+        // Legacy fallback: Bearer token
         return {
             Authorization: `Bearer ${userToken}`,
             'Content-Type': 'application/fhir+json',

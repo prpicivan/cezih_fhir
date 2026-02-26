@@ -1,0 +1,293 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<html>
+    <head>
+        <link href="/authenticationendpoint/libs/themes/default/font-inter.css" rel="stylesheet">
+        <!-- header -->
+        
+        
+
+<!-- localize.jsp MUST already be included in the calling script -->
+
+
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<link rel="icon" href="/authenticationendpoint/libs/themes/default/assets/images/favicon.ico" type="image/x-icon"/>
+<link href="/authenticationendpoint/libs/themes/default/theme.css?hash=ea7faf7b305aa56e634b344c799fba7a402f7751eb39a97e8bfccc192c535deb" rel="stylesheet">
+
+<title>Certilia</title>
+
+<style>
+    html, body {
+        height: 100%;
+    }
+
+    body {
+        flex-direction: column;
+        display: flex;
+    }
+
+    main {
+        flex-shrink: 0;
+    }
+
+    main.center-segment {
+        margin: auto;
+        display: flex;
+        align-items: center;
+    }
+
+    main.center-segment > .ui.container.medium {
+        max-width: 450px !important;
+    }
+
+    main.center-segment > .ui.container.large {
+        max-width: 700px !important;
+    }
+
+    main.center-segment > .ui.container > .ui.segment {
+        padding: 3rem;
+    }
+
+    main.center-segment > .ui.container > .ui.segment .segment-form .buttons {
+        margin-top: 1em;
+    }
+
+    main.center-segment > .ui.container > .ui.segment .segment-form .buttons.align-right button,
+    main.center-segment > .ui.container > .ui.segment .segment-form .buttons.align-right input {
+        margin: 0 0 0 0.25em;
+    }
+
+    main.center-segment > .ui.container > .ui.segment .segment-form .column .buttons.align-left button.link-button,
+    main.center-segment > .ui.container > .ui.segment .segment-form .column .buttons.align-left input.link-button {
+        padding: .78571429em 1.5em .78571429em 0;
+    }
+
+    main.center-segment > .ui.container > .ui.segment .segment-form {
+        text-align: left;
+    }
+
+    main.center-segment > .ui.container > .ui.segment .segment-form .align-center {
+        text-align: center;
+    }
+
+    main.center-segment > .ui.container > .ui.segment .segment-form .align-right {
+        text-align: right;
+    }
+    
+    .cookie-policy-message {
+        font-size: 14px;
+    }
+
+    footer {
+        padding: 2rem 0;
+    }
+
+    body .product-title .product-title-text {
+        margin: 0;
+    }
+
+    body .center-segment .product-title .product-title-text {
+        margin-top: 2em;
+        margin-bottom: 1em;
+    }
+
+    .ui.menu.fixed.app-header .product-logo {
+        padding-left: 0;
+    }
+
+    /* Table of content styling */
+
+    main #toc {
+        position: sticky;
+        top: 93px;
+    }
+
+    main .ui.segment.toc {
+        padding: 20px;
+    }
+
+    main .ui.segment.toc ul.ui.list.nav > li.sub {
+        margin-left: 20px;
+    }
+
+    main .ui.segment.toc ul.ui.list.nav > li > a {
+        color: rgba(0,0,0,.87);
+        text-decoration: none;
+    }
+
+    main .ui.segment.toc ul.ui.list.nav > li:before {
+        content: "\2219";
+        font-weight: bold;
+        font-size: 1.6em;
+        line-height: 0.5em;
+        display: inline-block;
+        width: 1em;
+        margin-left: -0.7em;
+    }
+
+    main .ui.segment.toc ul.ui.list.nav > li.sub:before {
+        content: "\2192";
+        margin-left: -1em;
+    }
+
+    main .ui.segment.toc ul.ui.list.nav > li:hover a {
+        color: #ff5000;
+        text-decoration: none;
+        cursor: pointer;
+    }
+
+    main .ui.segment.toc ul.ui.list.nav > li:hover:before {
+        color: #ff5000;
+    }
+</style>
+
+        
+
+        <script src="/authenticationendpoint/libs/jquery/jquery.js"></script>
+        <script src="/mobileidauthenticationendpoint/js/scripts.js?hash=df15c88cbc162f6b2b6df7aeba35bf4c062f1255a0371b1ec7ad78009ce614e5"></script>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+
+    <body class="login-portal layout">
+        <main class="center-segment">
+            <div class="ui container medium center aligned middle aligned">
+                <div class="ui divider hidden"></div>
+                <!-- product-title -->
+                <div class="product-title">
+                    <div class="theme-icon inline auto transparent product-logo portal-logo">
+                        <a href="https://www.certilia.com/"><img src="/authenticationendpoint/libs/themes/default/assets/images/logo-test.svg" alt="product-logo" /></a>
+                    </div>
+                </div>
+                <div class="ui divider hidden"></div>
+                <div class="ui segment">
+                    <!-- page content -->
+                    <h1><span class="mobileid">mobileID</span> sign in</h1>
+                    
+                    <div align="center">
+                        
+                        <h5 id="received" style="display:none;">Please open the notification on your device and confirm the login request.</h5>
+                        
+                        <h5 id="requesterror" style="display:none;">Login request check failed</h5>
+                        <h5 id="acceptedondev" style="display:none;">Waiting for your confirmation...</h5>
+                        <h5 id="userdeclined" style="display:none;">You have declined the login request</h5>
+                        <h5 id="userconfirmed" style="display:none;">Login confirmed. Please wait...</h5>
+                        <h5 id="notexistorexpired" style="display:none;">Request has expired or it does not exist</h5>
+                        <h5 id="unknownstatus" style="display:none;">Unknown request status</h5>
+                        <h5 id="timeoutwarning" style="display:none;">Request check failed. Internet connection might be lost. Retrying...</h5>
+                        <h5 id="multipletimeout" style="display:none;">Request check failed multiple times. Check your internet connection and try again.</h5>
+                    </div>
+                    <input id="username" type="hidden"
+                            value='null'>
+
+                    <div class="segment-form" hidden>
+                        <form action="../../commonauth" method="post" id="mobileIdForm" class="ui large form">
+                            <input id="sessionDataKey" type="hidden" name="sessionDataKey"
+                                    value='test' />
+                            <input id="auth" type="hidden" name="auth"
+                                    value='null' />
+                            <input id="checkUserAuthURL" type="hidden" name="checkUserAuthURL"
+                                    value='null' />
+                            <input id="willExpire" type="hidden" name="willExpire"
+                                    value='null' />
+                            <input id="otpCode" type="hidden" name="otpCode"
+                                    value='null' />
+                            <input id="multiOptionURI" type="hidden" name="multiOptionURI"
+                                    value='null' />
+                            <input id="retry" type="hidden" name="retry"
+                                    value='false' />
+                            <div class="ui divider hidden"></div>
+                            <input type="submit" value="Authenticate" class="ui primary button">
+                        </form>
+                    </div>
+                    <br/>
+                    <div align="center">
+                        <div id="app">
+                            <div class="base-timer">
+                                <svg class="base-timer__svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                                    <g class="base-timer__circle">
+                                        <circle class="base-timer__path-elapsed" cx="50" cy="50" r="45"></circle>
+                                        <path
+                                            id="base-timer-path-remaining"
+                                            stroke-dasharray="283 283"
+                                            class="base-timer__path-remaining green"
+                                            d="
+                                            M 50, 50
+                                            m -45, 0
+                                            a 45,45 0 1,0 90,0
+                                            a 45,45 0 1,0 -90,0
+                                            "
+                                        ></path>
+                                    </g>
+                                </svg>
+                                <span id="base-timer-label" class="base-timer__label"></span>
+                            </div>
+                        </div>
+                        <div align="center" style="max-width: 350px; text-align: center; margin: auto;">
+                            <div id="retryLinkDiv" style="margin: 16px 8px 8px 8px; display: none;" class="ui button link-button">
+                                <a id="retry"><u>Didn&#39;t receive the notification? Click here to retry</u></a>
+                            </div>
+                        </div>
+                        <div class="ui divider hidden"></div>
+                            
+                        <div align="center">
+                            <div class="ui divider hidden"></div>
+                            <p class="akdText" style="margin-bottom: 4px; margin-top: 0.7142em;">Support: 0800 0440</p>
+                            <a style="color: #2773ad;" href="mailto:helpdesk@certilia.com">helpdesk@certilia.com</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- product-footer -->
+        
+        
+
+<!-- localize.jsp MUST already be included in the calling script -->
+
+
+<!-- footer -->
+<footer class="footer" style="text-align: center;">
+    <div class="container-fluid">
+        <p style="color: #FFF;">AKD d.o.o. &copy;
+            <script>document.write(new Date().getFullYear());</script>
+        </p>
+    </div>
+</footer>
+
+        
+
+        <!-- footer -->
+        
+        
+
+<script src="/authenticationendpoint/libs/jquery/jquery.js"></script>
+<script src="/authenticationendpoint/libs/themes/default/semantic.min.js"></script>
+
+        
+    </body>
+</html>

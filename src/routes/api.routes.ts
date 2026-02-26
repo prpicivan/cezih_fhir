@@ -3,6 +3,7 @@
  * Each route group maps to a set of test cases.
  */
 import { Router, Request, Response } from 'express';
+import { CertiliaAuthClient } from '../services/certilia-auth.service';
 import {
     authService,
     oidService,
@@ -56,36 +57,170 @@ router.post('/auth/system-token', async (_req: Request, res: Response) => {
     }
 });
 
-// Test Case 1: Initiate Smart Card auth
-router.get('/auth/smartcard', (req: Request, res: Response) => {
-    const state = Math.random().toString(36).substring(7);
-    const authUrl = authService.getSmartCardAuthUrl(state);
-    res.json({ authUrl, state });
-});
-
-// Test Case 2: Initiate Certilia mobile.ID auth
-router.get('/auth/certilia', (req: Request, res: Response) => {
-    const state = Math.random().toString(36).substring(7);
-    const authUrl = authService.getCertiliaAuthUrl(state);
-    res.json({ authUrl, state });
-});
-
-// Auth callback (shared by Test Cases 1 & 2)
-router.get('/auth/callback', async (req: Request, res: Response) => {
+// Test Cases 1 & 2: Initiate gateway-based user authentication
+// method=smartcard → TLS client cert auth (browser handles smart card PIN)
+// method=certilia → Certilia mobile.ID (no client cert needed)
+router.get('/auth/initiate', async (req: Request, res: Response) => {
     try {
-        const { code, state } = req.query;
-        if (!code) {
-            return res.status(400).json({ error: 'Missing authorization code' });
-        }
-        const tokenResponse = await authService.exchangeAuthCode(code as string);
-        const sessionId = state as string || 'default';
-        authService.storeUserSession(sessionId, tokenResponse.access_token, tokenResponse.expires_in);
+        const method = (req.query.method as string) === 'smartcard' ? 'smartcard' : 'certilia';
+        console.log(`[Auth] Initiating ${method} auth via gateway...`);
 
-        // Redirect back to frontend dashboard
-        // Assuming frontend is at http://localhost:3011
-        res.redirect('http://localhost:3011/dashboard/patients?sessionId=' + sessionId);
+        const result = await authService.initiateGatewayAuth(method as 'smartcard' | 'certilia');
+
+        res.json({
+            success: true,
+            authUrl: result.authUrl,
+            method: result.method,
+            chainCookies: result.chainCookies,
+            gatewayUrl: result.gatewayUrl,
+            instructions: method === 'smartcard'
+                ? 'Open authUrl in browser. Smart card PIN prompt will appear during TLS handshake.'
+                : 'Open authUrl in browser. Authenticate via Certilia mobile.ID push notification.',
+        });
     } catch (error: any) {
-        res.redirect('http://localhost:3011/?error=' + encodeURIComponent(error.message));
+        console.error('[Auth] Initiate failed:', error.message);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Store gateway session cookies after browser authentication completes
+router.post('/auth/session', (req: Request, res: Response) => {
+    try {
+        const { cookies, sessionToken } = req.body;
+        if (!cookies || !Array.isArray(cookies) || cookies.length === 0) {
+            return res.status(400).json({ error: 'Missing cookies array' });
+        }
+
+        authService.storeGatewaySession(cookies, sessionToken);
+        res.json({ success: true, message: 'Gateway session stored' });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Check authentication status
+router.get('/auth/status', (_req: Request, res: Response) => {
+    const status = authService.getSessionStatus();
+    res.json(status);
+});
+
+// Legacy: Smart Card auth URL (backward compat — now redirects to /auth/initiate)
+router.get('/auth/smartcard', async (req: Request, res: Response) => {
+    try {
+        const result = await authService.initiateGatewayAuth('smartcard');
+        res.json({ authUrl: result.authUrl, state: 'gateway' });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Legacy: Certilia auth URL (backward compat)
+router.get('/auth/certilia', async (req: Request, res: Response) => {
+    try {
+        const result = await authService.initiateGatewayAuth('certilia');
+        res.json({ authUrl: result.authUrl, state: 'gateway' });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ============================================================
+// Certilia Programmatic Auth (cookie-jar based)
+// ============================================================
+
+// Stores active Certilia auth sessions
+const certiliaClients: Map<string, CertiliaAuthClient> = new Map();
+
+// Step 1: Initiate Certilia flow — follow gateway → SSO → Certilia login form
+router.post('/auth/certilia/initiate', async (_req: Request, res: Response) => {
+    try {
+        const client = new CertiliaAuthClient();
+        const formData = await client.initiate();
+
+        // Store client with a session ID
+        const sessionId = Math.random().toString(36).substring(2, 15);
+        certiliaClients.set(sessionId, client);
+
+        // Clean up old sessions after 10 minutes
+        setTimeout(() => certiliaClients.delete(sessionId), 10 * 60 * 1000);
+
+        res.json({
+            success: true,
+            sessionId,
+            formData: {
+                ready: formData.ready,
+                sessionDataKey: formData.sessionDataKey.substring(0, 10) + '...',
+            },
+            message: 'Unesite Certilia korisničko ime (OIB ili email) i lozinku.',
+        });
+    } catch (error: any) {
+        console.error('[Auth/Certilia] Initiate failed:', error.message);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Step 2: Submit Certilia credentials
+router.post('/auth/certilia/login', async (req: Request, res: Response) => {
+    try {
+        const { sessionId, username, password } = req.body;
+
+        if (!sessionId || !username || !password) {
+            return res.status(400).json({ error: 'Missing sessionId, username, or password' });
+        }
+
+        const client = certiliaClients.get(sessionId);
+        if (!client) {
+            return res.status(400).json({ error: 'Invalid or expired session. Please initiate again.' });
+        }
+
+        console.log(`[Auth/Certilia] Submitting credentials for: ${username}`);
+        const result = await client.submitCredentials(username, password);
+
+        if (result.success) {
+            authService.storeGatewaySession(result.gatewayCookies, result.sessionToken);
+            certiliaClients.delete(sessionId);
+            res.json({ success: true, message: 'Autentikacija uspješna!', authenticated: true });
+        } else if (result.error === 'PENDING_MOBILE_APPROVAL') {
+            // Push notification sent, frontend should poll /auth/certilia/check
+            res.json({
+                success: true, pendingApproval: true, sessionId,
+                message: 'Push obavijest poslana. Odobrite zahtjev u Certilia aplikaciji.'
+            });
+        } else {
+            res.json({ success: false, error: result.error || 'Autentikacija nije uspjela' });
+        }
+    } catch (error: any) {
+        console.error('[Auth/Certilia] Login failed:', error.message);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Step 3: Check mobile approval status (called by frontend polling)
+router.get('/auth/certilia/check', async (req: Request, res: Response) => {
+    try {
+        const sessionId = req.query.sessionId as string;
+        if (!sessionId) {
+            return res.status(400).json({ error: 'Missing sessionId' });
+        }
+
+        const client = certiliaClients.get(sessionId);
+        if (!client) {
+            return res.status(400).json({ error: 'Session expired' });
+        }
+
+        const result = await client.checkMobileApproval();
+
+        if (result.success) {
+            authService.storeGatewaySession(result.gatewayCookies, result.sessionToken);
+            certiliaClients.delete(sessionId);
+            res.json({ success: true, authenticated: true, message: 'Autentikacija uspješna!' });
+        } else if (result.error === 'PENDING_MOBILE_APPROVAL') {
+            res.json({ success: true, pending: true });
+        } else {
+            res.json({ success: false, error: result.error });
+        }
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
     }
 });
 

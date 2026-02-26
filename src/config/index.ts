@@ -51,5 +51,6 @@ export const config = {
     remoteSigning: {
         signerOib: process.env.SIGNER_OIB || '',
         sourceSystem: process.env.REMOTE_SIGN_SOURCE_SYSTEM || 'DEV',
+        remoteSignUrl: process.env.REMOTE_SIGN_URL || 'https://certpubws.cezih.hr/services-router/gateway/extsigner/api/sign',
     },
 };
