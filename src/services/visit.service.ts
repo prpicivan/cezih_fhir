@@ -58,9 +58,6 @@ class VisitService {
         return db.prepare('SELECT * FROM visits WHERE id = ?').get(id);
     }
 
-    // ============================================================
-    // Test Case 12: Create Visit (FHIR Messaging)
-    // ============================================================
 
     async createVisit(data: VisitData, userToken: string): Promise<any> {
         const messageId = uuidv4();
@@ -469,7 +466,7 @@ class VisitService {
             // Sign the bundle before sending (CEZIH requires JWS digital signature)
             try {
                 if (signatureService.isAvailable()) {
-                    const { bundle: signedBundle } = signatureService.signBundle(bundle);
+                    const { bundle: signedBundle } = await signatureService.signBundle(bundle);
                     bundleToSend = signedBundle;
                     console.log('[VisitService] Bundle signed successfully');
                 } else {
@@ -501,7 +498,7 @@ class VisitService {
                 visitId,
                 patientMbo,
                 action,
-                direction: 'OUTGOING',
+                direction: 'OUTGOING_CEZIH',
                 status: errorMessage && !finalResponse ? 'ERROR' : 'SUCCESS',
                 payload_req: bundleToSend,
                 payload_res: finalResponse,

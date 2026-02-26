@@ -93,9 +93,13 @@ For a high-volume environment with **800 patients daily** (approx. 240,000–300
 ### Retention & Optimization Strategy
 1.  **Cold Storage**: Audit logs older than 2 years can be moved to cheap Object Storage (e.g., AWS S3 or Supabase Storage) to keep the primary database fast and small.
 2.  **Compression**: Enabling Postgres/Neon compression can reduce these requirements by **30-50%**, as FHIR JSON is highly repetitive.
-3.  **Database Choice**:
-    *   **Postgres (Managed)**: Easily handles tens of gigabytes. Storage is cheap (approx. $0.10/GB/month).
-    *   **Neon/Supabase**: Both offer "Auto-scaling storage," so you don't need to commit to a fixed disk size upfront.
+3.  **Zero-Storage Alternative**: If PII must never touch the middleware's disk, the service can be configured as a **Stateful-less Proxy**. In this mode, storage requirements for the Middleware drop to **< 1GB (Terminology only)**.
+
+### Storage Comparison
+| Data Strategy | Middleware Storage | G9 Responsibility | Note |
+| :--- | :--- | :--- | :--- |
+| **Hybrid (Current)** | ~40 GB / Year | Standard EHR logs | Easier to debug/audit via Middleware. |
+| **Zero-Storage** | < 1GB total | **All FHIR & Audit Logs** | Middleware acts as a pure pipe. Maximum HIPAA/GDPR safety. |
 
 ## 7. On-Prem Multi-Location Architecture
 
@@ -169,7 +173,7 @@ Recommended for modern, low-maintenance setups and multi-location polyclinics.
 ```mermaid
 sequenceDiagram
     participant Doc as Doctor (Web/G9)
-    participant Vercel as VBS_FHIR (Vercel)
+    participant Vercel as WBS_FHIR (Vercel)
     participant Mobile as Doctor Phone (Certilia App)
     participant CEZIH as CEZIH FHIR (National)
 
@@ -262,3 +266,25 @@ To make the Proxy accessible to Vercel without opening firewall ports:
 *   **Secure Tunnel**: Use **Cloudflare Tunnel (cloudflared)** or **Tailscale Funnel**. This creates a secure, encrypted outbound-only connection. Vercel sees the Proxy at a URL like `https://proxy.yourclinic.com`.
 *   **Authentication**: The Proxy is protected by a **Static API Key** and **IP Whitelisting** (only allowing requests from Vercel's Edge IPs).
 *   **Impact**: Adds ~50-150ms of latency per signature, which is negligible for 150 patients/day.
+## 10. Future-Proofing: Zero-Storage & Security Hardening
+
+If the clinic chooses to move to a cloud-hosted environment (Vercel/Local Cloud) or requires maximum data privacy, the following "Zero-Storage" path is ready for implementation.
+
+### Zero-Storage (Passthrough) Logic
+The middleware is modified to skip all `db.run()` operations for:
+- `patients`, `visits`, `cases`, `documents`, and `audit_logs`.
+
+**The Passthrough Flow:**
+1.  **Request**: G9 sends data to Middleware.
+2.  **Process**: Middleware prepares, signs, and sends to CEZIH.
+3.  **Return**: Middleware returns an object containing:
+    - `result`: The CEZIH response.
+    - `audit`: The full signed JWS payload (request) and the raw CEZIH response.
+4.  **Logging**: G9 receives this `audit` data and is responsible for storing it in its own secure, centralized audit log.
+
+### Security Hardening Measures
+For environments where the middleware endpoint is exposed (even over VPN):
+- **API Key Authentication**: Implement `X-API-KEY` header verification. Only the authorized G9 instances can trigger CEZIH transactions.
+- **mTLS**: Use mutual TLS certificates for G9-to-Middleware communication if hosted in a public cloud.
+- **Environment Secrets**: All JWS certificates and CEZIH credentials MUST be stored in encrypted environment secrets (Vercel Secrets / AWS Secrets Manager), never in `.env` files.
+- **Audit Passthrough**: Since the middleware doesn't store data, it must return every raw payload to G9. Failure to do so would break the "legal/GDP audit trail" required by HZZO.

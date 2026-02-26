@@ -169,13 +169,40 @@ export function initDatabase() {
     insert.run('112233445', '11223344556', 'Marko', 'Marić', '1975-11-20', 'male', 'Riva 5', 'Rijeka');
   }
 
+  // Seed 15 MKB-10 diagnoses if empty
+  const diagCount = db.prepare('SELECT count(*) as count FROM diagnoses').get() as { count: number };
+  if (diagCount.count === 0) {
+    console.log('Seeding MKB-10 diagnoses...');
+    const insertDiag = db.prepare('INSERT INTO diagnoses (code, display) VALUES (?, ?)');
+    const commonDiagnoses = [
+      { code: 'I10', display: 'Esencijalna (primarna) hipertenzija' },
+      { code: 'E11', display: 'Dijabetes melitus neovisan o inzulinu' },
+      { code: 'J06.9', display: 'Akutna infekcija gornjega dišnog sustava' },
+      { code: 'M54.5', display: 'Križobolja' },
+      { code: 'K21.9', display: 'Gastroezofagealna refluksna bolest (GERB)' },
+      { code: 'N39.0', display: 'Infekcija mokraćnog sustava' },
+      { code: 'F41.1', display: 'Opći anksiozni poremećaj' },
+      { code: 'G44.2', display: 'Tenzijska glavobolja' },
+      { code: 'I25.1', display: 'Aterosklerotična bolest srca' },
+      { code: 'J45.9', display: 'Astma, nespecificirana' },
+      { code: 'L20.9', display: 'Atopijski dermatitis' },
+      { code: 'M17.9', display: 'Gonoartroza (artroza koljena)' },
+      { code: 'R05', display: 'Kašalj' },
+      { code: 'R51', display: 'Glavobolja' },
+      { code: 'Z00.0', display: 'Opći medicinski pregled' }
+    ];
+    for (const d of commonDiagnoses) {
+      insertDiag.run(d.code, d.display);
+    }
+  }
+
   // Seed some settings
   const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
   insertSetting.run('terminology_last_sync', new Date().toISOString());
   insertSetting.run('cezih_environment', 'TEST');
 
   const defaultMenu = [
-    { id: 'dashboard', name: 'Nadzorna ploča', href: '/dashboard', icon: 'LayoutDashboard', isVisible: true, orderIndex: 0 },
+    { id: 'dashboard', name: 'Nadzorna ploča', href: '/dashboard', icon: 'LayoutDashboard', isVisible: false, orderIndex: 0 },
     { id: 'patients', name: 'Pacijenti', href: '/dashboard/patients', icon: 'Users', isVisible: true, orderIndex: 1 },
     { id: 'calendar', name: 'Kalendar', href: '/dashboard/calendar', icon: 'Calendar', isVisible: true, orderIndex: 2 },
     { id: 'documents', name: 'Klinički dokumenti', href: '/dashboard/documents', icon: 'Activity', isVisible: true, orderIndex: 3 },
@@ -184,7 +211,10 @@ export function initDatabase() {
     { id: 'settings', name: 'Postavke', href: '/dashboard/settings', icon: 'Settings', isVisible: true, orderIndex: 6 },
     { id: 'certification', name: 'Certifikacija', href: '/dashboard/certification', icon: 'Award', isVisible: true, orderIndex: 7 },
   ];
-  insertSetting.run('menu_config', JSON.stringify(defaultMenu));
+
+  // Use INSERT OR REPLACE to ensure the menu is updated even if it already exists
+  const insertMenu = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+  insertMenu.run('menu_config', JSON.stringify(defaultMenu));
 }
 
 export default db;

@@ -53,7 +53,7 @@ export default function LoginPage() {
 
     const handleDemoLogin = () => {
         // Bypass auth for demonstration purposes
-        router.push('/dashboard');
+        router.push('/dashboard/patients');
     };
 
     return (

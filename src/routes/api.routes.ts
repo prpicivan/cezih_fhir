@@ -83,7 +83,7 @@ router.get('/auth/callback', async (req: Request, res: Response) => {
 
         // Redirect back to frontend dashboard
         // Assuming frontend is at http://localhost:3011
-        res.redirect('http://localhost:3011/dashboard?sessionId=' + sessionId);
+        res.redirect('http://localhost:3011/dashboard/patients?sessionId=' + sessionId);
     } catch (error: any) {
         res.redirect('http://localhost:3011/?error=' + encodeURIComponent(error.message));
     }
@@ -242,6 +242,7 @@ router.put('/visit/:id', async (req: Request, res: Response) => {
     }
 });
 
+// Transition a planned visit to in-progress — logs ENCOUNTER_START (not ENCOUNTER_UPDATE)
 router.post('/visit/:id/start', async (req: Request, res: Response) => {
     try {
         const userToken = req.headers.authorization?.replace('Bearer ', '') || '';

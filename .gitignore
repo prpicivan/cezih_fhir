@@ -34,3 +34,7 @@ Thumbs.db
 
 # Resolved docs (generated)
 *.resolved
+next.err  
+server.err  
+client/next.err  
+*.log  

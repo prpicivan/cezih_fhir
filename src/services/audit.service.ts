@@ -5,7 +5,7 @@ export interface AuditLogEntry {
     visitId?: string;
     patientMbo?: string;
     action: string;
-    direction: 'OUTGOING' | 'INCOMING';
+    direction: 'OUTGOING' | 'OUTGOING_CEZIH' | 'INCOMING' | 'INCOMING_G9' | 'INCOMING_CEZIH';
     status: 'SUCCESS' | 'ERROR';
     payload_req?: any;
     payload_res?: any;

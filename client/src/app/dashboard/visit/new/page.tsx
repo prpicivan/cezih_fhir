@@ -43,10 +43,14 @@ function ClinicalWorkspace() {
     const [isInspectorOpen, setIsInspectorOpen] = useState(false);
 
     useEffect(() => {
-        // Fetch initial suggestions (top 10)
+        // Fetch initial suggestions (top 15)
         fetch('/api/terminology/diagnoses?q=')
             .then(res => res.json())
-            .then(data => { if (data.success) setDiagSuggestions(data.results); });
+            .then(data => {
+                if (data.success) {
+                    setDiagSuggestions(data.results.slice(0, 15));
+                }
+            });
 
         // Set default date to now, formatted for datetime-local input (YYYY-MM-DDTHH:mm)
         const now = new Date();
@@ -54,9 +58,9 @@ function ClinicalWorkspace() {
         setStartDate(now.toISOString().slice(0, 16));
     }, []);
 
-    // Poll for audit logs when visit is active
+    // Poll for audit logs when visit is active — stop when finished
     useEffect(() => {
-        if (!visitId) return;
+        if (!visitId || visitStatus === 'finished') return;
 
         const interval = setInterval(async () => {
             try {
@@ -66,12 +70,12 @@ function ClinicalWorkspace() {
                     setLogs(data.logs);
                 }
             } catch (err) {
-                console.error('Audit poll failed', err);
+                // Silently suppress poll errors (server may be briefly unavailable)
             }
         }, 3000);
 
         return () => clearInterval(interval);
-    }, [visitId]);
+    }, [visitId, visitStatus]);
 
     const searchDiagnoses = async (q: string) => {
         try {
@@ -127,7 +131,12 @@ function ClinicalWorkspace() {
     // TC 18: Send Clinical Document (MHD)
     const sendDocument = async (type: 'ambulatory-report' | 'specialist-finding' | 'discharge-letter') => {
         if (!findingText) {
-            alert('Molimo unesite tekst nalaza.');
+            alert('Molimo unesite tekst nalaza u polje "3. Nalaz i Mišljenje".');
+            return;
+        }
+
+        if (!diagnosisCode) {
+            alert('Molimo odaberite primarnu dijagnozu (MKB-10).');
             return;
         }
 
@@ -157,10 +166,14 @@ function ClinicalWorkspace() {
             const data = await res.json();
 
             if (data.success) {
-                addLog(`Dokument uspješno poslan! OID: ${data.result.documentOid}`);
+                const successMsg = `Dokument uspješno poslan! OID: ${data.result.documentOid}`;
+                addLog(successMsg);
                 addLog('Potpisano i arhivirano u CEZIH (MHD ITI-65).');
+                alert(successMsg);
             } else {
-                addLog(`Greška slanja: ${data.error}`);
+                const errorMsg = `Greška slanja: ${data.error}`;
+                addLog(errorMsg);
+                alert(errorMsg);
             }
         } catch (err: any) {
             addLog(`Greška komunikacije: ${err.message}`);
@@ -321,7 +334,10 @@ function ClinicalWorkspace() {
                                                 searchDiagnoses(val);
                                                 setShowSuggestions(true);
                                             }}
-                                            onFocus={() => setShowSuggestions(true)}
+                                            onFocus={() => {
+                                                setShowSuggestions(true);
+                                                if (diagSuggestions.length === 0) searchDiagnoses(diagnosisCode);
+                                            }}
                                             disabled={visitStatus !== 'active' || loading}
                                         />
                                     </div>
@@ -336,7 +352,10 @@ function ClinicalWorkspace() {
                                                 searchDiagnoses(e.target.value);
                                                 setShowSuggestions(true);
                                             }}
-                                            onFocus={() => setShowSuggestions(true)}
+                                            onFocus={() => {
+                                                setShowSuggestions(true);
+                                                if (diagSuggestions.length === 0) searchDiagnoses(diagnosisDisplay);
+                                            }}
                                             disabled={visitStatus !== 'active' || loading}
                                         />
 
@@ -423,15 +442,22 @@ function ClinicalWorkspace() {
                         </div>
 
                         <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-4">
-                            <div className="flex gap-2">
+                            <div className="flex flex-col gap-2">
                                 <button
-                                    onClick={() => sendDocument('MEDICINSKI_NALAZ' as any)}
+                                    onClick={() => sendDocument('specialist-finding' as any)}
                                     disabled={visitStatus !== 'active' || loading}
-                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
+                                    title={visitStatus !== 'active' ? 'Prvo morate započeti posjet klikom na gumb "Započni posjet"' : ''}
+                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     <Send className="w-4 h-4" />
                                     Pošalji Medicinski Nalaz (TC 18)
                                 </button>
+                                {visitStatus === 'idle' && (
+                                    <p className="text-[10px] text-amber-600 font-medium flex items-center gap-1">
+                                        <Info className="w-3 h-3" />
+                                        Započnite posjet kako biste aktivirali slanje
+                                    </p>
+                                )}
                             </div>
 
                             {visitStatus === 'active' && (

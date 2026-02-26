@@ -49,6 +49,7 @@ class ValidationService {
         const system = 'http://fhir.cezih.hr/specifikacije/CodeSystem/icd10-hr';
 
         const concept = terminologyService.lookupConcept(system, code);
+
         if (!concept) {
             errors.push(`Dijagnoza sa šifrom "${code}" nije pronađena u važećem MKB-10 šifrarniku.`);
         }

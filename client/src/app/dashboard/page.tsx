@@ -2,12 +2,19 @@
 
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Users, Calendar, FileText, UserPlus, Activity, Clock, LogOut, CheckCircle, XCircle } from 'lucide-react';
 
 export default function DashboardPage() {
     const searchParams = useSearchParams();
     const [showSuccess, setShowSuccess] = useState(false);
+
+    const router = useRouter();
+
+    useEffect(() => {
+        // Dashboard should never be seen, redirect to patients
+        router.replace('/dashboard/patients');
+    }, [router]);
 
     useEffect(() => {
         if (searchParams.get('sessionId')) {

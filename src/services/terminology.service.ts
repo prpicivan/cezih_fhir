@@ -153,7 +153,17 @@ class TerminologyService {
             console.warn('[TerminologyService] DB lookup failed:', err);
         }
 
-        // 2. Fallback to cache
+        // 2. Fallback for ICD-10 to legacy diagnoses table
+        if (codeSystemUrl === 'http://fhir.cezih.hr/specifikacije/CodeSystem/icd10-hr') {
+            try {
+                const diag = db.prepare('SELECT code, display FROM diagnoses WHERE code = ?').get(code) as any;
+                if (diag) return diag;
+            } catch (err) {
+                console.warn('[TerminologyService] Legacy diagnoses lookup failed:', err);
+            }
+        }
+
+        // 3. Fallback to cache
         const cs = this.cachedCodeSystems.get(codeSystemUrl);
         if (!cs?.concept) return undefined;
 

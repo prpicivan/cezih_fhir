@@ -228,7 +228,7 @@ class CaseService {
             try {
                 if (signatureService.isAvailable()) {
                     console.log('[CaseService] Attempting to sign bundle');
-                    const { bundle: signedBundle } = signatureService.signBundle(bundle);
+                    const { bundle: signedBundle } = await signatureService.signBundle(bundle);
                     bundleToSend = signedBundle;
                     console.log('[CaseService] Bundle signed successfully');
                 } else {
@@ -262,7 +262,7 @@ class CaseService {
                 visitId: undefined, // Health case logging might not have a visitId yet
                 patientMbo,
                 action,
-                direction: 'OUTGOING',
+                direction: 'OUTGOING_CEZIH',
                 status: errorMessage && !finalResponse ? 'ERROR' : 'SUCCESS',
                 payload_req: bundleToSend,
                 payload_res: finalResponse,

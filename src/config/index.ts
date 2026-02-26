@@ -43,5 +43,7 @@ export const config = {
     signing: {
         certPath: process.env.SIGNING_CERT_PATH || '',
         keyPath: process.env.SIGNING_KEY_PATH || '',
+        bridgeUrl: process.env.SIGN_BRIDGE_URL || '',
+        bridgeToken: process.env.SIGN_BRIDGE_TOKEN || 'dev-secret',
     },
 };

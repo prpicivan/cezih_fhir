@@ -98,6 +98,43 @@ export default function AuditLogsPage() {
         );
     };
 
+    const getDirectionBadge = (direction: string) => {
+        // G9 → Middleware (incoming to MW from G9)
+        if (direction === 'INCOMING_G9') {
+            return (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md border text-purple-700 bg-purple-50 border-purple-200">
+                    <ArrowDownLeft className="w-3 h-3" />
+                    ← G9
+                </span>
+            );
+        }
+        // Middleware → CEZIH (outgoing from MW to CEZIH)
+        if (direction === 'OUTGOING_CEZIH' || direction === 'OUTGOING') {
+            return (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md border text-blue-700 bg-blue-50 border-blue-200">
+                    <ArrowUpRight className="w-3 h-3" />
+                    → CEZIH
+                </span>
+            );
+        }
+        // CEZIH → Middleware (incoming to MW from CEZIH) — reserved for VPN
+        if (direction === 'INCOMING_CEZIH') {
+            return (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md border text-emerald-700 bg-emerald-50 border-emerald-200">
+                    <ArrowDownLeft className="w-3 h-3" />
+                    ← CEZIH
+                </span>
+            );
+        }
+        // Legacy fallback for old generic rows
+        return (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md border text-slate-600 bg-slate-50 border-slate-200">
+                <ArrowDownLeft className="w-3 h-3" />
+                {direction}
+            </span>
+        );
+    };
+
     const formatDate = (dateStr: string) => {
         const d = new Date(dateStr);
         const date = d.toLocaleDateString('hr-HR', {
@@ -243,13 +280,7 @@ export default function AuditLogsPage() {
                                                 {getStatusBadge(log.status)}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-right">
-                                                <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md border ${log.direction === 'OUTGOING'
-                                                    ? 'text-blue-700 bg-blue-50 border-blue-200'
-                                                    : 'text-purple-700 bg-purple-50 border-purple-200'
-                                                    }`}>
-                                                    {log.direction === 'OUTGOING' ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownLeft className="w-3 h-3" />}
-                                                    {log.direction}
-                                                </span>
+                                                {getDirectionBadge(log.direction)}
                                             </td>
                                         </tr>
                                     ))
@@ -314,10 +345,19 @@ export default function AuditLogsPage() {
                             {/* Request Payload */}
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex justify-between items-center">
-                                    FHIR Request (MHD/Bundle)
-                                    <span className="text-blue-500">JSON</span>
+                                    {selectedLog.direction === 'INCOMING_G9' ? (
+                                        <span className="text-purple-600">← G9 zahtjev</span>
+                                    ) : selectedLog.direction === 'INCOMING_CEZIH' ? (
+                                        <span className="text-blue-600">← CEZIH dolazak</span>
+                                    ) : (
+                                        'FHIR Request (MHD/Bundle)'
+                                    )}
+                                    <span className="text-slate-400">JSON</span>
                                 </label>
-                                <pre className="bg-slate-900 text-blue-300 p-4 rounded-lg text-xs overflow-x-auto font-mono max-h-[300px]">
+                                <pre className={`bg-slate-900 p-4 rounded-lg text-xs overflow-x-auto font-mono max-h-[300px] ${selectedLog.direction === 'INCOMING_G9' ? 'text-purple-300' :
+                                    selectedLog.direction === 'INCOMING_CEZIH' ? 'text-blue-300' :
+                                        'text-blue-300'
+                                    }`}>
                                     {selectedLog.payload_req || '// Nema podataka'}
                                 </pre>
                             </div>
@@ -325,7 +365,7 @@ export default function AuditLogsPage() {
                             {/* Response Payload */}
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex justify-between items-center">
-                                    CEZIH Response
+                                    {selectedLog.direction === 'INCOMING_G9' ? 'Odgovor prema G9' : 'CEZIH Response'}
                                     <span className="text-emerald-500">JSON</span>
                                 </label>
                                 <pre className="bg-slate-900 text-emerald-300 p-4 rounded-lg text-xs overflow-x-auto font-mono max-h-[300px]">

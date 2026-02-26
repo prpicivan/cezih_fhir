@@ -162,7 +162,7 @@ class ClinicalDocumentService {
         let finalDocumentBundle = documentBundle;
         try {
             if (signatureService.isAvailable()) {
-                const { bundle: signedDoc } = signatureService.signBundle(documentBundle, `Practitioner/${data.practitionerId}`);
+                const { bundle: signedDoc } = await signatureService.signBundle(documentBundle, `Practitioner/${data.practitionerId}`);
                 finalDocumentBundle = signedDoc;
                 console.log('[ClinicalDocumentService] Document Bundle signed successfully');
             } else {
@@ -302,7 +302,7 @@ class ClinicalDocumentService {
         let finalDocumentBundle = documentBundle;
         try {
             if (signatureService.isAvailable()) {
-                const { bundle: signedDoc } = signatureService.signBundle(documentBundle, `Practitioner/${data.practitionerId}`);
+                const { bundle: signedDoc } = await signatureService.signBundle(documentBundle, `Practitioner/${data.practitionerId}`);
                 finalDocumentBundle = signedDoc;
                 console.log('[ClinicalDocumentService] Replacement document signed successfully');
             }
@@ -413,7 +413,7 @@ class ClinicalDocumentService {
         let finalCancelBundle = cancelBundle;
         try {
             if (signatureService.isAvailable()) {
-                const { bundle: signedDoc } = signatureService.signBundle(cancelBundle, `Practitioner/unknown`);
+                const { bundle: signedDoc } = await signatureService.signBundle(cancelBundle, `Practitioner/unknown`);
                 finalCancelBundle = signedDoc;
                 console.log('[ClinicalDocumentService] Cancel Document Bundle signed successfully');
             }

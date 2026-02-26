@@ -103,6 +103,16 @@ class PatientService {
     }
 
     private async searchPatients(query: string, userToken: string, autoSave: boolean = true): Promise<PatientDemographics[]> {
+        // Log the incoming request from G9 immediately — before any local or remote lookup
+        const mboFromQuery = query.match(/\|([A-Za-z0-9]+)/)?.[1];
+        await auditService.log({
+            patientMbo: mboFromQuery,
+            action: 'PATIENT_SEARCH',
+            direction: 'INCOMING_G9',
+            status: 'SUCCESS',
+            payload_req: { query, source: 'G9 aplikacija' },
+        });
+
         try {
             // 1. Try Local DB first (Mock Mode / Hybrid) unless explicitly searching remote
             const idMatch = query.match(/\|([A-Za-z0-9]+)/);
@@ -158,12 +168,12 @@ class PatientService {
             console.error('[PatientService] Failed to search patients:', error.message);
             throw error;
         } finally {
-            // Log search to audit service
+            // Log outgoing query to CEZIH (or mock) for the audit trail
             const mboMatch = query.match(/MBO\|([A-Za-z0-9]+)/);
             auditService.log({
                 patientMbo: mboMatch ? mboMatch[1] : undefined,
                 action: 'PATIENT_SEARCH',
-                direction: 'OUTGOING',
+                direction: 'OUTGOING_CEZIH',
                 status: 'SUCCESS', // Usually success if we got here
                 payload_req: { query },
                 payload_res: { count: '...' } // Don't log full patient data for privacy
