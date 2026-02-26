@@ -63,6 +63,24 @@ export default function PatientChartPage() {
         router.push(`/dashboard/visit/new?${query.toString()}`);
     };
 
+    const handleCloseCase = async (caseId: string) => {
+        if (!confirm('Jeste li sigurni da želite zatvoriti ovaj slučaj?')) return;
+        try {
+            await fetch(`/api/case/${caseId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    status: 'finished',
+                    endDate: new Date().toISOString(),
+                    patientMbo: mbo,
+                }),
+            });
+            fetchChartData(); // Refresh to reflect the change
+        } catch (err) {
+            console.error('Failed to close case', err);
+        }
+    };
+
     const handleRetrieve = async (doc: any) => {
         if (!doc.isRemote || (doc.anamnesis && doc.finding)) {
             setViewingDocument(doc);
@@ -301,8 +319,8 @@ export default function PatientChartPage() {
                                         <div
                                             key={c.id}
                                             className={`p-4 rounded-2xl border transition-all group ${isActive
-                                                    ? 'border-emerald-100 bg-emerald-50/30 hover:border-emerald-300 hover:shadow-sm'
-                                                    : 'border-slate-100 bg-slate-50/30 hover:border-slate-200'
+                                                ? 'border-emerald-100 bg-emerald-50/30 hover:border-emerald-300 hover:shadow-sm'
+                                                : 'border-slate-100 bg-slate-50/30 hover:border-slate-200'
                                                 }`}
                                         >
                                             <div className="flex justify-between items-start gap-2">
@@ -315,8 +333,8 @@ export default function PatientChartPage() {
                                                             </span>
                                                         )}
                                                         <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${isActive
-                                                                ? 'bg-emerald-500 text-white'
-                                                                : 'bg-slate-300 text-white'
+                                                            ? 'bg-emerald-500 text-white'
+                                                            : 'bg-slate-300 text-white'
                                                             }`}>
                                                             {isActive ? 'aktivan' : isFinished ? 'završen' : c.status}
                                                         </span>
@@ -341,12 +359,20 @@ export default function PatientChartPage() {
                                                 )}
                                             </div>
                                             {isActive && (
-                                                <button
-                                                    onClick={(e) => { e.preventDefault(); handleStartVisit(c.id); }}
-                                                    className="mt-3 w-full py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all"
-                                                >
-                                                    Nastavi liječenje
-                                                </button>
+                                                <div className="mt-3 flex gap-2">
+                                                    <button
+                                                        onClick={(e) => { e.preventDefault(); handleStartVisit(c.id); }}
+                                                        className="flex-1 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all"
+                                                    >
+                                                        Nastavi liječenje
+                                                    </button>
+                                                    <button
+                                                        onClick={(e) => { e.preventDefault(); handleCloseCase(c.id); }}
+                                                        className="py-1.5 px-3 bg-white border border-rose-200 rounded-lg text-xs font-black text-rose-500 hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all"
+                                                    >
+                                                        Zatvori
+                                                    </button>
+                                                </div>
                                             )}
                                         </div>
                                     );
