@@ -4,6 +4,7 @@ import * as path from 'path';
 import axios from 'axios';
 import { config } from '../config';
 import { pkcs11Service } from './pkcs11.service';
+import { remoteSignService } from './remote-sign.service';
 
 // ============================================================
 // Types
@@ -96,6 +97,12 @@ class SignatureService {
             }
         } else if (mode === 'bridge') {
             await this.initializeBridge();
+        } else if (mode === 'certilia') {
+            // Certilia mobile.ID: Remote signing via CEZIH Udaljeni potpis API.
+            // No local keys needed — CEZIH/Certilia handles signing on their HSM.
+            // Documents are signed via remoteSignService.signAndWait().
+            console.log('[SignatureService] ✅ Certilia mobile.ID mode (CEZIH Udaljeni potpis)');
+            console.log(`[SignatureService] OIB: ${config.remoteSigning.signerOib}`);
         } else {
             this.loadMockCertificate();
         }

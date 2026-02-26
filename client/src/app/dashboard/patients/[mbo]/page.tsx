@@ -106,7 +106,7 @@ export default function PatientChartPage() {
         );
     }
 
-    const { patient, activeCases, recentVisits, allDocuments } = chartData;
+    const { patient, activeCases, allCases = [], recentVisits, allDocuments } = chartData;
 
     return (
         <div className="space-y-6">
@@ -281,34 +281,78 @@ export default function PatientChartPage() {
                             )}
                         </div>
                     </section>
-                    {/* Active Problems (Episodes of Care) */}
+                    {/* Zdravstveni slučajevi (TC 15-17) */}
                     <section className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
                         <div className="p-5 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between">
                             <h3 className="font-black text-slate-800 flex items-center gap-2">
                                 <ClipboardList className="w-5 h-5 text-amber-500" />
-                                Aktivni problemi
+                                Zdravstveni slučajevi
                             </h3>
-                            <button className="text-[10px] font-black uppercase text-blue-600 hover:underline">Novo</button>
+                            <span className="bg-amber-50 text-amber-600 text-[10px] font-black px-2 py-0.5 rounded-full border border-amber-100">
+                                TC 15-17
+                            </span>
                         </div>
-                        <div className="p-4 space-y-3">
-                            {activeCases.length > 0 ? (
-                                activeCases.map((c: any) => (
-                                    <div key={c.id} className="p-4 rounded-2xl border border-slate-100 bg-slate-50/50 hover:bg-white hover:border-amber-200 hover:shadow-sm transition-all cursor-pointer group">
-                                        <div className="flex justify-between items-start">
-                                            <p className="font-bold text-slate-900 group-hover:text-amber-700 transition-colors uppercase text-sm tracking-tight">{c.title}</p>
-                                            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                                        </div>
-                                        <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase">Otvoreno: {new Date(c.start).toLocaleDateString('hr-HR')}</p>
-                                        <button
-                                            onClick={(e) => { e.preventDefault(); handleStartVisit(c.id); }}
-                                            className="mt-3 w-full py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all"
+                        <div className="p-3 space-y-2">
+                            {allCases.length > 0 ? (
+                                allCases.map((c: any) => {
+                                    const isActive = c.status === 'active';
+                                    const isFinished = c.status === 'finished';
+                                    return (
+                                        <div
+                                            key={c.id}
+                                            className={`p-4 rounded-2xl border transition-all group ${isActive
+                                                    ? 'border-emerald-100 bg-emerald-50/30 hover:border-emerald-300 hover:shadow-sm'
+                                                    : 'border-slate-100 bg-slate-50/30 hover:border-slate-200'
+                                                }`}
                                         >
-                                            Nastavi liječenje
-                                        </button>
-                                    </div>
-                                ))
+                                            <div className="flex justify-between items-start gap-2">
+                                                <div className="min-w-0">
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        {c.diagnosisCode && (
+                                                            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
+                                                                }`}>
+                                                                {c.diagnosisCode}
+                                                            </span>
+                                                        )}
+                                                        <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${isActive
+                                                                ? 'bg-emerald-500 text-white'
+                                                                : 'bg-slate-300 text-white'
+                                                            }`}>
+                                                            {isActive ? 'aktivan' : isFinished ? 'završen' : c.status}
+                                                        </span>
+                                                    </div>
+                                                    <p className={`font-bold text-sm tracking-tight ${isActive ? 'text-slate-900' : 'text-slate-500'}`}>
+                                                        {c.title || c.diagnosisDisplay || 'Neimenovan slučaj'}
+                                                    </p>
+                                                    <div className="flex items-center gap-3 mt-1.5">
+                                                        <p className="text-[10px] font-bold text-slate-400 uppercase">
+                                                            Od: {new Date(c.start).toLocaleDateString('hr-HR')}
+                                                            {c.end && ` — Do: ${new Date(c.end).toLocaleDateString('hr-HR')}`}
+                                                        </p>
+                                                    </div>
+                                                    {c.practitionerName && (
+                                                        <p className="text-[10px] font-medium text-slate-400 mt-0.5">
+                                                            {c.practitionerName}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                                {isActive && (
+                                                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse flex-shrink-0 mt-2"></div>
+                                                )}
+                                            </div>
+                                            {isActive && (
+                                                <button
+                                                    onClick={(e) => { e.preventDefault(); handleStartVisit(c.id); }}
+                                                    className="mt-3 w-full py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all"
+                                                >
+                                                    Nastavi liječenje
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })
                             ) : (
-                                <p className="text-center py-4 text-xs text-slate-400 italic">Nema aktivnih epizoda liječenja.</p>
+                                <p className="text-center py-4 text-xs text-slate-400 italic">Nema zdravstvenih slučajeva.</p>
                             )}
                         </div>
                     </section>

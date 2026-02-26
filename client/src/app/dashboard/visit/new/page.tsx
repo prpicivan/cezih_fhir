@@ -6,7 +6,7 @@ import {
     User, Activity, FileText, Send, Save, XCircle, CheckCircle,
     AlertTriangle, Clock, Calendar, ArrowLeft, Info, Eye, Code,
     ChevronRight, CheckCircle2, ShieldCheck, Database,
-    ArrowUpRight, ArrowDownLeft
+    ArrowUpRight, ArrowDownLeft, ClipboardList
 } from 'lucide-react';
 
 function ClinicalWorkspace() {
@@ -38,6 +38,10 @@ function ClinicalWorkspace() {
     const [logs, setLogs] = useState<any[]>([]);
     const [visitType, setVisitType] = useState<'AMB' | 'IMP' | 'EMER'>('AMB');
 
+    // Case selector (TC 15-17)
+    const [patientCases, setPatientCases] = useState<any[]>([]);
+    const [selectedCaseId, setSelectedCaseId] = useState<string>(caseIdParam || '');
+
     // Audit Inspection
     const [inspectionLog, setInspectionLog] = useState<any>(null);
     const [isInspectorOpen, setIsInspectorOpen] = useState(false);
@@ -56,6 +60,18 @@ function ClinicalWorkspace() {
         const now = new Date();
         now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
         setStartDate(now.toISOString().slice(0, 16));
+
+        // Fetch active cases for this patient (TC 15)
+        if (effectiveMbo) {
+            fetch(`/api/case/patient/${effectiveMbo}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        setPatientCases(data.cases.filter((c: any) => c.status === 'active'));
+                    }
+                })
+                .catch(() => { });
+        }
     }, []);
 
     // Poll for audit logs when visit is active — stop when finished
@@ -109,7 +125,7 @@ function ClinicalWorkspace() {
                     organizationId: 'org-1', // Mock ID
                     startDate: new Date(startDate).toISOString(),
                     class: visitType,
-                    caseId: caseIdParam || undefined
+                    caseId: selectedCaseId || undefined
                 })
             });
             const data = await res.json();
@@ -276,6 +292,22 @@ function ClinicalWorkspace() {
                                     <option value="AMB">Ambulantno (AMB)</option>
                                     <option value="IMP">Bolničko (IMP)</option>
                                     <option value="EMER">Hitna (EMER)</option>
+                                </select>
+                            </div>
+                            {/* Case selector (TC 15-17) */}
+                            <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-slate-200">
+                                <ClipboardList className="w-4 h-4 text-amber-500" />
+                                <select
+                                    value={selectedCaseId}
+                                    onChange={(e) => setSelectedCaseId(e.target.value)}
+                                    className="text-sm text-slate-700 outline-none bg-transparent font-medium max-w-[200px]"
+                                >
+                                    <option value="">Bez slučaja</option>
+                                    {patientCases.map((c: any) => (
+                                        <option key={c.id} value={c.id}>
+                                            {c.diagnosisCode ? `${c.diagnosisCode} — ` : ''}{c.title || c.diagnosisDisplay || 'Slučaj'}
+                                        </option>
+                                    ))}
                                 </select>
                             </div>
                             <button

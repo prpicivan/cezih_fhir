@@ -46,4 +46,10 @@ export const config = {
         bridgeUrl: process.env.SIGN_BRIDGE_URL || '',
         bridgeToken: process.env.SIGN_BRIDGE_TOKEN || 'dev-secret',
     },
+
+    // Remote Signing (CEZIH Udaljeni potpis via Certilia mobile.ID)
+    remoteSigning: {
+        signerOib: process.env.SIGNER_OIB || '',
+        sourceSystem: process.env.REMOTE_SIGN_SOURCE_SYSTEM || 'DEV',
+    },
 };

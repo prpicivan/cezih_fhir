@@ -119,8 +119,40 @@ export function initDatabase() {
       status TEXT,
       start TEXT,
       end TEXT,
-      FOREIGN KEY(patientMbo) REFERENCES patients(mbo)
+      diagnosisCode TEXT,
+      diagnosisDisplay TEXT,
+      practitionerName TEXT
     );
+  `);
+
+  // Migration: add new columns to cases if they don't exist
+  const caseMigrations = ['diagnosisCode TEXT', 'diagnosisDisplay TEXT', 'practitionerName TEXT'];
+  for (const col of caseMigrations) {
+    try {
+      db.exec(`ALTER TABLE cases ADD COLUMN ${col}`);
+    } catch (e) { /* column already exists */ }
+  }
+
+  // Migration: remove FK constraints from cases if they exist
+  try {
+    const caseInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='cases'").get() as any;
+    if (caseInfo?.sql?.includes('FOREIGN KEY')) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS cases_new (
+          id TEXT PRIMARY KEY, patientMbo TEXT, title TEXT, status TEXT,
+          start TEXT, end TEXT, diagnosisCode TEXT, diagnosisDisplay TEXT, practitionerName TEXT
+        );
+        INSERT OR IGNORE INTO cases_new SELECT id, patientMbo, title, status, start, end, diagnosisCode, diagnosisDisplay, practitionerName FROM cases;
+        DROP TABLE cases;
+        ALTER TABLE cases_new RENAME TO cases;
+      `);
+      console.log('[DB] Migrated cases: removed FK constraints');
+    }
+  } catch (e) {
+    console.error('[DB] Migration cases failed:', e);
+  }
+
+  db.exec(`
 
     CREATE TABLE IF NOT EXISTS diagnoses (
       code TEXT PRIMARY KEY,

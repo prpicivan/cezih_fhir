@@ -36,9 +36,48 @@ class CaseService {
     /**
      * Retrieve existing health cases for a patient.
      * Searches the local SQLite table for quick rendering.
+     * Falls back to mock data when no real cases exist (demo mode).
      */
     async getPatientCases(patientMbo: string, userToken: string): Promise<any[]> {
-        return db.prepare('SELECT * FROM cases WHERE patientMbo = ? ORDER BY start DESC').all(patientMbo);
+        const rows = db.prepare('SELECT * FROM cases WHERE patientMbo = ? ORDER BY start DESC').all(patientMbo);
+        if (rows.length > 0) return rows;
+
+        // Mock data for demo (no VPN to CEZIH)
+        return [
+            {
+                id: 'mock-case-001',
+                patientMbo,
+                title: 'Esencijalna hipertenzija',
+                status: 'active',
+                start: '2024-01-15T09:00:00Z',
+                end: null,
+                diagnosisCode: 'I10',
+                diagnosisDisplay: 'Esencijalna (primarna) hipertenzija',
+                practitionerName: 'Dr. Ivan Horvat',
+            },
+            {
+                id: 'mock-case-002',
+                patientMbo,
+                title: 'Lumbalgia',
+                status: 'active',
+                start: '2025-11-03T10:30:00Z',
+                end: null,
+                diagnosisCode: 'M54.5',
+                diagnosisDisplay: 'Bol u donjem dijelu leđa',
+                practitionerName: 'Dr. Ana Kovačević',
+            },
+            {
+                id: 'mock-case-003',
+                patientMbo,
+                title: 'Akutna infekcija gornjih dišnih puteva',
+                status: 'finished',
+                start: '2026-02-10T08:15:00Z',
+                end: '2026-02-20T16:00:00Z',
+                diagnosisCode: 'J06.9',
+                diagnosisDisplay: 'Akutna infekcija gornjih dišnih puteva, nespecificirana',
+                practitionerName: 'Dr. Ivan Horvat',
+            },
+        ];
     }
 
     // ============================================================
@@ -49,18 +88,21 @@ class CaseService {
         const messageId = uuidv4();
         const localCaseId = data.localCaseId || uuidv4();
 
-        // Save to DB
+        // Save to DB (including diagnosis and practitioner for UI display)
         try {
             db.prepare(`
-                INSERT INTO cases (id, patientMbo, title, status, start, end)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO cases (id, patientMbo, title, status, start, end, diagnosisCode, diagnosisDisplay, practitionerName)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(
                 localCaseId,
                 data.patientMbo,
-                data.title || 'Nova Epizoda',
+                data.title || data.diagnosisDisplay || 'Nova Epizoda',
                 data.status || 'active',
                 data.startDate || new Date().toISOString(),
-                data.endDate || null
+                data.endDate || null,
+                data.diagnosisCode || null,
+                data.diagnosisDisplay || null,
+                data.practitionerId || null
             );
         } catch (err: any) {
             console.error('Case DB Insert error:', err.message);
