@@ -36,48 +36,100 @@ class CaseService {
     /**
      * Retrieve existing health cases for a patient.
      * Searches the local SQLite table for quick rendering.
-     * Falls back to mock data when no real cases exist (demo mode).
+     * Falls back to remote CEZIH search if local is empty or for refresh.
      */
-    async getPatientCases(patientMbo: string, userToken: string): Promise<any[]> {
-        const rows = db.prepare('SELECT * FROM cases WHERE patientMbo = ? ORDER BY start DESC').all(patientMbo);
-        if (rows.length > 0) return rows;
+    async getPatientCases(patientMbo: string, userToken: string, forceRefresh: boolean = false): Promise<any[]> {
+        console.log(`[CaseService] getPatientCases for MBO: ${patientMbo}`);
 
-        // Mock data for demo (no VPN to CEZIH)
-        return [
-            {
-                id: 'mock-case-001',
-                patientMbo,
-                title: 'Esencijalna hipertenzija',
-                status: 'active',
-                start: '2024-01-15T09:00:00Z',
-                end: null,
-                diagnosisCode: 'I10',
-                diagnosisDisplay: 'Esencijalna (primarna) hipertenzija',
-                practitionerName: 'Dr. Ivan Horvat',
-            },
-            {
-                id: 'mock-case-002',
-                patientMbo,
-                title: 'Lumbalgia',
-                status: 'active',
-                start: '2025-11-03T10:30:00Z',
-                end: null,
-                diagnosisCode: 'M54.5',
-                diagnosisDisplay: 'Bol u donjem dijelu leđa',
-                practitionerName: 'Dr. Ana Kovačević',
-            },
-            {
-                id: 'mock-case-003',
-                patientMbo,
-                title: 'Akutna infekcija gornjih dišnih puteva',
-                status: 'finished',
-                start: '2026-02-10T08:15:00Z',
-                end: '2026-02-20T16:00:00Z',
-                diagnosisCode: 'J06.9',
-                diagnosisDisplay: 'Akutna infekcija gornjih dišnih puteva, nespecificirana',
-                practitionerName: 'Dr. Ivan Horvat',
-            },
-        ];
+        // 1. Check local DB
+        const rows = db.prepare('SELECT * FROM cases WHERE patientMbo = ? ORDER BY start DESC').all(patientMbo);
+        if (rows.length > 0 && !forceRefresh) {
+            console.log(`[CaseService] Returning ${rows.length} cases from local DB`);
+            return rows;
+        }
+
+        // 2. Fallback: Search remote CEZIH (IHE QEDm / FHIR search)
+        try {
+            console.log(`[CaseService] No local cases found, searching remote CEZIH...`);
+            const remoteCases = await this.searchRemoteCases(patientMbo, userToken);
+            if (remoteCases.length > 0) {
+                console.log(`[CaseService] Found ${remoteCases.length} remote cases, syncing...`);
+                // Sync to local DB
+                for (const caseData of remoteCases) {
+                    this.saveOrUpdateCase(caseData);
+                }
+                return remoteCases;
+            }
+        } catch (err: any) {
+            console.warn(`[CaseService] Remote search failed: ${err.message}`);
+        }
+
+        // No cases found locally or remotely — return empty array
+        console.log(`[CaseService] No cases found for MBO: ${patientMbo} (local or remote)`);
+        return [];
+    }
+
+    private async searchRemoteCases(patientMbo: string, userToken: string): Promise<any[]> {
+        const headers = authService.getUserAuthHeaders(userToken);
+        const url = `${config.cezih.gatewayBase}${config.cezih.services.healthIssue}/EpisodeOfCare`;
+        const params = {
+            'patient.identifier': `${CEZIH_IDENTIFIERS.MBO}|${patientMbo}`,
+            _sort: '-date',
+            _count: 50
+        };
+
+        try {
+            const response = await axios.get(url, { headers, params });
+            const entries = response.data.entry || [];
+            return entries.map((e: any) => this.mapRemoteCase(e.resource));
+        } catch (err: any) {
+            throw new Error(`CEZIH EpisodeOfCare search failed: ${err.message}`);
+        }
+    }
+
+    private mapRemoteCase(resource: any): any {
+        const patientMbo = resource.patient?.identifier?.value || '';
+        const diagnosis = resource.diagnosis?.[0];
+        const period = resource.period || {};
+
+        return {
+            id: resource.id, // Using CEZIH ID as the primary ID
+            patientMbo,
+            title: diagnosis?.condition?.display || 'Health Case',
+            status: resource.status,
+            start: period.start,
+            end: period.end || null,
+            diagnosisCode: diagnosis?.role?.coding?.[0]?.code || '',
+            diagnosisDisplay: diagnosis?.role?.coding?.[0]?.display || diagnosis?.condition?.display || '',
+            practitionerName: resource.careManager?.display || 'Unknown Practitioner',
+        };
+    }
+
+    private saveOrUpdateCase(data: any) {
+        try {
+            db.prepare(`
+                INSERT INTO cases (id, patientMbo, title, status, start, end, diagnosisCode, diagnosisDisplay, practitionerName)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    status = excluded.status,
+                    end = excluded.end,
+                    title = excluded.title,
+                    diagnosisCode = excluded.diagnosisCode,
+                    diagnosisDisplay = excluded.diagnosisDisplay
+            `).run(
+                data.id,
+                data.patientMbo,
+                data.title,
+                data.status,
+                data.start,
+                data.end,
+                data.diagnosisCode,
+                data.diagnosisDisplay,
+                data.practitionerName
+            );
+        } catch (err: any) {
+            console.error('[CaseService] DB Sync failed:', err.message);
+        }
     }
 
     // ============================================================
@@ -147,30 +199,31 @@ class CaseService {
                                 value: data.patientMbo,
                             },
                         },
-                        ...(data.diagnosisCode ? [{
-                            condition: {
-                                display: data.diagnosisDisplay,
-                            },
-                            role: {
-                                coding: [{
-                                    code: data.diagnosisCode,
+                        ...(data.diagnosisCode ? {
+                            diagnosis: [{
+                                condition: {
                                     display: data.diagnosisDisplay,
-                                }],
-                            },
-                        }] : []),
+                                },
+                                role: {
+                                    coding: [{
+                                        system: ENCOUNTER_CODES.ICD10_HR,
+                                        code: data.diagnosisCode,
+                                        display: data.diagnosisDisplay,
+                                    }],
+                                },
+                            }]
+                        } : {}),
                         period: {
                             start: data.startDate,
                             end: data.endDate,
                         },
                         managingOrganization: {
-                            type: 'Organization',
                             identifier: {
                                 system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
                                 value: data.organizationId,
                             },
                         },
                         careManager: {
-                            type: 'Practitioner',
                             identifier: {
                                 system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
                                 value: data.practitionerId,
@@ -244,6 +297,7 @@ class CaseService {
                                 condition: { display: data.diagnosisDisplay },
                                 role: {
                                     coding: [{
+                                        system: ENCOUNTER_CODES.ICD10_HR,
                                         code: data.diagnosisCode,
                                         display: data.diagnosisDisplay,
                                     }],
@@ -255,9 +309,9 @@ class CaseService {
             ],
         };
 
-        // For logging we need patientMbo, let's get it from data if provided or skip (Case doesn't have it easily available on update if not passed)
         return this.sendMessage(bundle, userToken, 'CASE_UPDATE', caseId, data.patientMbo);
     }
+
 
     private async sendMessage(bundle: any, userToken: string, action: string, caseId?: string, patientMbo?: string): Promise<any> {
         console.log('[CaseService] sendMessage entered');
@@ -270,7 +324,7 @@ class CaseService {
             try {
                 if (signatureService.isAvailable()) {
                     console.log('[CaseService] Attempting to sign bundle');
-                    const { bundle: signedBundle } = await signatureService.signBundle(bundle);
+                    const { bundle: signedBundle } = await signatureService.signBundle(bundle, undefined, userToken);
                     bundleToSend = signedBundle;
                     console.log('[CaseService] Bundle signed successfully');
                 } else {
@@ -283,35 +337,61 @@ class CaseService {
 
             console.log('[CaseService] Preparing to send to CEZIH...');
             const headers = authService.getUserAuthHeaders(userToken);
-            const url = `${config.cezih.fhirUrl}/$process-message`;
-
+            const url = `${config.cezih.gatewayBase}${config.cezih.services.healthIssue}/$process-message`;
+            console.log('[CaseService] Sending to:', url);
             const response = await axios.post(url, bundleToSend, { headers });
 
             console.log('[CaseService] Message sent successfully');
             finalResponse = response.data;
         } catch (error: any) {
-            console.warn('[CaseService] CEZIH send failed (intercepted):', error.message);
+            const cezihStatus = error.response?.status;
+            const cezihBody = error.response?.data;
+            console.warn(`[CaseService] CEZIH send failed: HTTP ${cezihStatus || '?'}: ${error.message}`);
+            console.warn(`[CaseService] CEZIH Error Body:`, JSON.stringify(cezihBody)?.slice(0, 2000) || '""');
             errorMessage = error.message;
-            // Return a mock success response so the UI doesn't break
+
+            const cezihError = (() => {
+                if (!cezihBody) return error.message;
+                if (typeof cezihBody === 'string') return cezihBody.slice(0, 2000);
+
+                // Try to find OperationOutcome in a Bundle response
+                if (cezihBody.resourceType === 'Bundle') {
+                    const outcome = cezihBody.entry?.find((e: any) => e.resource?.resourceType === 'OperationOutcome')?.resource;
+                    if (outcome) {
+                        return outcome.issue?.[0]?.details?.coding?.[0]?.display
+                            || outcome.issue?.[0]?.diagnostics
+                            || JSON.stringify(outcome).slice(0, 2000);
+                    }
+                }
+
+                return cezihBody?.issue?.[0]?.diagnostics
+                    || cezihBody?.error?.errorDescription
+                    || JSON.stringify(cezihBody).slice(0, 2000);
+            })();
+
             finalResponse = {
-                resourceType: 'Bundle',
-                type: 'message',
-                entry: [{ resource: { resourceType: 'MessageHeader', response: { code: 'ok' } } }]
+                localOnly: true,
+                cezihStatus: 'failed',
+                cezihError: `HTTP ${cezihStatus}: ${cezihError}`,
+                id: undefined,
             };
         } finally {
-            // ASYNC Log to Audit service
             auditService.log({
-                visitId: undefined, // Health case logging might not have a visitId yet
+                visitId: undefined,
                 patientMbo,
                 action,
                 direction: 'OUTGOING_CEZIH',
-                status: errorMessage && !finalResponse ? 'ERROR' : 'SUCCESS',
+                status: errorMessage ? 'ERROR' : 'SUCCESS',
                 payload_req: bundleToSend,
                 payload_res: finalResponse,
                 error_msg: errorMessage
             });
         }
-        return finalResponse;
+
+        return {
+            success: true,
+            result: finalResponse ?? { cezihStatus: 'sent' },
+        };
     }
 }
 

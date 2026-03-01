@@ -11,3 +11,5 @@ export { clinicalDocumentService } from './clinical-document.service';
 export { settingsService } from './settings.service';
 export { auditService } from './audit.service';
 export { validationService } from './validation.service';
+export { smartCardGatewayAuthService } from './smartcard-gateway-auth.service';
+

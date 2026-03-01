@@ -93,7 +93,7 @@ class VisitService {
                 data.endDate || null,
                 data.class,
                 'regular',
-                'Dr. Ivan Horvat'
+                config.practitioner.name || 'Dr. Ivan Prpić'
             );
             console.log('[VisitService] Saved visit to local DB:', localVisitId);
         } catch (dbError: any) {
@@ -466,7 +466,7 @@ class VisitService {
             // Sign the bundle before sending (CEZIH requires JWS digital signature)
             try {
                 if (signatureService.isAvailable()) {
-                    const { bundle: signedBundle } = await signatureService.signBundle(bundle);
+                    const { bundle: signedBundle } = await signatureService.signBundle(bundle, undefined, userToken);
                     bundleToSend = signedBundle;
                     console.log('[VisitService] Bundle signed successfully');
                 } else {
@@ -478,28 +478,38 @@ class VisitService {
             }
 
             const headers = authService.getUserAuthHeaders(userToken);
-            const url = `${config.cezih.fhirUrl}/$process-message`;
+            const url = `${config.cezih.gatewayBase}${config.cezih.services.visit}/$process-message`;
+            console.log('[VisitService] Sending to:', url);
             const response = await axios.post(url, bundleToSend, { headers });
 
             console.log('[VisitService] Message sent successfully');
             finalResponse = response.data;
         } catch (error: any) {
-            console.warn('[VisitService] CEZIH send failed (expected without VPN).');
+            console.warn('[VisitService] CEZIH send failed:', error.message);
             errorMessage = error.message;
-            // Return a mock success response so the UI doesn't break
+
+            // If it's a real 404 from the server, we should NOT mask it as success
+            // 404 usually means a referenced resource (like a case) is missing on the server
+            if (error.response?.status === 404) {
+                console.error('[VisitService] Server returned 404 — missing resource error');
+                throw new Error(`CEZIH server reported 404: Resource not found. This often happens when referencing a mock case ID that does not exist on the remote server.`);
+            }
+
+            // Fallback for network/VPN issues (demo mode)
             finalResponse = {
                 resourceType: 'Bundle',
                 type: 'message',
                 entry: [{ resource: { resourceType: 'MessageHeader', response: { code: 'ok' } } }]
             };
-        } finally {
+        }
+        finally {
             // Await the audit log write so it's not dropped as fire-and-forget
             await auditService.log({
                 visitId,
                 patientMbo,
                 action,
                 direction: 'OUTGOING_CEZIH',
-                status: errorMessage && !finalResponse ? 'ERROR' : 'SUCCESS',
+                status: errorMessage ? 'ERROR' : 'SUCCESS',
                 payload_req: bundleToSend,
                 payload_res: finalResponse,
                 error_msg: errorMessage

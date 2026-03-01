@@ -6,7 +6,8 @@ import {
     User, Activity, FileText, Send, Save, XCircle, CheckCircle,
     AlertTriangle, Clock, Calendar, ArrowLeft, Info, Eye, Code,
     ChevronRight, CheckCircle2, ShieldCheck, Database,
-    ArrowUpRight, ArrowDownLeft, ClipboardList
+    ArrowUpRight, ArrowDownLeft, ClipboardList,
+    Smartphone, Loader2, SmartphoneNfc, Bell
 } from 'lucide-react';
 
 function ClinicalWorkspace() {
@@ -46,6 +47,13 @@ function ClinicalWorkspace() {
     const [inspectionLog, setInspectionLog] = useState<any>(null);
     const [isInspectorOpen, setIsInspectorOpen] = useState(false);
 
+    // Signing Flow State
+    const [isSigningModalOpen, setIsSigningModalOpen] = useState(false);
+    const [signingStatus, setSigningStatus] = useState<'waiting' | 'signed' | 'submitting' | 'success' | 'error'>('waiting');
+    const [signingError, setSigningError] = useState<string | null>(null);
+    const [transactionCode, setTransactionCode] = useState<string | null>(null);
+    const [currentDocOid, setCurrentDocOid] = useState<string | null>(null);
+
     useEffect(() => {
         // Fetch initial suggestions (top 15)
         fetch('/api/terminology/diagnoses?q=')
@@ -63,16 +71,22 @@ function ClinicalWorkspace() {
 
         // Fetch active cases for this patient (TC 15)
         if (effectiveMbo) {
-            fetch(`/api/case/patient/${effectiveMbo}`)
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        setPatientCases(data.cases.filter((c: any) => c.status === 'active'));
-                    }
-                })
-                .catch(() => { });
+            refreshCases();
         }
     }, []);
+
+    const refreshCases = async (force: boolean = false) => {
+        if (!effectiveMbo) return;
+        try {
+            const res = await fetch(`/api/case/patient/${effectiveMbo}${force ? '?refresh=true' : ''}`);
+            const data = await res.json();
+            if (data.success) {
+                setPatientCases(data.cases.filter((c: any) => c.status === 'active'));
+            }
+        } catch (err) {
+            console.error('Failed to load cases', err);
+        }
+    };
 
     // Poll for audit logs when visit is active — stop when finished
     useEffect(() => {
@@ -182,10 +196,19 @@ function ClinicalWorkspace() {
             const data = await res.json();
 
             if (data.success) {
-                const successMsg = `Dokument uspješno poslan! OID: ${data.result.documentOid}`;
-                addLog(successMsg);
-                addLog('Potpisano i arhivirano u CEZIH (MHD ITI-65).');
-                alert(successMsg);
+                if (data.result.pendingSignature) {
+                    // Start asynchronous remote signing flow
+                    setTransactionCode(data.result.transactionCode);
+                    setCurrentDocOid(data.result.documentOid);
+                    setSigningStatus('waiting');
+                    setIsSigningModalOpen(true);
+                    startPolling(data.result.transactionCode, data.result.documentOid);
+                } else {
+                    const successMsg = `Dokument uspješno poslan! OID: ${data.result.documentOid}`;
+                    addLog(successMsg);
+                    addLog('Potpisano i arhivirano u CEZIH (MHD ITI-65).');
+                    alert(successMsg);
+                }
             } else {
                 const errorMsg = `Greška slanja: ${data.error}`;
                 addLog(errorMsg);
@@ -195,6 +218,61 @@ function ClinicalWorkspace() {
             addLog(`Greška komunikacije: ${err.message}`);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const startPolling = async (tCode: string, docOid: string) => {
+        let attempts = 0;
+        const maxAttempts = 120; // 5 minutes (2.5s interval)
+        const pollInterval = 2500;
+
+        const interval = setInterval(async () => {
+            attempts++;
+            if (attempts > maxAttempts) {
+                clearInterval(interval);
+                setSigningStatus('error');
+                setSigningError('Isteklo vrijeme za potpisivanje (timeout).');
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/document/remote-sign/status/${tCode}`);
+                const data = await res.json();
+
+                if (data.success && data.isSigned) {
+                    clearInterval(interval);
+                    setSigningStatus('signed');
+                    completeSubmission(tCode, docOid);
+                }
+            } catch (err) {
+                console.warn('Polling error:', err);
+            }
+        }, pollInterval);
+    };
+
+    const completeSubmission = async (tCode: string, docOid: string) => {
+        setSigningStatus('submitting');
+        try {
+            const res = await fetch('/api/document/send/complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    transactionCode: tCode,
+                    documentOid: docOid
+                })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                setSigningStatus('success');
+                addLog(`Uspješno potpisano i poslano na CEZIH! OID: ${docOid}`);
+            } else {
+                setSigningStatus('error');
+                setSigningError(data.error || 'Greška pri dovršavanju slanja.');
+            }
+        } catch (err: any) {
+            setSigningStatus('error');
+            setSigningError(err.message);
         }
     };
 
@@ -297,18 +375,27 @@ function ClinicalWorkspace() {
                             {/* Case selector (TC 15-17) */}
                             <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-slate-200">
                                 <ClipboardList className="w-4 h-4 text-amber-500" />
-                                <select
-                                    value={selectedCaseId}
-                                    onChange={(e) => setSelectedCaseId(e.target.value)}
-                                    className="text-sm text-slate-700 outline-none bg-transparent font-medium max-w-[200px]"
-                                >
-                                    <option value="">Bez slučaja</option>
-                                    {patientCases.map((c: any) => (
-                                        <option key={c.id} value={c.id}>
-                                            {c.diagnosisCode ? `${c.diagnosisCode} — ` : ''}{c.title || c.diagnosisDisplay || 'Slučaj'}
-                                        </option>
-                                    ))}
-                                </select>
+                                <div className="flex items-center gap-2">
+                                    <select
+                                        value={selectedCaseId}
+                                        onChange={(e) => setSelectedCaseId(e.target.value)}
+                                        className="text-sm text-slate-700 outline-none bg-transparent font-medium max-w-[150px]"
+                                    >
+                                        <option value="">Bez slučaja</option>
+                                        {patientCases.map((c: any) => (
+                                            <option key={c.id} value={c.id}>
+                                                {c.diagnosisCode ? `${c.diagnosisCode} — ` : ''}{c.title || c.diagnosisDisplay || 'Slučaj'}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <button
+                                        onClick={() => refreshCases(true)}
+                                        className="p-1 hover:bg-amber-50 rounded text-amber-600"
+                                        title="Osvježi slučajeve s CEZIH-a"
+                                    >
+                                        <Database className="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
                             </div>
                             <button
                                 onClick={startVisit}
@@ -716,6 +803,104 @@ function ClinicalWorkspace() {
                             >
                                 Zatvori
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Signing Modal */}
+            {isSigningModalOpen && (
+                <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col border border-slate-200 animate-in fade-in zoom-in duration-300">
+                        <div className="p-8 text-center space-y-6">
+                            {signingStatus === 'waiting' && (
+                                <>
+                                    <div className="mx-auto w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center relative">
+                                        <Smartphone className="w-10 h-10 text-blue-600" />
+                                        <div className="absolute inset-0 rounded-full border-4 border-blue-500 border-t-transparent animate-spin" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <h3 className="text-xl font-bold text-slate-800">Čekam potpis...</h3>
+                                        <p className="text-sm text-slate-500">
+                                            Provjerite svoju Certilia mobilnu aplikaciju i odobrite zahtjev za potpisivanje.
+                                        </p>
+                                    </div>
+                                    <div className="pt-4 flex items-center justify-center gap-2 text-[10px] font-mono text-slate-400">
+                                        <ShieldCheck className="w-3 h-3" />
+                                        TRANSACTION: {transactionCode}
+                                    </div>
+                                </>
+                            )}
+
+                            {signingStatus === 'signed' && (
+                                <>
+                                    <div className="mx-auto w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center">
+                                        <CheckCircle2 className="w-10 h-10 text-emerald-600" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <h3 className="text-xl font-bold text-emerald-800">Uspješno potpisano!</h3>
+                                        <p className="text-sm text-slate-500">
+                                            Dohvaćam potpisan dokument i šaljem ga na CEZIH...
+                                        </p>
+                                    </div>
+                                    <Loader2 className="w-6 h-6 text-emerald-600 animate-spin mx-auto" />
+                                </>
+                            )}
+
+                            {signingStatus === 'submitting' && (
+                                <>
+                                    <div className="mx-auto w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center">
+                                        <Database className="w-10 h-10 text-blue-600 animate-pulse" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <h3 className="text-xl font-bold text-slate-800">Slanje na CEZIH...</h3>
+                                        <p className="text-sm text-slate-500">
+                                            Završavam ITI-65 transakciju i arhiviram dokument.
+                                        </p>
+                                    </div>
+                                    <Loader2 className="w-6 h-6 text-blue-600 animate-spin mx-auto" />
+                                </>
+                            )}
+
+                            {signingStatus === 'success' && (
+                                <>
+                                    <div className="mx-auto w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center">
+                                        <CheckCircle className="w-10 h-10 text-emerald-600" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <h3 className="text-xl font-bold text-slate-800">Dokument je poslan!</h3>
+                                        <p className="text-sm text-slate-500">
+                                            Vaš nalaz je uspješno potpisan i trajno pohranjen u CEZIH repozitorij.
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={() => setIsSigningModalOpen(false)}
+                                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition-colors"
+                                    >
+                                        U redu
+                                    </button>
+                                </>
+                            )}
+
+                            {signingStatus === 'error' && (
+                                <>
+                                    <div className="mx-auto w-20 h-20 bg-rose-50 rounded-full flex items-center justify-center">
+                                        <AlertTriangle className="w-10 h-10 text-rose-600" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <h3 className="text-xl font-bold text-slate-800">Greška</h3>
+                                        <p className="text-sm text-rose-600 font-medium">
+                                            {signingError || 'Došlo je do pogreške prilikom potpisivanja.'}
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={() => setIsSigningModalOpen(false)}
+                                        className="w-full py-3 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold transition-colors"
+                                    >
+                                        Zatvori
+                                    </button>
+                                </>
+                            )}
                         </div>
                     </div>
                 </div>

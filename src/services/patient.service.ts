@@ -99,6 +99,15 @@ class PatientService {
         if (results.length === 0) {
             throw new Error(`Patient with MBO ${mbo} not found on CEZIH.`);
         }
+
+        // Deep Sync: Also refresh cases
+        try {
+            const { caseService } = require('./index'); // Avoid circular dep if needed, or import at top
+            await caseService.getPatientCases(mbo, userToken, true);
+        } catch (caseErr: any) {
+            console.warn('[PatientService] Deep sync (cases) failed:', caseErr.message);
+        }
+
         return results[0];
     }
 
@@ -129,31 +138,20 @@ class PatientService {
 
             // 2. Fallback to CEZIH API
             const headers = authService.getUserAuthHeaders(userToken);
-            const url = `${config.cezih.fhirUrl}/Patient?${query}`;
+            const baseUrl = `${config.cezih.gatewayBase}${config.cezih.services.patient}/Patient`;
 
-            // MOCK MODE: If MBO is 000000000, return a mock patient for demonstration
-            if (query.includes('000000000')) {
-                console.log('[PatientService] MOCK MODE: Returning demo patient for MBO 000000000');
-                const mockPatient: PatientDemographics = {
-                    id: 'MOCK-000000000',
-                    mbo: '000000000',
-                    oib: '99999999999',
-                    name: {
-                        text: 'Marko Marković (DEMO)',
-                        family: 'Marković',
-                        given: ['Marko', '(DEMO)']
-                    },
-                    gender: 'male',
-                    birthDate: '1975-05-15',
-                    active: true,
-                    raw: { resourceType: 'Patient' }
-                };
-                return [mockPatient];
-            }
+            // Parse query into params for proper URL encoding
+            // e.g., "identifier=http://...MBO|999999423" → { identifier: "http://...MBO|999999423" }
+            const params: Record<string, string> = {};
+            query.split('&').forEach(part => {
+                const [key, ...valueParts] = part.split('=');
+                params[key] = valueParts.join('=');
+            });
 
-            console.log('[PatientService] Searching CEZIH:', url);
+            console.log('[PatientService] Searching CEZIH:', baseUrl);
+            console.log('[PatientService] Params:', JSON.stringify(params));
             console.log('[PatientService] Headers:', JSON.stringify(Object.keys(headers)));
-            const response = await axios.get(url, { headers });
+            const response = await axios.get(baseUrl, { headers, params });
 
             if (response.data.resourceType === 'Patient') {
                 const patient = this.mapPatient(response.data);

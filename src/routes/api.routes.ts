@@ -3,6 +3,8 @@
  * Each route group maps to a set of test cases.
  */
 import { Router, Request, Response } from 'express';
+import { spawn } from 'child_process';
+import * as path from 'path';
 import { CertiliaAuthClient } from '../services/certilia-auth.service';
 import {
     authService,
@@ -15,6 +17,7 @@ import {
     clinicalDocumentService,
     settingsService,
     auditService,
+    smartCardGatewayAuthService,
 } from '../services';
 import db from '../db/index';
 import { ENCOUNTER_CODES } from '../types';
@@ -104,7 +107,24 @@ router.get('/auth/status', (_req: Request, res: Response) => {
     res.json(status);
 });
 
-// Legacy: Smart Card auth URL (backward compat — now redirects to /auth/initiate)
+// Return gateway session headers (for use in test scripts / remote signing)
+router.get('/auth/gateway-token', (_req: Request, res: Response) => {
+    try {
+        if (!authService.hasGatewaySession()) {
+            return res.status(401).json({ error: 'No active gateway session' });
+        }
+        const headers = authService.getGatewayAuthHeaders();
+        res.json({
+            success: true,
+            cookieHeader: headers['Cookie'] || '',
+            sessionToken: headers[process.env.CEZIH_SSO_SESSION_HEADER || 'mod_auth_openid_session'] || '',
+        });
+    } catch (error: any) {
+        res.status(401).json({ error: error.message });
+    }
+});
+
+// Legacy: Smart Card auth URL (backward compat)
 router.get('/auth/smartcard', async (req: Request, res: Response) => {
     try {
         const result = await authService.initiateGatewayAuth('smartcard');
@@ -112,6 +132,97 @@ router.get('/auth/smartcard', async (req: Request, res: Response) => {
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
+});
+
+// TC1: Backend smart card TLS authentication via PKCS#11
+// The backend opens a direct TLS connection to the CEZIH gateway using
+// the IDEN certificate from the card. The private key never leaves hardware.
+router.post('/auth/smartcard/gateway', async (_req: Request, res: Response) => {
+    try {
+        console.log('[API] TC1: Backend smart card auth initiated');
+        const result = await smartCardGatewayAuthService.authenticate();
+        if (result.success) {
+            res.json({
+                success: true,
+                message: 'Smart card autentifikacija uspješna',
+                cookiesCount: result.cookies?.length ?? 0,
+            });
+        } else {
+            res.status(401).json({ success: false, error: result.error });
+        }
+    } catch (error: any) {
+        console.error('[API] Smart card auth error:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// TC1 — Playwright-based gateway cookie grabber
+// Spawns grab-gateway-cookie.js which opens a visible browser.
+// User authenticates with smart card, cookie is auto-injected into backend.
+// Frontend should poll /api/auth/status until authenticated.
+let playwrightSession: { pid: number; startedAt: number } | null = null;
+
+router.post('/auth/smartcard/playwright-start', (_req: Request, res: Response) => {
+    try {
+        // Prevent duplicate launches
+        if (playwrightSession) {
+            const ageMs = Date.now() - playwrightSession.startedAt;
+            if (ageMs < 6 * 60 * 1000) { // still within 6 min window
+                return res.json({
+                    success: true,
+                    alreadyRunning: true,
+                    message: 'Browser je već otvoren. Dovršite autentifikaciju u prozoru koji se otvorio.',
+                    pid: playwrightSession.pid,
+                });
+            }
+        }
+
+        const scriptPath = path.join(process.cwd(), 'scripts', 'grab-gateway-cookie.js');
+
+        const child = spawn('node', [scriptPath], {
+            detached: false,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env },
+            windowsHide: false, // Must be false — Playwright browser must be visible
+        });
+
+        playwrightSession = { pid: child.pid!, startedAt: Date.now() };
+        console.log(`[SmartCard/Playwright] Started grab-gateway-cookie.js (PID: ${child.pid})`);
+
+        child.stdout?.on('data', (data: Buffer) => {
+            process.stdout.write('[GrabCookie] ' + data.toString());
+        });
+        child.stderr?.on('data', (data: Buffer) => {
+            process.stderr.write('[GrabCookie] ' + data.toString());
+        });
+        child.on('close', (code: number) => {
+            console.log(`[SmartCard/Playwright] Process exited (code: ${code})`);
+            playwrightSession = null;
+        });
+        child.on('error', (err: Error) => {
+            console.error('[SmartCard/Playwright] Process error:', err.message);
+            playwrightSession = null;
+        });
+
+        res.json({
+            success: true,
+            message: 'Browser se otvara. Odaberite IDEN certifikat i unesite PIN.',
+            pid: child.pid,
+        });
+
+    } catch (error: any) {
+        console.error('[SmartCard/Playwright] Start error:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Check if Playwright session is still running
+router.get('/auth/smartcard/playwright-status', (_req: Request, res: Response) => {
+    res.json({
+        running: !!playwrightSession,
+        pid: playwrightSession?.pid,
+        ageMs: playwrightSession ? Date.now() - playwrightSession.startedAt : null,
+    });
 });
 
 // Legacy: Certilia auth URL (backward compat)
@@ -317,10 +428,11 @@ router.get('/audit/logs/:visitId', (req: Request, res: Response) => {
 
 router.get('/registry/organizations', async (req: Request, res: Response) => {
     try {
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
         const organizations = await registryService.searchOrganizations({
             active: req.query.active === 'true',
             name: req.query.name as string,
-        });
+        }, userToken);
         res.json({ success: true, count: organizations.length, organizations });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -329,16 +441,31 @@ router.get('/registry/organizations', async (req: Request, res: Response) => {
 
 router.get('/registry/practitioners', async (req: Request, res: Response) => {
     try {
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
         const practitioners = await registryService.searchPractitioners({
             name: req.query.name as string,
-        });
+            identifier: req.query.identifier as string,
+        }, userToken);
         res.json({ success: true, count: practitioners.length, practitioners });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
 });
 
-// Patient Routes (Test Cases 10, 11 + Registry/Chart)
+router.get('/registry/healthcare-services', async (req: Request, res: Response) => {
+    try {
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
+        const services = await registryService.searchHealthcareServices({
+            active: req.query.active !== undefined ? req.query.active === 'true' : undefined,
+            organization: req.query.organization as string,
+        }, userToken);
+        res.json({ success: true, count: services.length, services });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
 // ============================================================
 router.use('/patient', patientRoutes);
 
@@ -446,7 +573,8 @@ router.post('/settings/menu', (req: Request, res: Response) => {
 router.get('/case/patient/:mbo', async (req: Request, res: Response) => {
     try {
         const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
-        const cases = await caseService.getPatientCases(req.params.mbo as string, userToken);
+        const forceRefresh = req.query.refresh === 'true';
+        const cases = await caseService.getPatientCases(req.params.mbo as string, userToken, forceRefresh);
         res.json({ success: true, count: cases.length, cases });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -485,6 +613,28 @@ router.post('/document/send', async (req: Request, res: Response) => {
     } catch (error: any) {
         const isValidationError = error.message?.includes('Validacijske pogreške');
         res.status(isValidationError ? 400 : 500).json({ error: error.message });
+    }
+});
+
+router.get('/document/remote-sign/status/:transactionCode', async (req: Request, res: Response) => {
+    try {
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
+        const { transactionCode } = req.params;
+        const isSigned = await clinicalDocumentService.checkRemoteSigningStatus(transactionCode as string, userToken);
+        res.json({ success: true, isSigned });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.post('/document/send/complete', async (req: Request, res: Response) => {
+    try {
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
+        const { documentOid, transactionCode } = req.body;
+        const result = await clinicalDocumentService.completeRemoteSigning(documentOid, transactionCode, userToken);
+        res.json({ success: true, result });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
     }
 });
 

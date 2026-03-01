@@ -38,3 +38,7 @@ next.err
 server.err  
 client/next.err  
 *.log  
+
+# Temporary/debug scripts
+tmp/
+tmp_get_links*.js

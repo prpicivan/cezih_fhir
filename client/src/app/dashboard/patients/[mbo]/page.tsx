@@ -4,11 +4,13 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
-    FileText, Plus, User, Calendar,
+    FileText, User, Calendar,
     RefreshCw, CheckCircle2, AlertCircle,
     Stethoscope, ClipboardList, Activity,
-    History, ChevronRight, Download
+    History, ChevronRight, Edit2, Trash2, Plus
 } from 'lucide-react';
+import ChangeDocumentModal from './ChangeDocumentModal';
+import CaseModal from './CaseModal';
 
 export default function PatientChartPage() {
     const params = useParams();
@@ -17,15 +19,19 @@ export default function PatientChartPage() {
 
     const [chartData, setChartData] = useState<any>(null);
     const [viewingDocument, setViewingDocument] = useState<any>(null);
+    const [editingDocument, setEditingDocument] = useState<any>(null);
+    // null = closed, undefined = create mode, object = edit mode
+    const [caseModal, setCaseModal] = useState<any | null | undefined>(null);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
+    const [syncingCases, setSyncingCases] = useState(false);
     const [retrieving, setRetrieving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    const fetchChartData = async () => {
-        setLoading(true);
+    const fetchChartData = async (refresh: boolean = false) => {
+        setLoading(!refresh); // Only show full loading if not a background refresh
         try {
-            const res = await fetch(`/api/patient/${mbo}/chart`);
+            const res = await fetch(`/api/patient/${mbo}/chart${refresh ? '?refresh=true' : ''}`);
             const data = await res.json();
             if (data.success) {
                 setChartData(data.chart);
@@ -47,17 +53,27 @@ export default function PatientChartPage() {
     const handleSync = async () => {
         setSyncing(true);
         try {
-            // Re-fetch from remote (this updates local DB via PatientService and increments lastSyncAt)
-            await fetch(`/api/patient/search?mbo=${mbo}`);
-            await fetchChartData();
+            // Global Deep Sync
+            await fetchChartData(true);
         } finally {
             setSyncing(false);
+        }
+    };
+
+    const handleSyncCases = async () => {
+        setSyncingCases(true);
+        try {
+            // Force refresh cases only (via chart route with refresh=true)
+            await fetchChartData(true);
+        } finally {
+            setSyncingCases(false);
         }
     };
 
     const handleStartVisit = (caseId?: string) => {
         const query = new URLSearchParams({
             patientMbo: mbo,
+            patientId: patient?.id || '', // Include FHIR technical ID
             ...(caseId && { caseId })
         });
         router.push(`/dashboard/visit/new?${query.toString()}`);
@@ -78,6 +94,25 @@ export default function PatientChartPage() {
             fetchChartData(); // Refresh to reflect the change
         } catch (err) {
             console.error('Failed to close case', err);
+        }
+    };
+
+    const handleCancelDocument = async (doc: any) => {
+        if (!confirm(`Jeste li sigurni da želite stornirati dokument ${doc.id}?\nOva radnja se ne može poništiti.`)) return;
+        try {
+            const res = await fetch('/api/document/cancel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ documentOid: doc.id }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                fetchChartData();
+            } else {
+                alert('Greška pri storniranju: ' + (data.error || 'Nepoznata pogreška'));
+            }
+        } catch {
+            alert('Greška u komunikaciji s poslužiteljem.');
         }
     };
 
@@ -276,24 +311,88 @@ export default function PatientChartPage() {
                         </div>
                         <div className="p-2 space-y-1">
                             {allDocuments && allDocuments.length > 0 ? (
-                                allDocuments.map((doc: any) => (
-                                    <button
-                                        key={doc.id}
-                                        onClick={() => handleRetrieve(doc)}
-                                        className={`w-full text-left p-3 rounded-2xl transition-all flex items-center gap-3 group ${viewingDocument?.id === doc.id ? 'bg-blue-50 border border-blue-100' : 'hover:bg-slate-50 border border-transparent'}`}
-                                    >
-                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${viewingDocument?.id === doc.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400 group-hover:bg-white group-hover:text-blue-600'}`}>
-                                            <FileText className="w-5 h-5" />
+                                allDocuments.map((doc: any) => {
+                                    const isDeprecated = doc.status === 'replaced' || doc.status === 'cancelled';
+                                    const isActive = viewingDocument?.id === doc.id;
+                                    return (
+                                        <div
+                                            key={doc.id}
+                                            className={`rounded-2xl transition-all group ${isDeprecated
+                                                ? 'ml-4 border-l-2 border-slate-200 pl-2'
+                                                : ''
+                                                }`}
+                                        >
+                                            <div className={`w-full p-2.5 rounded-xl transition-all ${isActive
+                                                ? 'bg-blue-50 border border-blue-100'
+                                                : isDeprecated
+                                                    ? 'hover:bg-slate-50/50 border border-transparent opacity-60'
+                                                    : 'hover:bg-slate-50 border border-transparent'
+                                                }`}>
+                                                <button
+                                                    onClick={() => handleRetrieve(doc)}
+                                                    className="w-full text-left flex items-center gap-3"
+                                                >
+                                                    <div className={`rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${isDeprecated
+                                                        ? 'w-8 h-8 bg-slate-100 text-slate-300'
+                                                        : isActive
+                                                            ? 'w-10 h-10 bg-blue-600 text-white'
+                                                            : 'w-10 h-10 bg-slate-100 text-slate-400 group-hover:bg-white group-hover:text-blue-600'
+                                                        }`}>
+                                                        <FileText className={isDeprecated ? 'w-4 h-4' : 'w-5 h-5'} />
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                                            <p className={`font-bold text-xs truncate ${isActive ? 'text-blue-900' : isDeprecated ? 'text-slate-400' : 'text-slate-700'
+                                                                }`}>{doc.type || 'Nalaz'}</p>
+                                                            {isDeprecated && (
+                                                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${doc.status === 'cancelled'
+                                                                    ? 'bg-rose-50 text-rose-400'
+                                                                    : 'bg-slate-100 text-slate-400'
+                                                                    }`}>
+                                                                    {doc.status === 'cancelled' ? 'storniran' : 'zamijenjen'}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <p className={`text-[10px] font-bold uppercase ${isDeprecated ? 'text-slate-300' : 'text-slate-400'}`}>
+                                                            {new Date(doc.createdAt).toLocaleDateString('hr-HR')}
+                                                        </p>
+                                                        {doc.diagnosisCode && (
+                                                            <p className={`text-[10px] mt-0.5 ${isDeprecated ? 'text-slate-300' : 'text-slate-500'}`}>
+                                                                <span className="font-mono font-bold">{doc.diagnosisCode}</span>
+                                                                {doc.diagnosisDisplay && (
+                                                                    <span className="font-medium"> — {doc.diagnosisDisplay}</span>
+                                                                )}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                    {doc.isRemote && (
+                                                        <div className="w-2 h-2 bg-blue-400 rounded-full flex-shrink-0" title="Udaljeni dokument"></div>
+                                                    )}
+                                                </button>
+                                                {/* Edit / Remove actions — only for active local docs */}
+                                                {!doc.isRemote && !isDeprecated && (
+                                                    <div className="flex gap-1.5 mt-2 pl-13">
+                                                        <button
+                                                            onClick={() => setEditingDocument(doc)}
+                                                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-all"
+                                                        >
+                                                            <Edit2 className="w-3 h-3" />
+                                                            Izmijeni
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleCancelDocument(doc)}
+                                                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-all"
+                                                        >
+                                                            <Trash2 className="w-3 h-3" />
+                                                            Storniraj
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
-                                        <div className="min-w-0">
-                                            <p className={`font-bold text-xs truncate ${viewingDocument?.id === doc.id ? 'text-blue-900' : 'text-slate-700'}`}>{doc.type || 'Nalaz'}</p>
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase">{new Date(doc.createdAt).toLocaleDateString('hr-HR')}</p>
-                                        </div>
-                                        {doc.isRemote && (
-                                            <div className="ml-auto w-2 h-2 bg-blue-400 rounded-full" title="Udaljeni dokument"></div>
-                                        )}
-                                    </button>
-                                ))
+                                    );
+                                })
+
                             ) : (
                                 <p className="text-center py-6 text-xs text-slate-400 italic">Nema dostupnih dokumenata.</p>
                             )}
@@ -302,13 +401,29 @@ export default function PatientChartPage() {
                     {/* Zdravstveni slučajevi (TC 15-17) */}
                     <section className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
                         <div className="p-5 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between">
-                            <h3 className="font-black text-slate-800 flex items-center gap-2">
+                            <div className="flex items-center gap-2">
                                 <ClipboardList className="w-5 h-5 text-amber-500" />
-                                Zdravstveni slučajevi
-                            </h3>
-                            <span className="bg-amber-50 text-amber-600 text-[10px] font-black px-2 py-0.5 rounded-full border border-amber-100">
-                                TC 15-17
-                            </span>
+                                <h3 className="font-black text-slate-800">Zdravstveni slučajevi</h3>
+                                <button
+                                    onClick={handleSyncCases}
+                                    disabled={syncingCases}
+                                    className={`p-1 hover:bg-slate-200 rounded-md transition-colors ${syncingCases ? 'animate-spin text-amber-500' : 'text-slate-400'}`}
+                                >
+                                    <RefreshCw className="w-3.5 h-3.5" />
+                                </button>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => setCaseModal(undefined)}
+                                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-all"
+                                >
+                                    <Plus className="w-3 h-3" />
+                                    Novi slučaj
+                                </button>
+                                <span className="bg-amber-50 text-amber-600 text-[10px] font-black px-2 py-0.5 rounded-full border border-amber-100">
+                                    TC 15-17
+                                </span>
+                            </div>
                         </div>
                         <div className="p-3 space-y-2">
                             {allCases.length > 0 ? (
@@ -367,6 +482,13 @@ export default function PatientChartPage() {
                                                         Nastavi liječenje
                                                     </button>
                                                     <button
+                                                        onClick={(e) => { e.preventDefault(); setCaseModal(c); }}
+                                                        className="py-1.5 px-3 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-600 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all"
+                                                    >
+                                                        <Edit2 className="w-3 h-3 inline mr-1" />
+                                                        Uredi
+                                                    </button>
+                                                    <button
                                                         onClick={(e) => { e.preventDefault(); handleCloseCase(c.id); }}
                                                         className="py-1.5 px-3 bg-white border border-rose-200 rounded-lg text-xs font-black text-rose-500 hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all"
                                                     >
@@ -410,7 +532,33 @@ export default function PatientChartPage() {
                         </div>
                     </section>
                 </aside>
-            </div >
-        </div >
+            </div>
+
+            {/* Change Document Modal */}
+            {editingDocument && (
+                <ChangeDocumentModal
+                    doc={editingDocument}
+                    patientMbo={mbo}
+                    onClose={() => setEditingDocument(null)}
+                    onSuccess={() => {
+                        setEditingDocument(null);
+                        fetchChartData();
+                    }}
+                />
+            )}
+
+            {/* Case Modal: Novi slučaj (TC16) or Uredi slučaj (TC17) */}
+            {caseModal !== null && (
+                <CaseModal
+                    existingCase={caseModal === undefined ? null : caseModal}
+                    patientMbo={mbo}
+                    onClose={() => setCaseModal(null)}
+                    onSuccess={() => {
+                        setCaseModal(null);
+                        fetchChartData();
+                    }}
+                />
+            )}
+        </div>
     );
 }

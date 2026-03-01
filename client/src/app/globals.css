@@ -2,13 +2,20 @@
 
 :root {
   --background: #f8fafc;
-  --foreground: #0f172a;
-  --primary: #0ea5e9;
+  --foreground: #1e293b;
+  --primary: #14b8a6;
   --primary-foreground: #ffffff;
+  /* Dark theme colors (used by login page explicitly) */
+  --dark-background: #0a0f1e;
+  --dark-foreground: #ffffff;
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  body {
+    color: var(--foreground);
+    background: var(--background);
+    font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 }

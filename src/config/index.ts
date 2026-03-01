@@ -11,6 +11,19 @@ export const config = {
         baseUrl: process.env.CEZIH_BASE_URL || 'https://test.fhir.cezih.hr',
         fhirUrl: process.env.CEZIH_FHIR_URL || 'https://test.fhir.cezih.hr/R4/fhir',
         oidRegistryUrl: process.env.CEZIH_OID_REGISTRY_URL || 'https://test.fhir.cezih.hr/oid-registry',
+        // Per-service gateway URLs (each CEZIH FHIR resource has its own microservice)
+        gatewayBase: (process.env.CEZIH_BASE_URL || 'https://certws2.cezih.hr:8443') + '/services-router/gateway',
+        gatewaySystem: (process.env.CEZIH_BASE_URL?.replace(':8443', ':9443') || 'https://certws2.cezih.hr:9443') + '/services-router/gateway',
+        services: {
+            patient: '/patient-registry-services/api/v1',
+            document: '/doc-mhd-svc/api/v1',
+            healthIssue: '/health-issue-services/api/v1',
+            visit: '/encounter-services/api/v1',
+            terminology: '/terminology-services/api/v1',
+            notification: '/notification-pull-service/api/v1',
+            referral: '/sgp-referral-service/api/v1',
+            registry: '/patient-registry-services/api/v1',
+        },
     },
 
     // OAuth2 Client Credentials (System Auth)
@@ -29,6 +42,14 @@ export const config = {
         hzzoCode: process.env.ORGANIZATION_HZZO_CODE || '',
         hzjzCode: process.env.ORGANIZATION_HZJZ_CODE || '',
         name: process.env.ORGANIZATION_NAME || 'Privatna poliklinika',
+    },
+
+    // Practitioner (liječnik koji koristi sustav)
+    practitioner: {
+        oib: process.env.PRACTITIONER_OIB || '',
+        name: process.env.PRACTITIONER_NAME || '',
+        // HZJZ broj radnika — šalje se kao practitionerId u FHIR resursima
+        hzjzId: process.env.PRACTITIONER_HZJZ_ID || process.env.PRACTITIONER_OIB || '',
     },
 
     // Software Metadata (for CEZIH identification)

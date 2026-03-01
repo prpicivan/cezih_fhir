@@ -32,8 +32,15 @@ router.get('/:mbo/chart', async (req: Request, res: Response) => {
         const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
 
         // 1. Get Basic Demography (local or remote)
-        const patients = await patientService.searchByMbo(mbo, userToken);
-        const patient = patients[0];
+        const refresh = req.query.refresh === 'true';
+        let patient;
+
+        if (refresh) {
+            patient = await patientService.syncPatient(mbo, userToken);
+        } else {
+            const patients = await patientService.searchByMbo(mbo, userToken);
+            patient = patients[0];
+        }
 
         if (!patient) {
             return res.status(404).json({ error: 'Patient not found' });
@@ -41,7 +48,7 @@ router.get('/:mbo/chart', async (req: Request, res: Response) => {
 
         // 2. Aggregate Clinical Data
         const documents = await clinicalDocumentService.searchDocuments({ patientMbo: mbo }, userToken);
-        const cases = await caseService.getPatientCases(mbo, userToken);
+        const cases = await caseService.getPatientCases(mbo, userToken, refresh);
         const visits = visitService.getVisits(mbo);
 
         res.json({

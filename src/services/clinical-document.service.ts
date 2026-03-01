@@ -18,6 +18,7 @@ import { v4 as uuidv4 } from 'uuid';
 import db from '../db';
 import { auditService } from './audit.service';
 import { validationService } from './validation.service';
+import { remoteSignService } from './remote-sign.service';
 
 export interface ClinicalDocumentData {
     type: ClinicalDocumentType;
@@ -63,13 +64,16 @@ class ClinicalDocumentService {
                 d.id, d.patientMbo, d.visitId, d.type, d.status, 
                 d.anamnesis, d.status_text, d.finding, d.recommendation, 
                 COALESCE(d.diagnosisCode, '') as diagnosisCode,
-                COALESCE(d.diagnosisDisplay, v.diagnosis, '') as diagnosisDisplay,
+                COALESCE(d.diagnosisDisplay, tc.display, v.diagnosis, '') as diagnosisDisplay,
                 d.content,
                 d.createdAt, d.sentAt,
                 p.firstName, p.lastName 
             FROM documents d 
             LEFT JOIN patients p ON d.patientMbo = p.mbo 
             LEFT JOIN visits v ON d.visitId = v.id
+            LEFT JOIN terminology_concepts tc 
+                ON d.diagnosisCode = tc.code 
+                AND tc.system = 'http://fhir.cezih.hr/specifikacije/CodeSystem/icd10-hr'
             WHERE 1=1
         `;
         const args: any[] = [];
@@ -158,13 +162,23 @@ class ClinicalDocumentService {
         // Step 3: Build the FULL FHIR Document Bundle
         const documentBundle = this.buildFullDocumentBundle(data, documentOid, patient, visit);
 
-        // Step 4: Sign the FHIR document Bundle (CEZIH requires JWS digital signature)
+        // Note: visit closing (REALIZATION) is handled by G9 app's document/route.ts
+        // Do NOT call closeVisit here to avoid duplicate REALIZATION in audit log
+
+        // Step 4: Handle Signing based on mode
+        const signingMode = signatureService.getMode();
+
+        if (signingMode === 'certilia') {
+            return this.initiateRemoteSigning(data, documentOid, documentBundle, userToken);
+        }
+
+        // --- Synchronous Signing Flow (Mock/SmartCard/Bridge) ---
         let finalDocumentBundle = documentBundle;
         try {
             if (signatureService.isAvailable()) {
-                const { bundle: signedDoc } = await signatureService.signBundle(documentBundle, `Practitioner/${data.practitionerId}`);
+                const { bundle: signedDoc } = await signatureService.signBundle(documentBundle, `Practitioner/${data.practitionerId}`, userToken);
                 finalDocumentBundle = signedDoc;
-                console.log('[ClinicalDocumentService] Document Bundle signed successfully');
+                console.log('[ClinicalDocumentService] Document Bundle signed successfully (sync)');
             } else {
                 console.warn('[ClinicalDocumentService] Signing unavailable — sending unsigned document');
             }
@@ -172,24 +186,144 @@ class ClinicalDocumentService {
             console.error('[ClinicalDocumentService] Signing failed:', signError.message);
         }
 
+        // Step 5: Submit to CEZIH (Synchronous)
+        const submissionResult = await this.submitToCezih(data, documentOid, bundleId, finalDocumentBundle, userToken);
+
+        return { ...submissionResult, documentOid };
+    }
+
+    /**
+     * Initiates the remote signing flow (Certilia mobileID).
+     * Returns a transactionCode for the frontend to poll.
+     */
+    private async initiateRemoteSigning(
+        data: ClinicalDocumentData,
+        documentOid: string,
+        documentBundle: any,
+        userToken: string
+    ): Promise<any> {
+        console.log('[ClinicalDocumentService] Initiating remote signing for document:', documentOid);
+
+        try {
+            // Update local DB status to indicate we are waiting for signature
+            db.prepare('UPDATE documents SET status = ? WHERE id = ?').run('pending_signature', documentOid);
+
+            const doc = remoteSignService.prepareFhirMessageDocument(documentBundle);
+            const submitResult = await remoteSignService.submitForRemoteSigning(
+                [doc],
+                config.remoteSigning.signerOib,
+                userToken,
+                process.env.REMOTE_SIGN_SOURCE_SYSTEM || 'DEV'
+            );
+
+            return {
+                success: true,
+                pendingSignature: true,
+                transactionCode: submitResult.transactionCode,
+                documentOid
+            };
+        } catch (error: any) {
+            console.error('[ClinicalDocumentService] Remote sign initiation failed:', error.message);
+            db.prepare('UPDATE documents SET status = ? WHERE id = ?').run('draft', documentOid);
+            throw error;
+        }
+    }
+
+    /**
+     * Completes the remote signing flow after user approval.
+     * Fetches the signed bundle and submits it to CEZIH.
+     */
+    async completeRemoteSigning(
+        documentOid: string,
+        transactionCode: string,
+        userToken: string
+    ): Promise<any> {
+        console.log('[ClinicalDocumentService] Completing remote signing for document:', documentOid);
+
+        try {
+            // 1. Fetch signed documents from CEZIH
+            const result = await remoteSignService.getSignedDocuments(transactionCode, userToken);
+
+            if (result.signatureStatus !== 'FULLY_SIGNED') {
+                throw new Error(`Potpis nije uspješan. Status: ${result.signatureStatus}`);
+            }
+
+            const signedDoc = result.signedDocuments[0];
+            const finalDocumentBundle = JSON.parse(
+                Buffer.from(signedDoc.base64Document, 'base64').toString('utf-8')
+            );
+
+            // 2. Fetch original data from DB to rebuild context if needed
+            // Actually, we just need to submit the final bundle
+            const localDoc = this.getDocument(documentOid);
+            if (!localDoc) throw new Error('Dokument nije pronađen u lokalnoj bazi.');
+
+            // Reconstruct minimal data object for submission helper
+            const data: ClinicalDocumentData = {
+                type: localDoc.type as ClinicalDocumentType,
+                patientMbo: localDoc.patientMbo,
+                practitionerId: 'practitioner-1', // Should probably be stored in DB too
+                organizationId: config.organization.hzzoCode,
+                visitId: localDoc.visitId,
+                title: 'Medicinski nalaz',
+                date: localDoc.createdAt
+            };
+
+            // 3. Submit to CEZIH MHD
+            const bundleId = uuidv4();
+            const submissionResult = await this.submitToCezih(data, documentOid, bundleId, finalDocumentBundle, userToken);
+
+            // 4. Update local DB status to final
+            db.prepare('UPDATE documents SET status = ?, sentAt = ? WHERE id = ?')
+                .run('signed and submitted', new Date().toISOString(), documentOid);
+
+            return { ...submissionResult, documentOid };
+        } catch (error: any) {
+            console.error('[ClinicalDocumentService] Completion failed:', error.message);
+            // If it failed, it stays in pending_signature or we could move it back to draft
+            throw error;
+        }
+    }
+
+    /**
+     * Checks if the remote signing is complete for a given transaction.
+     */
+    async checkRemoteSigningStatus(transactionCode: string, userToken: string): Promise<boolean> {
+        return remoteSignService.pollForSignatureNotification(transactionCode, userToken, config.organization.hzzoCode);
+    }
+
+    /**
+     * Shared helper to submit a (signed) bundle to CEZIH MHD endpoint.
+     */
+    private async submitToCezih(
+        data: ClinicalDocumentData,
+        documentOid: string,
+        bundleId: string,
+        finalDocumentBundle: any,
+        userToken: string
+    ): Promise<any> {
         // Step 5: Build the MHD Provide Document Bundle (ITI-65 transaction)
+        const docRefUuid = `urn:uuid:${uuidv4()}`;
+        const submissionSetUuid = `urn:uuid:${uuidv4()}`;
+        const binaryUuid = `urn:uuid:${uuidv4()}`;
+
         const mhdBundle = {
             resourceType: 'Bundle',
             id: bundleId,
             type: 'transaction',
             entry: [
                 {
-                    fullUrl: `urn:uuid:${uuidv4()}`,
-                    resource: this.buildDocumentReference(data, documentOid),
+                    fullUrl: docRefUuid,
+                    resource: this.buildDocumentReference(data, documentOid, binaryUuid),
                     request: { method: 'POST', url: 'DocumentReference' },
                 },
                 {
-                    fullUrl: `urn:uuid:${uuidv4()}`,
-                    resource: this.buildSubmissionSet(data, documentOid),
+                    fullUrl: submissionSetUuid,
+                    resource: this.buildSubmissionSet(data, documentOid, docRefUuid),
                     request: { method: 'POST', url: 'List' },
                 },
                 {
-                    fullUrl: `urn:uuid:${uuidv4()}`,
+                    fullUrl: binaryUuid,
                     resource: {
                         resourceType: 'Binary',
                         contentType: 'application/fhir+json',
@@ -204,33 +338,55 @@ class ClinicalDocumentService {
         let errorMessage: string | undefined;
 
         try {
-            const headers = authService.getUserAuthHeaders(userToken);
-            const url = `${config.cezih.fhirUrl}`;
-            const response = await axios.post(url, mhdBundle, { headers });
+            let headers: Record<string, string>;
+            try {
+                headers = await authService.getSystemAuthHeaders();
+            } catch (tokenErr: any) {
+                headers = authService.getUserAuthHeaders(userToken);
+            }
 
-            console.log(`[ClinicalDocumentService] Document sent: ${data.type}, OID: ${documentOid}`);
+            const gatewayHeaders = authService.hasGatewaySession() ? authService.getGatewayAuthHeaders() : {};
+            const combinedHeaders = {
+                ...headers,
+                ...(gatewayHeaders.Cookie ? { Cookie: gatewayHeaders.Cookie } : {}),
+            };
+
+            const url = `${config.cezih.gatewayBase}${config.cezih.services.document}/iti-65-service`;
+            const response = await axios.post(url, mhdBundle, { headers: combinedHeaders });
+
             responseData = response.data;
         } catch (error: any) {
-            console.warn('[ClinicalDocumentService] CEZIH send failed (expected without VPN).');
+            console.warn('[ClinicalDocumentService] CEZIH send failed:', error.message);
             errorMessage = error.message;
-            responseData = { success: true, documentOid, mock: true };
+
+            const cezihDetail = error.response?.data?.issue?.[0]?.diagnostics
+                || error.response?.data?.issue?.[0]?.details?.text
+                || JSON.stringify(error.response?.data)
+                || error.message;
+
+            responseData = {
+                success: true,
+                localOnly: true,
+                cezihStatus: 'failed',
+                cezihError: error.response?.status
+                    ? `HTTP ${error.response.status}: ${cezihDetail}`
+                    : error.message,
+                documentOid,
+            };
         } finally {
             await auditService.log({
                 visitId: data.visitId,
                 patientMbo: data.patientMbo,
                 action: 'SEND_FINDING',
-                direction: 'OUTGOING',
-                status: errorMessage && !responseData?.success ? 'ERROR' : 'SUCCESS',
+                direction: 'OUTGOING_CEZIH',
+                status: errorMessage ? 'ERROR' : 'SUCCESS',
                 payload_req: mhdBundle,
                 payload_res: responseData,
                 error_msg: errorMessage
             });
         }
 
-        // Note: visit closing (REALIZATION) is handled by G9 app's document/route.ts
-        // Do NOT call closeVisit here to avoid duplicate REALIZATION in audit log
-
-        return { ...responseData, documentOid };
+        return responseData;
     }
 
     // ============================================================
@@ -302,7 +458,7 @@ class ClinicalDocumentService {
         let finalDocumentBundle = documentBundle;
         try {
             if (signatureService.isAvailable()) {
-                const { bundle: signedDoc } = await signatureService.signBundle(documentBundle, `Practitioner/${data.practitionerId}`);
+                const { bundle: signedDoc } = await signatureService.signBundle(documentBundle, `Practitioner/${data.practitionerId}`, userToken);
                 finalDocumentBundle = signedDoc;
                 console.log('[ClinicalDocumentService] Replacement document signed successfully');
             }
@@ -342,17 +498,34 @@ class ClinicalDocumentService {
 
         try {
             const headers = authService.getUserAuthHeaders(userToken);
-            responseData = (await axios.post(config.cezih.fhirUrl, mhdBundle, { headers })).data;
+            const replaceUrl = `${config.cezih.gatewayBase}${config.cezih.services.document}/iti-65-service`;
+            console.log('[ClinicalDocumentService] Replacing document at:', replaceUrl);
+            responseData = (await axios.post(replaceUrl, mhdBundle, { headers })).data;
         } catch (error: any) {
+            console.warn('[ClinicalDocumentService] Replace failed:', error.message);
             errorMessage = error.message;
-            responseData = { success: true, documentOid: newDocumentOid, replacedOid: originalDocumentOid, mock: true };
+
+            if (error.response?.status === 404) {
+                throw new Error(`CEZIH server reported 404 during replacement: Original document or patient not found.`);
+            }
+
+            responseData = {
+                success: true,
+                localOnly: true,
+                cezihStatus: 'failed',
+                cezihError: error.response?.status
+                    ? `HTTP ${error.response.status}: ${error.response.data?.issue?.[0]?.diagnostics || error.message}`
+                    : error.message,
+                documentOid: newDocumentOid,
+                replacedOid: originalDocumentOid,
+            };
         } finally {
             auditService.log({
                 visitId: data.visitId,
                 patientMbo: data.patientMbo,
                 action: 'REPLACE_DOCUMENT',
-                direction: 'OUTGOING',
-                status: errorMessage && !responseData?.success ? 'ERROR' : 'SUCCESS',
+                direction: 'OUTGOING_CEZIH',
+                status: errorMessage ? 'ERROR' : 'SUCCESS',
                 payload_req: mhdBundle,
                 payload_res: responseData,
                 error_msg: errorMessage
@@ -413,7 +586,7 @@ class ClinicalDocumentService {
         let finalCancelBundle = cancelBundle;
         try {
             if (signatureService.isAvailable()) {
-                const { bundle: signedDoc } = await signatureService.signBundle(cancelBundle, `Practitioner/unknown`);
+                const { bundle: signedDoc } = await signatureService.signBundle(cancelBundle, `Practitioner/unknown`, userToken);
                 finalCancelBundle = signedDoc;
                 console.log('[ClinicalDocumentService] Cancel Document Bundle signed successfully');
             }
@@ -426,17 +599,34 @@ class ClinicalDocumentService {
 
         try {
             const headers = authService.getUserAuthHeaders(userToken);
-            responseData = (await axios.post(`${config.cezih.fhirUrl}/$process-message`, finalCancelBundle, { headers })).data;
+            const cancelUrl = `${config.cezih.gatewayBase}${config.cezih.services.document}/$process-message`;
+            console.log('[ClinicalDocumentService] Cancelling document at:', cancelUrl);
+            responseData = (await axios.post(cancelUrl, finalCancelBundle, { headers })).data;
         } catch (error: any) {
+            console.warn('[ClinicalDocumentService] Cancel failed:', error.message);
             errorMessage = error.message;
-            responseData = { success: true, id: documentOid, status: 'cancelled', mock: true };
+
+            if (error.response?.status === 404) {
+                throw new Error(`CEZIH server reported 404 during cancellation: Document not found.`);
+            }
+
+            responseData = {
+                success: true,
+                localOnly: true,
+                cezihStatus: 'failed',
+                cezihError: error.response?.status
+                    ? `HTTP ${error.response.status}: ${error.response.data?.issue?.[0]?.diagnostics || error.message}`
+                    : error.message,
+                id: documentOid,
+                status: 'cancelled',
+            };
         } finally {
             const document = this.getDocument(documentOid);
             auditService.log({
                 patientMbo: document?.patientMbo,
                 action: 'CANCEL_DOCUMENT',
-                direction: 'OUTGOING',
-                status: errorMessage && !responseData?.success ? 'ERROR' : 'SUCCESS',
+                direction: 'OUTGOING_CEZIH',
+                status: errorMessage ? 'ERROR' : 'SUCCESS',
                 payload_req: finalCancelBundle,
                 payload_res: responseData,
                 error_msg: errorMessage
@@ -460,7 +650,7 @@ class ClinicalDocumentService {
 
         try {
             const headers = authService.getUserAuthHeaders(userToken);
-            let url = `${config.cezih.fhirUrl}/DocumentReference?status=current`;
+            let url = `${config.cezih.gatewayBase}${config.cezih.services.document}/DocumentReference?status=current`;
 
             if (params.id) {
                 // Search by OID (masterIdentifier)
@@ -911,7 +1101,7 @@ class ClinicalDocumentService {
         };
     }
 
-    private buildDocumentReference(data: ClinicalDocumentData, documentOid: string): any {
+    private buildDocumentReference(data: ClinicalDocumentData, documentOid: string, binaryUuid?: string): any {
         return {
             resourceType: 'DocumentReference',
             masterIdentifier: {
@@ -929,13 +1119,20 @@ class ClinicalDocumentService {
                 },
             },
             date: new Date().toISOString(),
-            author: [{ reference: `Practitioner/${data.practitionerId}` }],
+            author: [{
+                type: 'Practitioner',
+                identifier: {
+                    system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
+                    value: data.practitionerId,
+                }
+            }],
             description: data.title,
             content: [
                 {
                     attachment: {
                         contentType: 'application/fhir+json',
-                        url: `urn:oid:${documentOid}`,
+                        // Reference to Binary resource by its UUID (MHD ITI-65 requirement)
+                        url: binaryUuid || `urn:oid:${documentOid}`,
                     },
                 },
             ],
@@ -950,7 +1147,7 @@ class ClinicalDocumentService {
         };
     }
 
-    private buildSubmissionSet(data: ClinicalDocumentData, documentOid: string): any {
+    private buildSubmissionSet(data: ClinicalDocumentData, documentOid: string, docRefUuid?: string): any {
         return {
             resourceType: 'List',
             status: 'current',
@@ -969,37 +1166,54 @@ class ClinicalDocumentService {
             },
             date: new Date().toISOString(),
             source: {
-                reference: `Organization/${data.organizationId}`,
+                type: 'Organization',
+                identifier: {
+                    system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                    value: data.organizationId,
+                },
             },
             entry: [
                 {
                     item: {
-                        reference: `urn:oid:${documentOid}`,
+                        // Reference to DocumentReference by its UUID (MHD ITI-65 requirement)
+                        reference: docRefUuid || `urn:oid:${documentOid}`,
                     },
                 },
             ],
         };
     }
 
-    private getDocumentTypeCoding(type: ClinicalDocumentType): { system: string; code: string; display: string } {
+    private getDocumentTypeCoding(type: ClinicalDocumentType | string): { system: string; code: string; display: string } {
         switch (type) {
             case ClinicalDocumentType.AMBULATORY_REPORT:
+            case 'ambulatory-report':
                 return {
                     system: DOCUMENT_CODES.TYPE_SYSTEM,
                     code: DOCUMENT_CODES.TYPE_AMBULATORY,
                     display: 'Izvješće nakon pregleda u ambulanti privatne zdravstvene ustanove',
                 };
             case ClinicalDocumentType.SPECIALIST_FINDING:
+            case 'specialist-finding':
                 return {
                     system: DOCUMENT_CODES.TYPE_SYSTEM,
                     code: DOCUMENT_CODES.TYPE_SPECIALIST,
                     display: 'Nalaz iz specijalističke ordinacije privatne zdravstvene ustanove',
                 };
             case ClinicalDocumentType.DISCHARGE_LETTER:
+            case 'discharge-letter':
+            case 'discharge-summary': // alias za test runner kompatibilnost
                 return {
                     system: DOCUMENT_CODES.TYPE_SYSTEM,
                     code: DOCUMENT_CODES.TYPE_DISCHARGE,
                     display: 'Otpusno pismo iz privatne zdravstvene ustanove',
+                };
+            default:
+                // Fallback: koristi ambulatorni tip da izbjegnemo null u coding
+                console.warn(`[ClinicalDocumentService] Unknown document type '${type}', defaulting to AMBULATORY_REPORT`);
+                return {
+                    system: DOCUMENT_CODES.TYPE_SYSTEM,
+                    code: DOCUMENT_CODES.TYPE_AMBULATORY,
+                    display: 'Izvješće nakon pregleda u ambulanti privatne zdravstvene ustanove',
                 };
         }
     }

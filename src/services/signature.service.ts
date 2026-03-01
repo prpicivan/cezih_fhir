@@ -78,7 +78,7 @@ class SignatureService {
     }
 
     private async initializeSigning() {
-        const mode = (process.env.SIGNING_MODE as SigningMode) || 'mock';
+        const mode = (process.env.SIGNING_MODE as SigningMode) || 'certilia';
         this.signingMode = mode;
 
         if (mode === 'smartcard') {
@@ -164,6 +164,8 @@ class SignatureService {
     }
 
     isAvailable(): boolean {
+        // Certilia mode is always "available" — signing happens remotely
+        if (this.signingMode === 'certilia') return true;
         return this.keyPair !== null;
     }
 
@@ -226,7 +228,27 @@ class SignatureService {
         return Buffer.concat([extract(), extract()]);
     }
 
-    async signBundle(bundle: any, signerRef?: string): Promise<SignedBundle> {
+    async signBundle(bundle: any, signerRef?: string, userToken?: string): Promise<SignedBundle> {
+        // Certilia mode: delegate entirely to CEZIH Udaljeni potpis (remote signing)
+        if (this.signingMode === 'certilia') {
+            if (!userToken) {
+                throw new Error('[SignatureService] Certilia mode requires userToken for remote signing.');
+            }
+            const doc = remoteSignService.prepareFhirMessageDocument(bundle);
+            const result = await remoteSignService.signAndWait(
+                [doc],
+                config.remoteSigning.signerOib,
+                userToken,
+                { sourceSystem: process.env.REMOTE_SIGN_SOURCE_SYSTEM || 'DEV' }
+            );
+            const signedDoc = result.signedDocuments[0];
+            const signedBundle = JSON.parse(
+                Buffer.from(signedDoc.base64Document, 'base64').toString('utf-8')
+            );
+            console.log('[SignatureService] ✅ Certilia remote signing complete.');
+            return { bundle: signedBundle, jwsCompact: '' };
+        }
+
         if (!this.keyPair) throw new Error('Signing not available.');
 
         const authorRef = signerRef || this.extractAuthorFromBundle(bundle);

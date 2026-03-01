@@ -10,8 +10,52 @@ import {
     clinicalDocumentService
 } from '../services';
 import { ClinicalDocumentType } from '../types';
+import db from '../db';
 
 const router = Router();
+
+// ═══════════════════════════════════════════
+// TC Status persistence (settings table)
+// ═══════════════════════════════════════════
+
+/** GET /api/certification/status — return all saved TC statuses */
+router.get('/status', (_req: Request, res: Response) => {
+    try {
+        const rows = db.prepare("SELECT key, value FROM settings WHERE key LIKE 'tc_status_%'").all() as any[];
+        const statuses: Record<string, any> = {};
+        for (const row of rows) {
+            const tcId = row.key.replace('tc_status_', '');
+            statuses[tcId] = JSON.parse(row.value);
+        }
+        res.json({ success: true, statuses });
+    } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/** POST /api/certification/status/:tcId — manually save a TC status */
+router.post('/status/:tcId', (req: Request, res: Response) => {
+    const { tcId } = req.params;
+    const { status, error, isMock, result } = req.body;
+    try {
+        const value = JSON.stringify({ status, error: error || null, isMock: !!isMock, result: result || null, updatedAt: new Date().toISOString() });
+        db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(`tc_status_${tcId}`, value);
+        res.json({ success: true });
+    } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/** POST /api/certification/reset — reset all TC statuses */
+router.post('/reset', (_req: Request, res: Response) => {
+    try {
+        db.prepare("DELETE FROM settings WHERE key LIKE 'tc_status_%'").run();
+        res.json({ success: true });
+    } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 
 /**
  * Runs a specific CEZIH Test Case (TC)
@@ -174,9 +218,32 @@ router.post('/run/:tcId', async (req: Request, res: Response) => {
                 break;
         }
 
-        res.json({ success: true, result });
+        // Auto-save the status to DB
+        const isMock = result && (typeof result === 'object') && (result.mock === true ||
+            (result.entry && result.entry[0]?.resource?.response?.code === 'ok' && !result.id));
+        const value = JSON.stringify({
+            status: 'passed',
+            isMock: !!isMock,
+            result: result || null,
+            error: null,
+            updatedAt: new Date().toISOString()
+        });
+        db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(`tc_status_${tcId}`, value);
+
+        res.json({ success: true, result, isMock });
     } catch (error: any) {
         console.error(`[CertificationRunner] TC ${tcId} failed:`, error.message);
+        // Save failure status
+        try {
+            const failValue = JSON.stringify({
+                status: 'failed',
+                isMock: false,
+                result: null,
+                error: error.message,
+                updatedAt: new Date().toISOString()
+            });
+            db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(`tc_status_${tcId}`, failValue);
+        } catch (_) { }
         res.status(500).json({
             success: false,
             error: error.message,

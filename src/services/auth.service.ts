@@ -105,37 +105,55 @@ class AuthService {
         const gatewayUrl = `${config.cezih.baseUrl}/services-router/gateway`;
         console.log(`[AuthService] Initiating gateway auth (${method})...`);
 
-        // Verify gateway is reachable
-        try {
-            const probe = await axios.get(gatewayUrl, {
-                maxRedirects: 0,
-                validateStatus: () => true,
-            });
-            console.log('[AuthService] Gateway probe:', probe.status);
+        if (method === 'smartcard') {
+            // FINALNI FIX za smart card auth:
+            //
+            // V1: backend radio hop1+hop2, vraćao x509 URL → "Cookie not found"
+            // V2: otvara certsso2 OIDC URL → 400 na /protected (gateway nije inicirao sesiju)
+            // V3: otvara /services-router/gateway → Spring Boot 404 (to je FHIR API ruta)
+            //
+            // ISPRAVNO: otvoriti /protected — to je mod_auth_openidc endpoint koji:
+            //   1. Bez sesije → preusmjerava browser na certsso2 OIDC s ispravnim state/nonce
+            //   2. Browser ide na certsso2, dobiva AUTH_SESSION_ID ✅
+            //   3. Korisnik unosi PIN ✅
+            //   4. certsso2 → /protected?state=...&code=... — gateway prepoznaje vlastiti state ✅
+            //   5. Gateway validira code, kreira sesiju ✅
+            const protectedUrl = `${config.cezih.baseUrl}/protected`;
+            console.log(`[AuthService] ✅ Smart card: vraćamo /protected URL (mod_auth_openidc endpoint)`);
+            return {
+                authUrl: protectedUrl,
+                method,
+                chainCookies: [],
+                gatewayUrl,
+            };
+        }
 
-            if (probe.status !== 302) {
-                // If 200, gateway might already have a session
-                if (probe.status === 200) {
-                    console.log('[AuthService] Gateway returned 200 — may already be authenticated');
-                } else {
-                    console.log('[AuthService] Warning: unexpected gateway status:', probe.status);
-                }
-            }
+        // For Certilia (mobile.ID): follow redirects server-side to get the Certilia URL
+        try {
+            const { default: axios } = await import('axios');
+            const response = await axios.get(gatewayUrl, {
+                maxRedirects: 15,
+                validateStatus: () => true,
+                httpsAgent: undefined,
+            });
+
+            const finalUrl: string = (response.request as any)?.res?.responseUrl || gatewayUrl;
+            console.log(`[AuthService] ✅ Certilia login URL ready`);
+
+            return {
+                authUrl: finalUrl,
+                method,
+                chainCookies: [],
+                gatewayUrl,
+            };
         } catch (error: any) {
             throw new Error(`Cannot reach CEZIH gateway: ${error.message}`);
         }
-
-        // Return the gateway URL for the browser to open directly.
-        // The browser will follow all redirects and accumulate cookies naturally.
-        console.log(`[AuthService] ✅ Returning gateway URL for browser-based ${method} auth`);
-
-        return {
-            authUrl: gatewayUrl,
-            method,
-            chainCookies: [], // Browser handles cookies directly
-            gatewayUrl,
-        };
     }
+
+
+
+
 
     // ============================================================
     // Gateway Auth — Store Session
@@ -168,10 +186,6 @@ class AuthService {
         return Date.now() - this.gatewaySession.createdAt < maxAge;
     }
 
-    /**
-     * Get headers for authenticated gateway FHIR requests.
-     * Uses the mod_auth_openid_session header + cookies.
-     */
     getGatewayAuthHeaders(): Record<string, string> {
         if (!this.gatewaySession) {
             throw new Error('No active gateway session. Please authenticate first.');

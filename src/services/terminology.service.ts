@@ -36,7 +36,8 @@ class TerminologyService {
         try {
             const headers = await authService.getSystemAuthHeaders();
 
-            let url = `${config.cezih.fhirUrl}/CodeSystem`;
+            let url = `${config.cezih.gatewaySystem}${config.cezih.services.terminology}/CodeSystem`;
+            console.log('[TerminologyService] Syncing CodeSystems from:', url);
             if (lastUpdatedAfter) {
                 const dateStr = lastUpdatedAfter.toISOString().split('T')[0];
                 url += `?_lastUpdated=gt${dateStr}`;
@@ -90,7 +91,8 @@ class TerminologyService {
         try {
             const headers = await authService.getSystemAuthHeaders();
 
-            let url = `${config.cezih.fhirUrl}/ValueSet`;
+            let url = `${config.cezih.gatewaySystem}${config.cezih.services.terminology}/ValueSet`;
+            console.log('[TerminologyService] Syncing ValueSets from:', url);
             if (lastUpdatedAfter) {
                 const dateStr = lastUpdatedAfter.toISOString().split('T')[0];
                 url += `?_lastUpdated=gt${dateStr}`;

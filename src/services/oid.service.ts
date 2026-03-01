@@ -41,19 +41,20 @@ class OidService {
                 }
             );
 
-            console.log(`[OidService] Generated ${response.data.OID.length} OIDs`);
-            return response.data.OID;
+            console.log(`[OidService] Generated ${response.data.oid.length} OIDs`);
+            return response.data.oid;
         } catch (error: any) {
-            console.error('[OidService] Failed to generate OIDs from CEZIH, falling back to local generation:', error.message);
+            // ⚠️  OFFLINE FALLBACK: OID-ovi generirani lokalno NISU registrirani u CEZIH OID registru!
+            //    Dokument s ovakvim OID-om neće biti prepoznat od strane CEZIH-a.
+            //    Provjeri VPN konekciju i dostupnost CEZIH servisa.
+            console.error(`[OidService] ❌ CEZIH OID registry nedostupan — generiram LOKALNE OID-ove (NISU VALIDNI ZA CEZIH): ${error.message}`);
 
-            // Fallback for local testing without VPN
-            const mockOids = [];
+            const localOids = [];
             for (let i = 0; i < quantity; i++) {
-                // Generate a mock CEZIH-like OID ending in a random number string
                 const randomPart = Math.floor(Math.random() * 100000000000000).toString();
-                mockOids.push(`2.16.840.1.113883.3.33.1.2.1.1.1.${randomPart}`);
+                localOids.push(`2.16.840.1.113883.3.33.1.2.1.1.1.${randomPart}`);
             }
-            return mockOids;
+            return localOids;
         }
     }
 

@@ -27,7 +27,9 @@ export default function RegistrySearchPage() {
             if (data.success) {
                 setResults(searchType === 'organization' ? data.organizations : data.practitioners);
             } else {
-                setError(data.error);
+                // Show a friendly message for the known CEZIH 404 case
+                const msg = data.error || 'Greška u komunikaciji.';
+                setError(msg.includes('nije dostupna') ? msg : `Greška: ${msg}`);
             }
         } catch (err: any) {
             setError(err.message || 'Greška u komunikaciji.');

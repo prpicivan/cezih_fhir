@@ -171,7 +171,7 @@ export interface OidRegistryRequest {
  * OID Registry Response
  */
 export interface OidRegistryResponse {
-    OID: string[];
+    oid: string[];
 }
 
 /**

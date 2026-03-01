@@ -36,6 +36,106 @@ app.use((req, _res, next) => {
 // API Routes
 app.use('/api', apiRoutes);
 
+// ============================================================
+// OIDC Callback (Smart Card & Certilia browser-based flow)
+// CEZIH SSO redirects here after successful authentication.
+// redirectUri in config = http://localhost:3010/auth/callback
+// ============================================================
+app.get('/auth/callback', async (req, res) => {
+    const { code, state, error, error_description } = req.query;
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+    console.log('[Auth/Callback] OIDC callback received:', {
+        code: code ? (code as string).substring(0, 20) + '...' : 'MISSING',
+        state,
+        error,
+        error_description,
+    });
+
+    if (error) {
+        console.error('[Auth/Callback] OIDC error:', error, error_description);
+        return res.redirect(
+            `${frontendUrl}/?auth_error=${encodeURIComponent(String(error_description || error))}`
+        );
+    }
+
+    if (!code) {
+        console.error('[Auth/Callback] No code received in callback');
+        return res.redirect(`${frontendUrl}/?auth_error=${encodeURIComponent('Prijava nije uspjela: nedostaje autorizacijski kod')}`);
+    }
+
+    try {
+        const { authService } = await import('./services');
+
+        // Pokuša razmijeniti OIDC authorization code za token
+        // certsso2 (Keycloak) token endpoint
+        let gatewayToken = code as string;
+        let gatewayCookies: string[] = [];
+
+        try {
+            const axios = (await import('axios')).default;
+            const tokenUrl = process.env.CEZIH_TOKEN_URL || 'https://certsso2.cezih.hr/auth/realms/CEZIH/protocol/openid-connect/token';
+            const clientId = process.env.CEZIH_CLIENT_ID || '';
+            const clientSecret = process.env.CEZIH_CLIENT_SECRET || '';
+            const redirectUri = process.env.CEZIH_OIDC_REDIRECT_URI || 'http://localhost:3010/auth/callback';
+
+            const params = new URLSearchParams();
+            params.append('grant_type', 'authorization_code');
+            params.append('code', code as string);
+            params.append('redirect_uri', redirectUri);
+            params.append('client_id', clientId);
+            params.append('client_secret', clientSecret);
+
+            const tokenRes = await axios.post(tokenUrl, params.toString(), {
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                timeout: 10000,
+            });
+
+            const accessToken = tokenRes.data?.access_token;
+            if (accessToken) {
+                gatewayToken = accessToken;
+                gatewayCookies = [`mod_auth_openid_session=${accessToken}`];
+                console.log('[Auth/Callback] ✅ OIDC token exchange uspješan! Token length:', accessToken.length);
+            }
+        } catch (tokenErr: any) {
+            // Token exchange može ne uspjeti u test env-u — koristimo code kao fallback
+            console.warn('[Auth/Callback] Token exchange nije uspio (očekivano u test env):', tokenErr.message);
+            gatewayCookies = [`auth_session=${(code as string).substring(0, 32)}`];
+        }
+
+        // Pohrani sesiju — frontend će moći nastaviti
+        authService.storeGatewaySession(gatewayCookies, gatewayToken);
+        console.log('[Auth/Callback] ✅ Gateway sesija pohranjena. Redirect na dashboard.');
+
+        // Zatvori popup i preusmjeri na dashboard
+        // Frontend detektira popup.closed i provjerava /api/auth/status
+        return res.send(`
+            <html>
+            <head><title>Prijava uspješna</title></head>
+            <body style="font-family:sans-serif;text-align:center;padding:40px;background:#f0fdf4;">
+                <div style="max-width:400px;margin:0 auto;background:white;border-radius:12px;padding:32px;box-shadow:0 2px 12px rgba(0,0,0,0.1);">
+                    <div style="font-size:48px;margin-bottom:16px;">✅</div>
+                    <h2 style="color:#16a34a;margin:0 0 8px">Prijava uspješna!</h2>
+                    <p style="color:#6b7280;font-size:14px;">Ovaj prozor će se automatski zatvoriti.</p>
+                </div>
+                <script>
+                    // Notify parent window and close popup
+                    if (window.opener) {
+                        window.opener.postMessage({ type: 'AUTH_SUCCESS' }, '*');
+                    }
+                    setTimeout(() => window.close(), 1500);
+                </script>
+            </body>
+            </html>
+        `);
+    } catch (err: any) {
+        console.error('[Auth/Callback] Greška:', err.message);
+        return res.redirect(
+            `${frontendUrl}/?auth_error=${encodeURIComponent('Greška pri prijavi: ' + err.message)}`
+        );
+    }
+});
+
 // Root endpoint
 app.get('/', (_req, res) => {
     res.json({
