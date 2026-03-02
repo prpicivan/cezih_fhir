@@ -335,17 +335,20 @@ class ClinicalDocumentService {
         const mhdBundle = {
             resourceType: 'Bundle',
             id: bundleId,
+            meta: {
+                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HRMinimalProvideDocumentBundle']
+            },
             type: 'transaction',
             entry: [
-                {
-                    fullUrl: docRefUuid,
-                    resource: this.buildDocumentReference(data, documentOid, binaryUuid),
-                    request: { method: 'POST', url: 'DocumentReference' },
-                },
                 {
                     fullUrl: submissionSetUuid,
                     resource: this.buildSubmissionSet(data, documentOid, docRefUuid),
                     request: { method: 'POST', url: 'List' },
+                },
+                {
+                    fullUrl: docRefUuid,
+                    resource: this.buildDocumentReference(data, documentOid, binaryUuid),
+                    request: { method: 'POST', url: 'DocumentReference' },
                 },
                 {
                     fullUrl: binaryUuid,
@@ -374,9 +377,15 @@ class ClinicalDocumentService {
             const combinedHeaders = {
                 ...headers,
                 ...(gatewayHeaders.Cookie ? { Cookie: gatewayHeaders.Cookie } : {}),
+                'Content-Type': 'application/fhir+json',
+                'Accept': 'application/fhir+json',
             };
 
             const url = `${config.cezih.gatewayBase}${config.cezih.services.document}/iti-65-service`;
+            console.log('[ClinicalDocumentService] Submitting MHD Bundle to:', url);
+            console.log('[ClinicalDocumentService] Headers:', JSON.stringify(Object.keys(combinedHeaders)));
+            console.log('[ClinicalDocumentService] MHD Bundle entries:', mhdBundle.entry.map((e: any) => e.resource?.resourceType).join(', '));
+            console.log('[ClinicalDocumentService] Full MHD Bundle:', JSON.stringify(mhdBundle).substring(0, 2000));
             const response = await axios.post(url, mhdBundle, { headers: combinedHeaders });
 
             responseData = response.data;
@@ -614,7 +623,7 @@ class ClinicalDocumentService {
         let finalCancelBundle = cancelBundle;
         try {
             if (signatureService.isAvailable()) {
-                const { bundle: signedDoc } = await signatureService.signBundle(cancelBundle, `Practitioner/unknown`, userToken);
+                const { bundle: signedDoc } = await signatureService.signBundle(cancelBundle, undefined, userToken);
                 finalCancelBundle = signedDoc;
                 console.log('[ClinicalDocumentService] Cancel Document Bundle signed successfully');
             }
@@ -627,7 +636,7 @@ class ClinicalDocumentService {
 
         try {
             const headers = authService.getUserAuthHeaders(userToken);
-            const cancelUrl = `${config.cezih.gatewayBase}${config.cezih.services.document}/$process-message`;
+            const cancelUrl = `${config.cezih.gatewayBase}${config.cezih.services.document}/iti-65-service`;
             console.log('[ClinicalDocumentService] Cancelling document at:', cancelUrl);
             responseData = (await axios.post(cancelUrl, finalCancelBundle, { headers })).data;
         } catch (error: any) {
@@ -681,11 +690,11 @@ class ClinicalDocumentService {
             let url = `${config.cezih.gatewayBase}${config.cezih.services.document}/DocumentReference?status=current`;
 
             if (params.id) {
-                // Search by OID (masterIdentifier)
-                url += `&identifier=urn:ietf:rfc:3986|urn:oid:${params.id}`;
+                // Search by OID (masterIdentifier) — pipe must be URL-encoded
+                url += `&identifier=${encodeURIComponent(`urn:ietf:rfc:3986|urn:oid:${params.id}`)}`;
             } else if (params.patientMbo) {
-                // Search by Patient MBO
-                url += `&patient.identifier=${CEZIH_IDENTIFIERS.MBO}|${params.patientMbo}`;
+                // Search by Patient MBO — pipe must be URL-encoded
+                url += `&patient.identifier=${encodeURIComponent(`${CEZIH_IDENTIFIERS.MBO}|${params.patientMbo}`)}`;
             }
 
             console.log(`[ClinicalDocumentService] Searching CEZIH documents: ${params.id ? `OID ${params.id}` : `MBO ${params.patientMbo}`}`);
@@ -1003,12 +1012,11 @@ class ClinicalDocumentService {
             });
         }
 
-        entries.push({ resource: composition });
-
         // 2. Patient Resource
         entries.push({
             fullUrl: patientUuid,
             resource: {
+                resourceType: 'Patient',
                 extension: [
                     {
                         url: CEZIH_EXTENSIONS.PATIENT_LAST_CONTACT,
@@ -1025,23 +1033,23 @@ class ClinicalDocumentService {
             }
         });
 
-        // 3. Practitioner Resource (Hardcoded for Mock)
+        // 3. Practitioner Resource
         entries.push({
             fullUrl: practitionerUuid,
             resource: {
                 resourceType: 'Practitioner',
-                identifier: [{ system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER, value: '1234567' }],
-                name: [{ family: 'Horvat', given: ['Ivan'], prefix: ['Dr.'] }]
+                identifier: [{ system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER, value: config.practitioner.hzjzId }],
+                name: [{ family: config.practitioner.name.split(' ').pop() || 'Prpić', given: [config.practitioner.name.split(' ')[0] || 'Ivan'] }]
             }
         });
 
-        // 4. Organization Resource (Hardcoded for Mock)
+        // 4. Organization Resource
         entries.push({
             fullUrl: organizationUuid,
             resource: {
                 resourceType: 'Organization',
-                identifier: [{ system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE, value: '999999999' }],
-                name: 'Ordinacija opće medicine Dr. Ivan Horvat'
+                identifier: [{ system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE, value: data.organizationId || config.organization.hzzoCode }],
+                name: config.organization.name
             }
         });
 
@@ -1123,61 +1131,176 @@ class ClinicalDocumentService {
                     }
                 ],
                 when: new Date().toISOString(),
-                who: { reference: practitionerUuid, display: "Dr. Ivan Horvat" },
-                data: "cG90cGlz" // Base64 'potpis' mock
+                who: {
+                    type: 'Practitioner',
+                    identifier: {
+                        system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
+                        value: config.practitioner.hzjzId
+                    }
+                },
+                data: '' // Will be replaced by signBundle()
             }
         };
     }
 
     private buildDocumentReference(data: ClinicalDocumentData, documentOid: string, binaryUuid?: string): any {
-        return {
+        const docRefIdentifierUuid = uuidv4();
+        const patientName = config.practitioner.name || 'Ivan Prpić'; // Fallback
+
+        const docRef: any = {
             resourceType: 'DocumentReference',
+            meta: {
+                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HR.MinimalDocumentReference']
+            },
             masterIdentifier: {
+                use: 'usual',
                 system: 'urn:ietf:rfc:3986',
                 value: `urn:oid:${documentOid}`,
             },
+            identifier: [{
+                use: 'official',
+                system: 'urn:ietf:rfc:3986',
+                value: `urn:uuid:${docRefIdentifierUuid}`,
+            }],
             status: 'current',
             type: {
                 coding: [this.getDocumentTypeCoding(data.type)],
             },
+            category: [{
+                coding: [{
+                    system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-class',
+                    code: '11',
+                    display: 'Klinički dokument'
+                }]
+            }],
             subject: {
+                type: 'Patient',
                 identifier: {
                     system: CEZIH_IDENTIFIERS.MBO,
                     value: data.patientMbo,
                 },
+                display: data.patientMbo, // Will be overridden below if patient name available
             },
             date: new Date().toISOString(),
-            author: [{
+            author: [
+                {
+                    type: 'Practitioner',
+                    identifier: {
+                        system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
+                        value: data.practitionerId,
+                    },
+                    display: config.practitioner.name || 'Liječnik',
+                },
+                {
+                    type: 'Organization',
+                    identifier: {
+                        system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                        value: data.organizationId,
+                    },
+                    display: config.organization.name || 'Zdravstvena organizacija',
+                }
+            ],
+            // CEZIHDR-001: authenticator required for clinical documents (codes 011, 012, 013, etc.)
+            authenticator: {
                 type: 'Practitioner',
                 identifier: {
                     system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
                     value: data.practitionerId,
-                }
-            }],
+                },
+                display: config.practitioner.name || 'Liječnik',
+            },
+            // CEZIHDR-002: custodian required for clinical documents
+            custodian: {
+                identifier: {
+                    system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                    value: data.organizationId,
+                },
+                display: config.organization.name || 'Zdravstvena organizacija',
+            },
             description: data.title,
+            securityLabel: [{
+                coding: [{
+                    system: 'http://terminology.hl7.org/CodeSystem/v3-Confidentiality',
+                    code: 'N',
+                    display: 'normal'
+                }]
+            }],
             content: [
                 {
                     attachment: {
                         contentType: 'application/fhir+json',
-                        // Reference to Binary resource by its UUID (MHD ITI-65 requirement)
                         url: binaryUuid || `urn:oid:${documentOid}`,
                     },
+                    format: {
+                        system: 'http://ihe.net/fhir/ihe.formatcode.fhir/CodeSystem/formatcode',
+                        code: 'urn:ihe:iti:xds:2017:mimeTypeSufficient',
+                        display: 'mimeType Sufficient'
+                    }
                 },
             ],
             context: {
-                ...(data.visitId && {
-                    encounter: [{ identifier: { system: CEZIH_IDENTIFIERS.VISIT_ID, value: data.visitId } }],
-                }),
-                ...(data.caseId && {
-                    related: [{ identifier: { system: CEZIH_IDENTIFIERS.CASE_ID, value: data.caseId } }],
-                }),
+                practiceSetting: {
+                    coding: [{
+                        system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/djelatnosti-zz',
+                        code: '3030000',
+                        display: 'Opća medicina'
+                    }]
+                },
+                // CEZIHDR-011: context.period required for clinical documents
+                period: {
+                    start: data.date || new Date().toISOString(),
+                },
+                // CEZIHDR-005: encounter required for clinical documents  
+                encounter: [{
+                    type: 'Encounter',
+                    identifier: {
+                        system: CEZIH_IDENTIFIERS.VISIT_ID,
+                        value: data.visitId || `local-${uuidv4()}`,
+                    }
+                }],
+                // CEZIHDR-008: related with Condition required for clinical documents
+                related: [{
+                    type: 'Condition',
+                    identifier: {
+                        system: CEZIH_IDENTIFIERS.CASE_ID,
+                        value: data.caseId || `local-${uuidv4()}`,
+                    }
+                }],
             },
         };
+
+        return docRef;
     }
 
     private buildSubmissionSet(data: ClinicalDocumentData, documentOid: string, docRefUuid?: string): any {
+        const entryUuid = uuidv4();
+        const uniqueId = uuidv4();
         return {
             resourceType: 'List',
+            meta: {
+                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HRMinimalSubmissionSet']
+            },
+            // Required extension: ihe-sourceId (with system!)
+            extension: [{
+                url: 'https://profiles.ihe.net/ITI/MHD/StructureDefinition/ihe-sourceId',
+                valueIdentifier: {
+                    system: 'urn:ietf:rfc:3986',
+                    value: `urn:uuid:${uuidv4()}`
+                }
+            }],
+            // 2 identifiers required: uniqueId (official) + entryUUID (usual)
+            identifier: [
+                {
+                    use: 'official',
+                    system: 'urn:ietf:rfc:3986',
+                    value: `urn:uuid:${uniqueId}`,
+                },
+                {
+                    use: 'usual',
+                    system: 'urn:ietf:rfc:3986',
+                    value: `urn:uuid:${entryUuid}`,
+                }
+            ],
             status: 'current',
             mode: 'working',
             code: {
@@ -1187,23 +1310,24 @@ class ClinicalDocumentService {
                 }],
             },
             subject: {
+                type: 'Patient',
                 identifier: {
                     system: CEZIH_IDENTIFIERS.MBO,
                     value: data.patientMbo,
                 },
             },
             date: new Date().toISOString(),
+            // Per CEZIH Primjer: source is Practitioner, not Organization
             source: {
-                type: 'Organization',
+                type: 'Practitioner',
                 identifier: {
-                    system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
-                    value: data.organizationId,
+                    system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
+                    value: data.practitionerId,
                 },
             },
             entry: [
                 {
                     item: {
-                        // Reference to DocumentReference by its UUID (MHD ITI-65 requirement)
                         reference: docRefUuid || `urn:oid:${documentOid}`,
                     },
                 },

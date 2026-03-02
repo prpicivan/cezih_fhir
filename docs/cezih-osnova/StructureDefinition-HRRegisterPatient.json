@@ -1,0 +1,49 @@
+{
+    "resourceType": "StructureDefinition",
+    "id": "HRRegisterPatient",
+    "url": "http://fhir.cezih.hr/specifikacije/StructureDefinition/HRRegisterPatient",
+    "name": "HRRegisterPatient",
+    "status": "draft",
+    "description": "Struktura poruke za registraciju pacijenata koji nemaju MBO, a koji imaju pravo na zdravstvenu zaštitu. Obavezno poslati broj putovnice ili EU kartice.",
+    "fhirVersion": "4.0.1",
+    "kind": "resource",
+    "abstract": false,
+    "type": "Bundle",
+    "baseDefinition": "https://profiles.ihe.net/ITI/PMIR/StructureDefinition/IHE.PMIR.Bundle",
+    "derivation": "constraint",
+    "_summary": {
+        "bundleType": "message",
+        "timestamp": "required (min=1)",
+        "entries": {
+            "PMIRMessageHeaderEntry": {
+                "sender": "Organization (HZZO identifier, min=1)",
+                "author": "Practitioner (HZJZ identifier, min=1)",
+                "destination": "CEZIH endpoint (max=1)",
+                "enterer": "NOT ALLOWED (max=0)"
+            },
+            "PMIRBundleHistoryEntry": {
+                "maxEntries": 1,
+                "PMIREntryCreate": "min=1, max=1 (only CREATE)",
+                "PMIREntryUpdate": "NOT ALLOWED (max=0)",
+                "PMIREntryDelete": "NOT ALLOWED (max=0)",
+                "patient": {
+                    "identifiers": "closed slicing, min=1, max=2",
+                    "europskaKartica": "system=europska-kartica, value must be 20 chars",
+                    "putovnica": "system=putovnica",
+                    "name": "min=1, max=1",
+                    "address": "min=1, max=1",
+                    "address.country": "min=1, bound to ValueSet/drzave"
+                }
+            }
+        },
+        "signature": {
+            "required": true,
+            "type": "1.2.840.10065.1.12.1.1 (author's signature)",
+            "who": "Practitioner (HZJZ identifier)",
+            "data": "required (min=1)",
+            "onBehalfOf": "NOT ALLOWED",
+            "targetFormat": "NOT ALLOWED",
+            "sigFormat": "NOT ALLOWED"
+        }
+    }
+}

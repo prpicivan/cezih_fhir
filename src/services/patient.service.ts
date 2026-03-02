@@ -272,44 +272,237 @@ class PatientService {
     }
 
     // ============================================================
-    // Test Case 11: Foreigner Registration (IHE PMIR)
+    // Test Case 11: Foreigner Registration (IHE PMIR ITI-93)
+    // Profile: HRRegisterPatient
+    // Endpoint: POST /patient-registry-services/api/v1
     // ============================================================
+
+    /**
+     * Build PMIR message bundle for foreign patient registration.
+     * Profile: http://fhir.cezih.hr/specifikacije/StructureDefinition/HRRegisterPatient
+     */
+    buildPMIRBundle(data: ForeignerRegistrationData): any {
+        const crypto = require('crypto');
+        const now = new Date().toISOString();
+        const messageHeaderFullUrl = crypto.randomUUID();
+        const historyBundleFullUrl = crypto.randomUUID();
+        const patientFullUrl = `urn:uuid:${crypto.randomUUID()}`;
+
+        // Patient identifiers (closed slicing, min=1, max=2)
+        const patientIdentifiers: any[] = [];
+        if (data.passportNumber) {
+            patientIdentifiers.push({
+                system: CEZIH_IDENTIFIERS.PASSPORT,
+                value: data.passportNumber,
+            });
+        }
+        if (data.euCardNumber) {
+            patientIdentifiers.push({
+                system: CEZIH_IDENTIFIERS.EU_CARD,
+                value: data.euCardNumber,
+            });
+        }
+        if (patientIdentifiers.length === 0) {
+            throw new Error('Registracija stranca zahtijeva barem jedan identifikator: broj putovnice ili EU kartica.');
+        }
+
+        const orgHzzoCode = config.organization.hzzoCode;
+        const practitionerHzjzId = config.practitioner.hzjzId;
+
+        if (!orgHzzoCode) throw new Error('ORGANIZATION_HZZO_CODE nije konfiguriran u .env');
+        if (!practitionerHzjzId) throw new Error('PRACTITIONER_HZJZ_ID nije konfiguriran u .env');
+
+        // Bundle.signature.who — must match MessageHeader.author
+        const practitionerWho = {
+            type: 'Practitioner',
+            identifier: {
+                system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
+                value: practitionerHzjzId,
+            },
+        };
+
+        const bundle: any = {
+            resourceType: 'Bundle',
+            meta: {
+                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HRRegisterPatient'],
+            },
+            type: 'message',
+            timestamp: now,
+            // entry[0]: MessageHeader
+            entry: [
+                {
+                    fullUrl: messageHeaderFullUrl,
+                    resource: {
+                        resourceType: 'MessageHeader',
+                        meta: {
+                            profile: ['https://profiles.ihe.net/ITI/PMIR/StructureDefinition/IHE.PMIR.MessageHeader'],
+                        },
+                        eventUri: 'urn:ihe:iti:pmir:2019:patient-feed',
+                        destination: [{
+                            endpoint: 'http://cezih.hr',
+                        }],
+                        sender: {
+                            type: 'Organization',
+                            identifier: {
+                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                                value: orgHzzoCode,
+                            },
+                        },
+                        author: practitionerWho,
+                        source: {
+                            endpoint: `urn:oid:${config.software.name}`,
+                        },
+                        focus: [{
+                            reference: historyBundleFullUrl,
+                        }],
+                    },
+                },
+                // entry[1]: History Bundle with Patient
+                {
+                    fullUrl: historyBundleFullUrl,
+                    resource: {
+                        resourceType: 'Bundle',
+                        meta: {
+                            profile: ['https://profiles.ihe.net/ITI/PMIR/StructureDefinition/IHE.PMIR.Bundle.History'],
+                        },
+                        type: 'history',
+                        entry: [
+                            {
+                                fullUrl: patientFullUrl,
+                                resource: {
+                                    resourceType: 'Patient',
+                                    identifier: patientIdentifiers,
+                                    active: true,
+                                    name: [{
+                                        use: 'official',
+                                        family: data.name.family,
+                                        given: data.name.given,
+                                    }],
+                                    address: [{
+                                        country: data.nationality || 'UNK',
+                                    }],
+                                },
+                                request: {
+                                    method: 'POST',
+                                    url: 'Patient',
+                                },
+                                response: {
+                                    status: '201',
+                                },
+                            },
+                        ],
+                    },
+                },
+            ],
+            // signature placeholder — signBundle() will populate data
+            signature: {
+                type: [{ system: 'urn:iso-astm:E1762-95:2013', code: '1.2.840.10065.1.12.1.1' }],
+                when: now,
+                who: practitionerWho,
+                data: '', // Will be filled by signatureService.signBundle()
+            },
+        };
+
+        return bundle;
+    }
 
     async registerForeigner(data: ForeignerRegistrationData, userToken: string): Promise<any> {
         try {
-            // Save to Local DB
+            // 1. Save to local DB first
             const stmt = db.prepare(`
                 INSERT INTO patients (mbo, firstName, lastName, dateOfBirth, gender, city)
                 VALUES (?, ?, ?, ?, ?, ?)
             `);
-            // Mock MBO for foreigner (usually they get one from system, but for now rand)
-            const mockMBO = 'F' + Math.floor(Math.random() * 100000000).toString().padStart(8, '0');
+            const tempId = 'F' + Math.floor(Math.random() * 100000000).toString().padStart(8, '0');
 
             stmt.run(
-                mockMBO,
+                tempId,
                 data.name.given[0],
                 data.name.family,
                 data.birthDate,
                 data.gender,
-                'Foreign/Unknown'
+                data.nationality || 'Foreign/Unknown'
             );
-            console.log('[PatientService] Saved foreigner to local DB:', mockMBO);
+            console.log('[PatientService] Saved foreigner to local DB:', tempId);
 
-            // Proceed to CEZIH API attempt (Mocking success for now if offline)
+            // 2. Build and sign PMIR bundle
+            const pmirBundle = this.buildPMIRBundle(data);
+            console.log('[PatientService] Built PMIR bundle for foreigner registration');
+
+            // 3. Sign the bundle
+            let signedBundle = pmirBundle;
             try {
-                const headers = authService.getUserAuthHeaders(userToken);
-                // ... existing PMIR bundle ...
-                // skipping full bundle construction for brevity here as it is unchanged logic
-            } catch (e) {
-                console.warn('CEZIH Reg failed (expected without VPN), but saved locally.');
+                const { signatureService } = require('./index');
+                const { bundle: signed } = await signatureService.signBundle(
+                    pmirBundle,
+                    undefined, // signerRef extracted from bundle.signature.who
+                    userToken
+                );
+                signedBundle = signed;
+                console.log('[PatientService] ✅ PMIR bundle signed');
+            } catch (signErr: any) {
+                console.warn('[PatientService] Signing failed, sending unsigned:', signErr.message);
             }
 
-            return {
-                resourceType: 'Patient',
-                id: mockMBO,
-                name: [{ family: data.name.family, given: data.name.given }],
-                identifier: [{ system: CEZIH_IDENTIFIERS.MBO, value: mockMBO }]
-            };
+            // 4. Send to CEZIH patient-registry-services
+            try {
+                const headers = authService.getUserAuthHeaders(userToken);
+                const url = `${config.cezih.gatewayBase}${config.cezih.services.patient}/iti93`;
+                console.log('[PatientService] Sending PMIR bundle to:', url);
+
+                const response = await axios.post(url, signedBundle, {
+                    headers: {
+                        ...headers,
+                        'Content-Type': 'application/fhir+json',
+                        'Accept': 'application/fhir+json',
+                    },
+                });
+
+                console.log('[PatientService] ✅ CEZIH registration response:', response.status);
+
+                // Extract assigned MBO/ID from response
+                const responseBundle = response.data;
+                if (responseBundle?.entry) {
+                    // CEZIH typically returns the registered Patient with assigned identifiers
+                    const patientEntry = responseBundle.entry.find((e: any) =>
+                        e.resource?.resourceType === 'Patient'
+                    );
+                    if (patientEntry?.resource) {
+                        const assignedMbo = patientEntry.resource.identifier?.find(
+                            (id: any) => id.system === CEZIH_IDENTIFIERS.MBO
+                        );
+                        if (assignedMbo) {
+                            // Update local DB with real MBO
+                            db.prepare('UPDATE patients SET mbo = ? WHERE mbo = ?')
+                                .run(assignedMbo.value, tempId);
+                            console.log('[PatientService] Updated local DB with assigned MBO:', assignedMbo.value);
+                        }
+                        return this.mapPatient(patientEntry.resource);
+                    }
+                }
+
+                return {
+                    resourceType: 'Patient',
+                    id: tempId,
+                    name: [{ family: data.name.family, given: data.name.given }],
+                    identifier: [{ system: CEZIH_IDENTIFIERS.MBO, value: tempId }],
+                    _cezihResponse: responseBundle,
+                };
+            } catch (cezihErr: any) {
+                console.warn('[PatientService] CEZIH registration failed:', cezihErr.message);
+                if (cezihErr.response?.data) {
+                    console.warn('[PatientService] CEZIH response:', JSON.stringify(cezihErr.response.data).substring(0, 500));
+                }
+                // Return local-only result
+                return {
+                    resourceType: 'Patient',
+                    id: tempId,
+                    name: [{ family: data.name.family, given: data.name.given }],
+                    identifier: [{ system: CEZIH_IDENTIFIERS.MBO, value: tempId }],
+                    _localOnly: true,
+                    _cezihError: cezihErr.response?.data || cezihErr.message,
+                };
+            }
         } catch (error: any) {
             console.error('[PatientService] Failed to register foreigner:', error.message);
             throw error;
@@ -317,7 +510,12 @@ class PatientService {
     }
 
     async updateForeigner(patientId: string, data: Partial<ForeignerRegistrationData>, userToken: string): Promise<any> {
-        // Similar local update logic could go here
+        // PMIR Update uses PMIREntryUpdate — requires JedinstveniIdentifikatorPacijenta from CEZIH
+        // For now, only update local DB
+        if (data.name) {
+            db.prepare('UPDATE patients SET firstName = ?, lastName = ? WHERE mbo = ?')
+                .run(data.name.given?.[0] || '', data.name.family || '', patientId);
+        }
         return { success: true, id: patientId };
     }
 }
