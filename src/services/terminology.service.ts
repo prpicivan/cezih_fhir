@@ -102,14 +102,19 @@ class TerminologyService {
 
             const valueSets = response.data.entry?.map(e => e.resource) || [];
 
-            // Cache the value sets
+            // Cache and persist the value sets
+            const upsertStmt = db.prepare(
+                'INSERT OR REPLACE INTO terminology_valuesets (url, name, title, version, status, lastSync) VALUES (?, ?, ?, ?, ?, ?)'
+            );
+            const now = new Date().toISOString();
             for (const vs of valueSets) {
                 if (vs.url) {
                     this.cachedValueSets.set(vs.url, vs);
+                    upsertStmt.run(vs.url, vs.name || null, vs.title || null, vs.version || null, vs.status || null, now);
                 }
             }
 
-            console.log(`[TerminologyService] Synced ${valueSets.length} ValueSets`);
+            console.log(`[TerminologyService] Synced and persisted ${valueSets.length} ValueSets`);
             return valueSets;
         } catch (error: any) {
             console.error('[TerminologyService] Failed to sync ValueSets:', error.message);
@@ -140,6 +145,44 @@ class TerminologyService {
      */
     getValueSet(url: string): any | undefined {
         return this.cachedValueSets.get(url);
+    }
+
+    /**
+     * Read all CodeSystems from local DB (no CEZIH call).
+     * Returns each system URL with its concept count and last sync date.
+     */
+    getLocalCodeSystems(): { system: string; conceptCount: number; lastSync: string | null }[] {
+        const rows = db.prepare(`
+            SELECT s.system, s.lastSync, COUNT(c.code) AS conceptCount
+            FROM terminology_sync s
+            LEFT JOIN terminology_concepts c ON c.system = s.system
+            GROUP BY s.system
+            ORDER BY s.lastSync DESC
+        `).all() as any[];
+        return rows.map(r => ({
+            system: r.system,
+            conceptCount: r.conceptCount ?? 0,
+            lastSync: r.lastSync ?? null,
+        }));
+    }
+
+    /**
+     * Read all ValueSets from local DB (no CEZIH call).
+     */
+    getLocalValueSets(): { url: string; name: string | null; title: string | null; version: string | null; status: string | null; lastSync: string | null }[] {
+        const rows = db.prepare(`
+            SELECT url, name, title, version, status, lastSync
+            FROM terminology_valuesets
+            ORDER BY lastSync DESC
+        `).all() as any[];
+        return rows.map(r => ({
+            url: r.url,
+            name: r.name ?? null,
+            title: r.title ?? null,
+            version: r.version ?? null,
+            status: r.status ?? null,
+            lastSync: r.lastSync ?? null,
+        }));
     }
 
     /**

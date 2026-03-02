@@ -189,6 +189,15 @@ export function initDatabase() {
         system TEXT PRIMARY KEY,
         lastSync TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS terminology_valuesets (
+        url      TEXT PRIMARY KEY,
+        name     TEXT,
+        title    TEXT,
+        version  TEXT,
+        status   TEXT,
+        lastSync TEXT
+    );
   `);
 
   // Seed dummy patients if empty
@@ -239,7 +248,7 @@ export function initDatabase() {
     { id: 'calendar', name: 'Kalendar', href: '/dashboard/calendar', icon: 'Calendar', isVisible: true, orderIndex: 2 },
     { id: 'documents', name: 'Klinički dokumenti', href: '/dashboard/documents', icon: 'Activity', isVisible: true, orderIndex: 3 },
     { id: 'audit', name: 'Praćenje statusa', href: '/dashboard/audit', icon: 'ShieldCheck', isVisible: true, orderIndex: 4 },
-    { id: 'registry', name: 'Registar (TC 9)', href: '/dashboard/registry', icon: 'Users', isVisible: true, orderIndex: 5 },
+    { id: 'registry', name: 'CEZIH Registri', href: '/dashboard/registry', icon: 'BookOpen', isVisible: true, orderIndex: 5 },
     { id: 'settings', name: 'Postavke', href: '/dashboard/settings', icon: 'Settings', isVisible: true, orderIndex: 6 },
     { id: 'certification', name: 'Certifikacija', href: '/dashboard/certification', icon: 'Award', isVisible: true, orderIndex: 7 },
   ];

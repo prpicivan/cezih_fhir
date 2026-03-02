@@ -45,6 +45,7 @@ export const CEZIH_IDENTIFIERS = {
 export const CEZIH_EXTENSIONS = {
     PATIENT_LAST_CONTACT: 'http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-patient-last-contact',
     ENCOUNTER_PROFILE: 'http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-encounter',
+    EPISODE_OF_CARE_PROFILE: 'http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-episode-of-care',
     COST_PARTICIPATION: 'http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-troskovi-sudjelovanje',
     RELATED_CASE: 'http://fhir.cezih.hr/specifikacije/StructureDefinition/vezani-slucaj',
     ANNOTATION_TYPE: 'http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-annotation-type',

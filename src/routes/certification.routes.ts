@@ -68,27 +68,74 @@ router.post('/run/:tcId', async (req: Request, res: Response) => {
         let result: any = null;
 
         switch (tcId.toLowerCase()) {
-            case 'tc-1': // Smart Card Login
-                result = { success: true, message: 'Simulated Smart Card Auth successful via Certilia OIDC.' };
-                break;
-
-            case 'tc-2': // Mobile ID Login
-                result = { success: true, message: 'Simulated Mobile.ID Auth successful via Certilia OIDC.' };
-                break;
-
-            case 'tc-3': // System Auth
-                result = await authService.getSystemToken();
-                break;
-
-            case 'tc-4': // Digital Signature (AKD Card)
-            case 'tc-5':
+            case 'tc-1': { // Smart Card Login — vraćamo pravi /protected URL
+                const smartcardInit = await authService.initiateGatewayAuth('smartcard');
                 result = {
                     success: true,
-                    available: true,
-                    algorithm: 'ES384',
-                    message: 'Signature service initialized and ready with PKCS#11.'
+                    method: 'smartcard',
+                    authUrl: smartcardInit.authUrl,
+                    info: 'TC-1 zahtijeva fizičku AKD pametnu karticu i Certilia Middleware. Korisnik mora otvoriti URL u pregledniku i autenticirati se.'
                 };
                 break;
+            }
+
+            case 'tc-2': { // Certilia Mobile ID Login
+                const certiliaInit = await authService.initiateGatewayAuth('certilia');
+                const hasSession = authService.hasGatewaySession();
+                result = {
+                    success: true,
+                    method: 'certilia',
+                    authUrl: certiliaInit.authUrl,
+                    sessionAlreadyActive: hasSession,
+                    message: hasSession
+                        ? 'TC-2: Certilia Mobile ID sesija je već aktivna.'
+                        : 'TC-2: Otvori authUrl u pregledniku, prijavi se Certilia Mobile ID, pa pohrani kolačiće putem POST /auth/session.',
+                };
+                break;
+            }
+
+            case 'tc-3': { // System Auth (OAuth2 Client Credentials)
+                const sysToken = await authService.getSystemToken();
+                result = { success: true, tokenObtained: true, tokenLength: sysToken.length, message: 'System token uspješno dohvaćen od CEZIH SSO.' };
+                break;
+            }
+
+            case 'tc-4': { // Digital Signature — AKD Smart Card (PKCS#11)
+                const { pkcs11Service } = await import('../services/pkcs11.service');
+                const pkcs11Init = pkcs11Service.initialize();
+                if (!pkcs11Init || !pkcs11Service.isActive()) {
+                    const pinStatus = process.env.SIGN_PIN === 'your_sign_pin' ? 'NIJE POSTAVLJEN' : 'postavljen';
+                    throw new Error(
+                        `TC-4 PREDUVJET NIJE ISPUNJEN: AKD pametna kartica nije pronađena. ` +
+                        `(1) Certilia Middleware mora biti instaliran, ` +
+                        `(2) kartica mora biti umetnuta u čitač, ` +
+                        `(3) SIGN_PIN u .env: ${pinStatus}.`
+                    );
+                }
+                const pkcs11Info = pkcs11Service.getKeyInfo();
+                result = { success: true, available: true, algorithm: pkcs11Info?.algo, message: 'AKD pametna kartica uspješno inicijalizirana.' };
+                break;
+            }
+
+            case 'tc-5': { // Digital Signature — Certilia Mobile ID (Udaljeni potpis)
+                const { signatureService: sig } = await import('../services/signature.service');
+                const sigMode = sig.getMode();
+                if (sigMode !== 'certilia') {
+                    throw new Error(`TC-5 PREDUVJET: SIGNING_MODE u .env mora biti 'certilia', trenutno je '${sigMode}'.`);
+                }
+                if (!authService.hasGatewaySession()) {
+                    throw new Error('TC-5 PREDUVJET: Nema aktivne gateway sesije. Prvo izvedi TC-2 (Certilia Mobile ID prijava).');
+                }
+                result = {
+                    success: true,
+                    mode: sigMode,
+                    remoteSignUrl: process.env.REMOTE_SIGN_URL,
+                    signerOib: process.env.SIGNER_OIB,
+                    gatewaySessionActive: true,
+                    message: 'Certilia Udaljeni potpis spreman. Gateway sesija aktivna.'
+                };
+                break;
+            }
 
             case 'tc-6': // OID Generation
                 result = await oidService.generateSingleOid();
@@ -125,15 +172,17 @@ router.post('/run/:tcId', async (req: Request, res: Response) => {
                 }, userToken);
                 break;
 
-            case 'tc-12': // Encounter Start
+            case 'tc-12': { // Encounter Create (Kreiranje posjete)
+                const { config: cfg } = await import('../config');
                 result = await visitService.createVisit({
-                    patientMbo: '123456789',
-                    practitionerId: 'practitioner-1',
-                    organizationId: 'org-1',
+                    patientMbo: '999999423', // Pravi testni pacijent s CEZIH slučajevima
+                    practitionerId: cfg.practitioner.hzjzId,
+                    organizationId: cfg.organization.hzzoCode,
                     startDate: new Date().toISOString(),
                     class: 'AMB'
                 }, userToken);
                 break;
+            }
 
             case 'tc-13': // Encounter Update
                 result = await visitService.updateVisit('some-visit-id', {
@@ -146,8 +195,8 @@ router.post('/run/:tcId', async (req: Request, res: Response) => {
                 result = await visitService.closeVisit('some-visit-id', new Date().toISOString(), userToken);
                 break;
 
-            case 'tc-15': // Case Search (EpisodeOfCare)
-                result = await caseService.getPatientCases('123456789', userToken);
+            case 'tc-15': // Case Search (EpisodeOfCare) via IHE QEDm
+                result = await caseService.getPatientCases('999999423', userToken, true); // Pravi testni pacijent, forceRefresh = true
                 break;
 
             case 'tc-16': // Case Creation (EpisodeOfCare)
@@ -204,8 +253,8 @@ router.post('/run/:tcId', async (req: Request, res: Response) => {
                 result = await clinicalDocumentService.cancelDocument('doc-to-cancel', userToken);
                 break;
 
-            case 'tc-21': // Document Search
-                result = await clinicalDocumentService.searchDocuments({ patientMbo: '123456789' }, userToken);
+            case 'tc-21': // Document Search — traži na CEZIH-u (ne lokalno)
+                result = await clinicalDocumentService.searchDocuments({ patientMbo: '999999423' }, userToken);
                 break;
 
             case 'tc-22': // Document Retrieve
@@ -213,9 +262,7 @@ router.post('/run/:tcId', async (req: Request, res: Response) => {
                 break;
 
             default:
-                // Generic fallback for unimplemented TCs
-                result = { success: true, message: `TC ${tcId} simulation initiated. Check Audit Logs for details.`, generic: true };
-                break;
+                throw new Error(`Nepoznati test case: ${tcId}. Implementirani su TC-1 do TC-22.`);
         }
 
         // Auto-save the status to DB

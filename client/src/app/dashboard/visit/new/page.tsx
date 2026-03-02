@@ -1,14 +1,158 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
     User, Activity, FileText, Send, Save, XCircle, CheckCircle,
     AlertTriangle, Clock, Calendar, ArrowLeft, Info, Eye, Code,
     ChevronRight, CheckCircle2, ShieldCheck, Database,
     ArrowUpRight, ArrowDownLeft, ClipboardList,
-    Smartphone, Loader2, SmartphoneNfc, Bell
+    Smartphone, Loader2, SmartphoneNfc, Bell, Wifi
 } from 'lucide-react';
+
+// ── Circular SVG countdown timer (same as login page) ─────────────────────────
+function CircleTimer({ seconds }: { seconds: number }) {
+    const r = 54;
+    const circumference = 2 * Math.PI * r;
+    const total = 120;
+    const pct = Math.max(0, Math.min(seconds / total, 1));
+    const dashOffset = circumference * (1 - pct);
+    const mm = String(Math.floor(seconds / 60)).padStart(1, '0');
+    const ss = String(seconds % 60).padStart(2, '0');
+
+    return (
+        <div className="relative flex items-center justify-center" style={{ width: 128, height: 128 }}>
+            <svg width="128" height="128" style={{ transform: 'rotate(-90deg)' }}>
+                <circle cx="64" cy="64" r={r} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="10" />
+                <circle
+                    cx="64" cy="64" r={r}
+                    fill="none"
+                    stroke="url(#timerGradSign)"
+                    strokeWidth="10"
+                    strokeLinecap="round"
+                    strokeDasharray={circumference}
+                    strokeDashoffset={dashOffset}
+                    style={{ transition: 'stroke-dashoffset 1s linear' }}
+                />
+                <defs>
+                    <linearGradient id="timerGradSign" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stopColor="#14b8a6" />
+                        <stop offset="100%" stopColor="#10d9a0" />
+                    </linearGradient>
+                </defs>
+            </svg>
+            <div className="absolute flex flex-col items-center">
+                <span style={{ fontFamily: 'monospace', fontSize: 28, fontWeight: 700, color: '#fff', lineHeight: 1 }}>
+                    {mm}:{ss}
+                </span>
+                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', marginTop: 3 }}>preostalo</span>
+            </div>
+        </div>
+    );
+}
+
+// ── Animated phone mock showing Certilia push screen (same as login page) ─────
+function CertiliaPhoneMock({ seconds, label }: { seconds: number; label?: string }) {
+    return (
+        <div className="relative flex items-center justify-center" style={{ width: 200, height: 340 }}>
+            {[0, 1, 2].map(i => (
+                <div
+                    key={i}
+                    className="absolute rounded-full border border-indigo-400/20"
+                    style={{
+                        width: 180 + i * 44,
+                        height: 300 + i * 44,
+                        animation: `sign-phone-pulse 2.4s ease-out ${i * 0.6}s infinite`,
+                    }}
+                />
+            ))}
+            <div style={{
+                width: 160,
+                height: 300,
+                background: 'linear-gradient(160deg,#1e1b4b 0%,#0f172a 100%)',
+                borderRadius: 28,
+                border: '2px solid rgba(139,92,246,0.4)',
+                boxShadow: '0 0 40px rgba(99,102,241,0.25), inset 0 1px 0 rgba(255,255,255,0.08)',
+                position: 'relative',
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+            }}>
+                <div style={{ width: 48, height: 8, background: '#0f172a', borderRadius: 4, marginTop: 12 }} />
+                <div style={{ width: '100%', padding: '4px 14px 2px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', fontFamily: 'monospace' }}>9:41</span>
+                    <Wifi style={{ width: 9, height: 9, color: 'rgba(255,255,255,0.4)' }} />
+                </div>
+                <div style={{
+                    width: '100%',
+                    padding: '8px 14px 6px',
+                    background: 'linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%)',
+                    display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                    <div style={{ width: 20, height: 20, borderRadius: 5, background: 'rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <ShieldCheck style={{ width: 12, height: 12, color: '#fff' }} />
+                    </div>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', letterSpacing: 0.5 }}>Certilia</span>
+                    <div style={{
+                        marginLeft: 'auto',
+                        width: 16, height: 16, borderRadius: 8,
+                        background: '#ef4444',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        animation: 'sign-badge-bounce 1.2s ease-in-out infinite',
+                    }}>
+                        <span style={{ fontSize: 9, color: '#fff', fontWeight: 700 }}>1</span>
+                    </div>
+                </div>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 12px 8px', width: '100%' }}>
+                    <div style={{
+                        width: '100%',
+                        background: 'rgba(255,255,255,0.06)',
+                        border: '1px solid rgba(255,255,255,0.12)',
+                        borderRadius: 12,
+                        padding: '10px 10px 8px',
+                        textAlign: 'center',
+                        marginBottom: 10,
+                    }}>
+                        <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>ZAHTJEV ZA POTPIS</div>
+                        <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.7)', marginBottom: 8 }}>{label || 'Medicinski nalaz'}</div>
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                            <CircleTimer seconds={seconds} />
+                        </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+                        <div style={{
+                            flex: 1, padding: '7px 0', borderRadius: 8,
+                            background: 'rgba(239,68,68,0.15)',
+                            border: '1px solid rgba(239,68,68,0.3)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                            <span style={{ fontSize: 9, color: '#f87171', fontWeight: 700 }}>ODBIJ</span>
+                        </div>
+                        <div style={{
+                            flex: 1, padding: '7px 0', borderRadius: 8,
+                            background: 'linear-gradient(135deg,rgba(20,184,166,0.3),rgba(16,217,160,0.3))',
+                            border: '1px solid rgba(20,184,166,0.5)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                            <span style={{ fontSize: 9, color: '#2dd4bf', fontWeight: 700 }}>ODOBRI</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div style={{ position: 'absolute', top: 10, right: -8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {[0, 1, 2].map(i => (
+                    <div key={i} style={{
+                        width: 5, height: 5, borderRadius: '50%',
+                        background: '#14b8a6',
+                        opacity: 0.6,
+                        animation: `sign-dot-blink 1.5s ease-in-out ${i * 0.3}s infinite`,
+                    }} />
+                ))}
+            </div>
+        </div>
+    );
+}
 
 function ClinicalWorkspace() {
     const searchParams = useSearchParams();
@@ -53,6 +197,29 @@ function ClinicalWorkspace() {
     const [signingError, setSigningError] = useState<string | null>(null);
     const [transactionCode, setTransactionCode] = useState<string | null>(null);
     const [currentDocOid, setCurrentDocOid] = useState<string | null>(null);
+
+    // Countdown for signing waiting screen (2 minutes = 120 seconds)
+    const [signingCountdown, setSigningCountdown] = useState(120);
+    const signingCountdownRef = useRef<NodeJS.Timeout | null>(null);
+
+    // Start/stop countdown when signing modal opens/closes
+    useEffect(() => {
+        if (isSigningModalOpen && signingStatus === 'waiting') {
+            setSigningCountdown(120);
+            signingCountdownRef.current = setInterval(() => {
+                setSigningCountdown(c => {
+                    if (c <= 1) {
+                        clearInterval(signingCountdownRef.current!);
+                        return 0;
+                    }
+                    return c - 1;
+                });
+            }, 1000);
+        } else {
+            if (signingCountdownRef.current) clearInterval(signingCountdownRef.current);
+        }
+        return () => { if (signingCountdownRef.current) clearInterval(signingCountdownRef.current); };
+    }, [isSigningModalOpen, signingStatus]);
 
     useEffect(() => {
         // Fetch initial suggestions (top 15)
@@ -810,72 +977,120 @@ function ClinicalWorkspace() {
 
             {/* Signing Modal */}
             {isSigningModalOpen && (
-                <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col border border-slate-200 animate-in fade-in zoom-in duration-300">
-                        <div className="p-8 text-center space-y-6">
+                <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" style={{ background: 'rgba(10,15,30,0.85)', backdropFilter: 'blur(8px)' }}>
+                    {/* CSS keyframes for phone animations */}
+                    <style>{`
+                        @keyframes sign-phone-pulse {
+                            0%   { transform: scale(1);    opacity: 0.5; }
+                            50%  { transform: scale(1.04); opacity: 0.25; }
+                            100% { transform: scale(1.08); opacity: 0; }
+                        }
+                        @keyframes sign-badge-bounce {
+                            0%, 100% { transform: scale(1); }
+                            50%      { transform: scale(1.25); }
+                        }
+                        @keyframes sign-dot-blink {
+                            0%, 100% { opacity: 0.2; }
+                            50%      { opacity: 1; }
+                        }
+                    `}</style>
+                    <div style={{
+                        width: '100%', maxWidth: 420,
+                        background: 'rgba(255,255,255,0.04)',
+                        backdropFilter: 'blur(24px)',
+                        WebkitBackdropFilter: 'blur(24px)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: 24,
+                        boxShadow: '0 32px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05) inset',
+                        overflow: 'hidden',
+                        fontFamily: "'Inter', 'Segoe UI', Arial, sans-serif",
+                        animation: 'sign-slide-up 0.35s ease-out',
+                    }}>
+                        <style>{`@keyframes sign-slide-up { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }`}</style>
+                        <div style={{ padding: '28px 28px 24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                             {signingStatus === 'waiting' && (
                                 <>
-                                    <div className="mx-auto w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center relative">
-                                        <Smartphone className="w-10 h-10 text-blue-600" />
-                                        <div className="absolute inset-0 rounded-full border-4 border-blue-500 border-t-transparent animate-spin" />
+                                    <h3 style={{ fontSize: 17, fontWeight: 800, color: '#fff', margin: '0 0 4px' }}>
+                                        Odobrenje potpisa
+                                    </h3>
+                                    <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', textAlign: 'center', margin: '0 0 16px', maxWidth: 300 }}>
+                                        Otvorite <strong style={{ color: 'rgba(255,255,255,0.65)' }}>Certilia</strong> aplikaciju i pritisnite <strong style={{ color: '#4ade80' }}>ODOBRI</strong>
+                                    </p>
+                                    <CertiliaPhoneMock seconds={signingCountdown} label="Medicinski nalaz" />
+                                    <div style={{ width: '100%', maxWidth: 300, display: 'flex', flexDirection: 'column', gap: 6, marginTop: 16 }}>
+                                        <div style={{
+                                            display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                                            background: 'rgba(74,222,128,0.08)',
+                                            border: '1px solid rgba(74,222,128,0.15)',
+                                            borderRadius: 10,
+                                        }}>
+                                            <CheckCircle style={{ width: 16, height: 16, color: '#4ade80', flexShrink: 0 }} />
+                                            <span style={{ fontSize: 12, color: '#4ade80' }}>Dokument generiran</span>
+                                        </div>
+                                        <div style={{
+                                            display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                                            background: 'rgba(74,222,128,0.08)',
+                                            border: '1px solid rgba(74,222,128,0.15)',
+                                            borderRadius: 10,
+                                        }}>
+                                            <CheckCircle style={{ width: 16, height: 16, color: '#4ade80', flexShrink: 0 }} />
+                                            <span style={{ fontSize: 12, color: '#4ade80' }}>Push obavijest poslana</span>
+                                        </div>
+                                        <div style={{
+                                            display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                                            background: 'rgba(99,102,241,0.1)',
+                                            border: '1px solid rgba(99,102,241,0.25)',
+                                            borderRadius: 10,
+                                        }}>
+                                            <Loader2 style={{ width: 16, height: 16, color: '#818cf8', flexShrink: 0, animation: 'spin 1s linear infinite' }} />
+                                            <span style={{ fontSize: 12, color: '#818cf8', fontWeight: 600 }}>Čeka se potpis...</span>
+                                        </div>
                                     </div>
-                                    <div className="space-y-2">
-                                        <h3 className="text-xl font-bold text-slate-800">Čekam potpis...</h3>
-                                        <p className="text-sm text-slate-500">
-                                            Provjerite svoju Certilia mobilnu aplikaciju i odobrite zahtjev za potpisivanje.
-                                        </p>
-                                    </div>
-                                    <div className="pt-4 flex items-center justify-center gap-2 text-[10px] font-mono text-slate-400">
-                                        <ShieldCheck className="w-3 h-3" />
-                                        TRANSACTION: {transactionCode}
+                                    <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'rgba(255,255,255,0.25)', fontFamily: 'monospace' }}>
+                                        <ShieldCheck style={{ width: 12, height: 12 }} />
+                                        TXN: {transactionCode}
                                     </div>
                                 </>
                             )}
 
                             {signingStatus === 'signed' && (
                                 <>
-                                    <div className="mx-auto w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center">
-                                        <CheckCircle2 className="w-10 h-10 text-emerald-600" />
+                                    <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(74,222,128,0.15)', border: '1px solid rgba(74,222,128,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', boxShadow: '0 0 40px rgba(74,222,128,0.2)' }}>
+                                        <CheckCircle2 style={{ width: 40, height: 40, color: '#4ade80' }} />
                                     </div>
-                                    <div className="space-y-2">
-                                        <h3 className="text-xl font-bold text-emerald-800">Uspješno potpisano!</h3>
-                                        <p className="text-sm text-slate-500">
-                                            Dohvaćam potpisan dokument i šaljem ga na CEZIH...
-                                        </p>
-                                    </div>
-                                    <Loader2 className="w-6 h-6 text-emerald-600 animate-spin mx-auto" />
+                                    <h3 style={{ fontSize: 18, fontWeight: 800, color: '#4ade80', margin: '0 0 8px' }}>Uspješno potpisano!</h3>
+                                    <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', margin: 0 }}>
+                                        Dohvaćam potpisan dokument i šaljem ga na CEZIH...
+                                    </p>
+                                    <Loader2 style={{ width: 24, height: 24, color: '#4ade80', animation: 'spin 1s linear infinite', marginTop: 16 }} />
                                 </>
                             )}
 
                             {signingStatus === 'submitting' && (
                                 <>
-                                    <div className="mx-auto w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center">
-                                        <Database className="w-10 h-10 text-blue-600 animate-pulse" />
+                                    <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                                        <Database style={{ width: 40, height: 40, color: '#818cf8', animation: 'pulse 2s ease-in-out infinite' }} />
                                     </div>
-                                    <div className="space-y-2">
-                                        <h3 className="text-xl font-bold text-slate-800">Slanje na CEZIH...</h3>
-                                        <p className="text-sm text-slate-500">
-                                            Završavam ITI-65 transakciju i arhiviram dokument.
-                                        </p>
-                                    </div>
-                                    <Loader2 className="w-6 h-6 text-blue-600 animate-spin mx-auto" />
+                                    <h3 style={{ fontSize: 18, fontWeight: 800, color: '#fff', margin: '0 0 8px' }}>Slanje na CEZIH...</h3>
+                                    <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', margin: 0 }}>
+                                        Završavam ITI-65 transakciju i arhiviram dokument.
+                                    </p>
+                                    <Loader2 style={{ width: 24, height: 24, color: '#818cf8', animation: 'spin 1s linear infinite', marginTop: 16 }} />
                                 </>
                             )}
 
                             {signingStatus === 'success' && (
                                 <>
-                                    <div className="mx-auto w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center">
-                                        <CheckCircle className="w-10 h-10 text-emerald-600" />
+                                    <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(74,222,128,0.12)', border: '1px solid rgba(74,222,128,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', boxShadow: '0 0 40px rgba(74,222,128,0.2)' }}>
+                                        <CheckCircle style={{ width: 40, height: 40, color: '#4ade80' }} />
                                     </div>
-                                    <div className="space-y-2">
-                                        <h3 className="text-xl font-bold text-slate-800">Dokument je poslan!</h3>
-                                        <p className="text-sm text-slate-500">
-                                            Vaš nalaz je uspješno potpisan i trajno pohranjen u CEZIH repozitorij.
-                                        </p>
-                                    </div>
+                                    <h3 style={{ fontSize: 18, fontWeight: 800, color: '#4ade80', margin: '0 0 8px' }}>Dokument je poslan!</h3>
+                                    <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', margin: '0 0 20px' }}>
+                                        Vaš nalaz je uspješno potpisan i trajno pohranjen u CEZIH repozitorij.
+                                    </p>
                                     <button
                                         onClick={() => setIsSigningModalOpen(false)}
-                                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition-colors"
+                                        style={{ width: '100%', padding: '12px', background: 'linear-gradient(135deg,#14b8a6,#10d9a0)', border: 'none', borderRadius: 12, cursor: 'pointer', fontSize: 14, fontWeight: 700, color: '#fff', boxShadow: '0 4px 16px rgba(20,184,166,0.4)' }}
                                     >
                                         U redu
                                     </button>
@@ -884,18 +1099,16 @@ function ClinicalWorkspace() {
 
                             {signingStatus === 'error' && (
                                 <>
-                                    <div className="mx-auto w-20 h-20 bg-rose-50 rounded-full flex items-center justify-center">
-                                        <AlertTriangle className="w-10 h-10 text-rose-600" />
+                                    <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                                        <AlertTriangle style={{ width: 40, height: 40, color: '#f87171' }} />
                                     </div>
-                                    <div className="space-y-2">
-                                        <h3 className="text-xl font-bold text-slate-800">Greška</h3>
-                                        <p className="text-sm text-rose-600 font-medium">
-                                            {signingError || 'Došlo je do pogreške prilikom potpisivanja.'}
-                                        </p>
-                                    </div>
+                                    <h3 style={{ fontSize: 18, fontWeight: 800, color: '#fff', margin: '0 0 8px' }}>Greška</h3>
+                                    <p style={{ fontSize: 13, color: '#fca5a5', fontWeight: 500, margin: '0 0 20px' }}>
+                                        {signingError || 'Došlo je do pogreške prilikom potpisivanja.'}
+                                    </p>
                                     <button
                                         onClick={() => setIsSigningModalOpen(false)}
-                                        className="w-full py-3 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold transition-colors"
+                                        style={{ width: '100%', padding: '12px', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 12, cursor: 'pointer', fontSize: 14, fontWeight: 700, color: '#fff' }}
                                     >
                                         Zatvori
                                     </button>

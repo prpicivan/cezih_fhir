@@ -11,6 +11,7 @@
 import axios, { AxiosInstance } from 'axios';
 import { config } from '../config';
 import { CezihTokenResponse } from '../types';
+import db from '../db';
 
 // ============================================================
 // Types
@@ -34,6 +35,8 @@ export interface GatewaySession {
     createdAt: number;
     /** mod_auth_openid_session value if extracted */
     sessionToken?: string;
+    /** Decoded JWT claims (includes realm_access.roles) — populated if a JWT cookie is detected */
+    userClaims?: Record<string, any>;
 }
 
 // ============================================================
@@ -48,6 +51,30 @@ class AuthService {
     // --- Gateway Auth ---
     private gatewaySession: GatewaySession | null = null;
     private pendingAuthState: Map<string, { chainCookies: string[]; gatewayUrl: string }> = new Map();
+
+    constructor() {
+        // Obnovi sesiju iz SQLite ako postoji (preživljava tsx watch restart)
+        this.restoreSessionFromDb();
+    }
+
+    private restoreSessionFromDb(): void {
+        try {
+            const row = db.prepare("SELECT value FROM settings WHERE key = 'gateway_session'").get() as any;
+            if (row?.value) {
+                const saved = JSON.parse(row.value) as GatewaySession;
+                const maxAge = 4 * 60 * 60 * 1000; // 4h
+                if (Date.now() - saved.createdAt < maxAge) {
+                    this.gatewaySession = saved;
+                    console.log('[AuthService] ✅ Gateway sesija obnovljena iz DB (stara', Math.round((Date.now() - saved.createdAt) / 60000), 'min)');
+                } else {
+                    console.log('[AuthService] DB sesija je istekla, ignoriramo.');
+                    db.prepare("DELETE FROM settings WHERE key = 'gateway_session'").run();
+                }
+            }
+        } catch (e: any) {
+            console.warn('[AuthService] Ne mogu obnoviti sesiju iz DB:', e.message);
+        }
+    }
 
     // ============================================================
     // System Auth (OAuth2 Client Credentials — unchanged)
@@ -106,18 +133,6 @@ class AuthService {
         console.log(`[AuthService] Initiating gateway auth (${method})...`);
 
         if (method === 'smartcard') {
-            // FINALNI FIX za smart card auth:
-            //
-            // V1: backend radio hop1+hop2, vraćao x509 URL → "Cookie not found"
-            // V2: otvara certsso2 OIDC URL → 400 na /protected (gateway nije inicirao sesiju)
-            // V3: otvara /services-router/gateway → Spring Boot 404 (to je FHIR API ruta)
-            //
-            // ISPRAVNO: otvoriti /protected — to je mod_auth_openidc endpoint koji:
-            //   1. Bez sesije → preusmjerava browser na certsso2 OIDC s ispravnim state/nonce
-            //   2. Browser ide na certsso2, dobiva AUTH_SESSION_ID ✅
-            //   3. Korisnik unosi PIN ✅
-            //   4. certsso2 → /protected?state=...&code=... — gateway prepoznaje vlastiti state ✅
-            //   5. Gateway validira code, kreira sesiju ✅
             const protectedUrl = `${config.cezih.baseUrl}/protected`;
             console.log(`[AuthService] ✅ Smart card: vraćamo /protected URL (mod_auth_openidc endpoint)`);
             return {
@@ -151,28 +166,63 @@ class AuthService {
         }
     }
 
-
-
-
-
     // ============================================================
     // Gateway Auth — Store Session
     // ============================================================
 
     /**
      * Store gateway session cookies after successful browser authentication.
-     * The frontend sends back the cookies it captured from the auth flow.
+     * Also tries to detect any JWT embedded in cookie values and extract user claims.
      */
     storeGatewaySession(cookies: string[], sessionToken?: string): void {
+        // Try to decode JWT claims from any cookie that contains a 3-part JWT value
+        let detectedClaims: Record<string, any> | undefined;
+
+        for (const cookie of cookies) {
+            const val = cookie.split('=').slice(1).join('=');
+            const parts = val.split('.');
+            if (parts.length === 3 && parts[1].length > 10) {
+                try {
+                    const padded = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+                    const payload = JSON.parse(Buffer.from(padded, 'base64').toString('utf-8'));
+                    if (payload.sub && (payload.realm_access || payload.authorities || payload.user_type)) {
+                        detectedClaims = payload;
+                        console.log('[AuthService] 🎯 JWT claims detected in cookie:', cookie.split('=')[0]);
+                        console.log('[AuthService] User:', payload.preferred_username || payload.sub);
+                        console.log('[AuthService] UserType:', payload.user_type);
+                        console.log('[AuthService] Roles:', JSON.stringify(
+                            payload.realm_access?.roles || payload.authorities?.roles || []
+                        ));
+                        break;
+                    }
+                } catch { /* not a valid JWT, skip */ }
+            }
+        }
+
+        if (!detectedClaims) {
+            console.log('[AuthService] No JWT found in cookies — user claims not available via cookie decode');
+        }
+
         this.gatewaySession = {
             cookies,
             createdAt: Date.now(),
             sessionToken,
+            userClaims: detectedClaims,
         };
         console.log('[AuthService] ✅ Gateway session stored');
         console.log('[AuthService] Cookies:', cookies.length);
         if (sessionToken) {
             console.log('[AuthService] Session token:', sessionToken.substring(0, 20) + '...');
+        }
+
+        // Persist u SQLite da preživi restart
+        try {
+            db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('gateway_session', ?)").run(
+                JSON.stringify(this.gatewaySession)
+            );
+            console.log('[AuthService] ✅ Sesija zapisana u DB.');
+        } catch (e: any) {
+            console.warn('[AuthService] Ne mogu zapisati sesiju u DB:', e.message);
         }
     }
 
@@ -181,7 +231,6 @@ class AuthService {
      */
     hasGatewaySession(): boolean {
         if (!this.gatewaySession) return false;
-        // Sessions are typically valid for a few hours
         const maxAge = 4 * 60 * 60 * 1000; // 4 hours
         return Date.now() - this.gatewaySession.createdAt < maxAge;
     }
@@ -206,7 +255,7 @@ class AuthService {
     /**
      * Get current session status.
      */
-    getSessionStatus(): { authenticated: boolean; method?: string; createdAt?: number } {
+    getSessionStatus(): { authenticated: boolean; method?: string; createdAt?: number; hasUserClaims?: boolean } {
         if (!this.hasGatewaySession()) {
             return { authenticated: false };
         }
@@ -214,7 +263,15 @@ class AuthService {
             authenticated: true,
             method: 'gateway',
             createdAt: this.gatewaySession!.createdAt,
+            hasUserClaims: !!this.gatewaySession!.userClaims,
         };
+    }
+
+    /**
+     * Get decoded user claims from the active session (if available).
+     */
+    getUserClaims(): Record<string, any> | null {
+        return this.gatewaySession?.userClaims || null;
     }
 
     // ============================================================

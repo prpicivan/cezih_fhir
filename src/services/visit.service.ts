@@ -30,6 +30,11 @@ export interface VisitData {
     diagnosisDisplay?: string;
     class: 'AMB' | 'IMP' | 'EMER'; // ambulatory, inpatient, emergency
     caseId?: string;
+    // Parameterized org identifier for testing
+    orgIdentifierSystem?: string;
+    orgIdentifierValue?: string;
+    // Skip serviceProvider entirely
+    skipServiceProvider?: boolean;
 }
 
 class VisitService {
@@ -61,6 +66,7 @@ class VisitService {
 
     async createVisit(data: VisitData, userToken: string): Promise<any> {
         const messageId = uuidv4();
+        const encounterUuid = uuidv4();
         const localVisitId = data.localVisitId || uuidv4();
 
         const now = new Date();
@@ -101,18 +107,35 @@ class VisitService {
             throw new Error(`Database error: ${dbError.message}`);
         }
 
-        const bundle = {
+        const bundle: any = {
             resourceType: 'Bundle',
+            id: uuidv4(),
+            meta: {
+                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-create-encounter-message']
+            },
             type: 'message',
+            timestamp: new Date().toISOString(),
             entry: [
                 {
                     fullUrl: `urn:uuid:${messageId}`,
                     resource: {
                         resourceType: 'MessageHeader',
                         id: messageId,
+                        meta: {
+                            profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-encounter-management-message-header'],
+                        },
                         eventCoding: {
-                            system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/message-events',
-                            code: 'encounter-create',
+                            // ehe-message-types / 1.1 — prema hr-create-encounter-message StructureDefinition
+                            system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
+                            code: '1.1',
+                        },
+                        // DIGSIG-1: autor poruke mora biti jednak Bundle.signature.who
+                        author: {
+                            type: 'Practitioner',
+                            identifier: {
+                                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
+                                value: config.practitioner.hzjzId || config.practitioner.oib,
+                            }
                         },
                         source: {
                             endpoint: config.cezih.baseUrl,
@@ -120,11 +143,11 @@ class VisitService {
                             software: `${config.software.name}_${config.software.company}`,
                             version: config.software.version,
                         },
-                        focus: [{ reference: `urn:uuid:encounter-1` }],
+                        focus: [{ reference: `urn:uuid:${encounterUuid}` }],
                     },
                 },
                 {
-                    fullUrl: 'urn:uuid:encounter-1',
+                    fullUrl: `urn:uuid:${encounterUuid}`,
                     resource: {
                         resourceType: 'Encounter',
                         meta: {
@@ -159,25 +182,31 @@ class VisitService {
                         },
                         type: [
                             {
+                                // VrstaPosjete — prisutnost pacijenta (vrsta-posjete)
+                                // 1=Pacijent prisutan, 2=Pacijent udaljeno prisutan, 3=Pacijent nije prisutan
                                 coding: [
                                     {
                                         system: ENCOUNTER_CODES.VISIT_TYPE_SYSTEM,
-                                        code: '1' // Example
+                                        code: '1',
+                                        display: 'Pacijent prisutan'
                                     }
                                 ]
                             },
                             {
+                                // TipPosjete — 1=LOM, 2=SKZZ, 3=Hospitalizacija
                                 coding: [
                                     {
                                         system: ENCOUNTER_CODES.VISIT_SUBTYPE_SYSTEM,
-                                        code: '1' // Example
+                                        code: '2', // Posjeta SKZZ (specijalistička)
+                                        display: 'Posjeta SKZZ'
                                     }
                                 ]
                             }
                         ],
                         identifier: [
                             {
-                                system: CEZIH_IDENTIFIERS.VISIT_ID, // Use the proper global one
+                                // Lokalni identifikator — šalje Gx aplikacija
+                                system: CEZIH_IDENTIFIERS.LOCAL_VISIT_ID,
                                 value: localVisitId,
                             },
                         ],
@@ -202,28 +231,28 @@ class VisitService {
                                     type: 'Practitioner',
                                     identifier: {
                                         system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
-                                        value: data.practitionerId,
+                                        value: data.practitionerId || config.practitioner.hzjzId,
                                     },
                                 },
                             },
                         ],
-                        serviceProvider: {
-                            type: 'Organization',
-                            identifier: {
-                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
-                                value: data.organizationId,
+                        ...(!data.skipServiceProvider && {
+                            serviceProvider: {
+                                type: 'Organization',
+                                identifier: {
+                                    system: data.orgIdentifierSystem || CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                                    value: data.orgIdentifierValue || data.organizationId || config.organization?.hzzoCode || '4981825',
+                                },
                             },
-                        },
+                        }),
                         period: {
-                            start: data.startDate,
-                            end: data.endDate,
+                            start: data.startDate || new Date().toISOString(),
+                            ...(data.endDate && { end: data.endDate }),
                         },
                         ...(data.reasonCode && {
                             reasonCode: [{
-                                coding: [{
-                                    code: data.reasonCode,
-                                    display: data.reasonDisplay,
-                                }],
+                                // Spec: reasonCode.coding max=0, samo text!
+                                text: data.reasonDisplay || data.reasonCode,
                             }],
                         }),
                         ...(data.caseId && {
@@ -398,6 +427,7 @@ class VisitService {
 
     async closeVisit(visitId: string, endDate: string, userToken: string, patientMbo?: string): Promise<any> {
         const messageId = uuidv4();
+        const encounterUuid = uuidv4();
 
         // Update Local DB
         try {
@@ -408,18 +438,34 @@ class VisitService {
             console.error('[VisitService] DB Close Error', dbError);
         }
 
-        const bundle = {
+        const bundle: any = {
             resourceType: 'Bundle',
+            id: uuidv4(),
+            meta: {
+                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-close-encounter-message'],
+            },
             type: 'message',
+            timestamp: new Date().toISOString(),
             entry: [
                 {
                     fullUrl: `urn:uuid:${messageId}`,
                     resource: {
                         resourceType: 'MessageHeader',
                         id: messageId,
+                        meta: {
+                            profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-encounter-management-message-header'],
+                        },
                         eventCoding: {
-                            system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/message-events',
-                            code: 'encounter-close',
+                            system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
+                            code: '1.3', // Close Encounter (1.1=create, 1.2=update, 1.3=close)
+                        },
+                        // DIGSIG-1: autor poruke = Bundle.signature.who
+                        author: {
+                            type: 'Practitioner',
+                            identifier: {
+                                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
+                                value: config.practitioner.hzjzId || config.practitioner.oib,
+                            }
                         },
                         source: {
                             endpoint: config.cezih.baseUrl,
@@ -427,11 +473,11 @@ class VisitService {
                             software: `${config.software.name}_${config.software.company}`,
                             version: config.software.version,
                         },
-                        focus: [{ reference: `urn:uuid:encounter-1` }],
+                        focus: [{ reference: `urn:uuid:${encounterUuid}` }],
                     },
                 },
                 {
-                    fullUrl: 'urn:uuid:encounter-1',
+                    fullUrl: `urn:uuid:${encounterUuid}`,
                     resource: {
                         resourceType: 'Encounter',
                         meta: {
@@ -444,6 +490,24 @@ class VisitService {
                             },
                         ],
                         status: 'finished',
+                        class: {
+                            system: ENCOUNTER_CLASS_SYSTEM,
+                            code: '1',
+                        },
+                        subject: {
+                            type: 'Patient',
+                            identifier: {
+                                system: CEZIH_IDENTIFIERS.MBO,
+                                value: patientMbo || this.getVisit(visitId)?.patientMbo || '999999423',
+                            },
+                        },
+                        serviceProvider: {
+                            type: 'Organization',
+                            identifier: {
+                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                                value: config.organization?.hzzoCode || '4981825',
+                            },
+                        },
                         period: {
                             end: endDate,
                         },
@@ -485,21 +549,36 @@ class VisitService {
             console.log('[VisitService] Message sent successfully');
             finalResponse = response.data;
         } catch (error: any) {
-            console.warn('[VisitService] CEZIH send failed:', error.message);
+            const cezihStatus = error.response?.status;
+            const cezihBody = error.response?.data;
+            console.warn(`[VisitService] CEZIH send failed: HTTP ${cezihStatus || '?'}: ${error.message}`);
+            if (cezihBody) console.warn('[VisitService] CEZIH Error Body:', JSON.stringify(cezihBody)?.slice(0, 2000));
             errorMessage = error.message;
 
-            // If it's a real 404 from the server, we should NOT mask it as success
-            // 404 usually means a referenced resource (like a case) is missing on the server
-            if (error.response?.status === 404) {
-                console.error('[VisitService] Server returned 404 — missing resource error');
-                throw new Error(`CEZIH server reported 404: Resource not found. This often happens when referencing a mock case ID that does not exist on the remote server.`);
-            }
+            // Extract human-readable CEZIH error for audit log
+            const cezihError = (() => {
+                if (!cezihBody) return error.message;
+                if (typeof cezihBody === 'string') return cezihBody.slice(0, 2000);
+                if (cezihBody.resourceType === 'Bundle') {
+                    const outcome = cezihBody.entry?.find((e: any) => e.resource?.resourceType === 'OperationOutcome')?.resource;
+                    if (outcome) {
+                        return outcome.issue?.[0]?.details?.coding?.[0]?.display
+                            || outcome.issue?.[0]?.diagnostics
+                            || JSON.stringify(outcome).slice(0, 2000);
+                    }
+                }
+                return cezihBody?.issue?.[0]?.diagnostics
+                    || cezihBody?.error?.errorDescription
+                    || JSON.stringify(cezihBody).slice(0, 2000);
+            })();
 
-            // Fallback for network/VPN issues (demo mode)
+            // Never re-throw — the visit is already saved to local DB.
+            // All CEZIH errors (400, 404, network) are recorded in audit log.
+            errorMessage = `HTTP ${cezihStatus}: ${cezihError}`;
             finalResponse = {
-                resourceType: 'Bundle',
-                type: 'message',
-                entry: [{ resource: { resourceType: 'MessageHeader', response: { code: 'ok' } } }]
+                localOnly: true,
+                cezihStatus: 'failed',
+                cezihError: errorMessage,
             };
         }
         finally {

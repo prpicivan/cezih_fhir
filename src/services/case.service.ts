@@ -160,18 +160,43 @@ class CaseService {
             console.error('Case DB Insert error:', err.message);
         }
 
+        const conditionUuid = uuidv4();
+        const conditionEntryId = `urn:uuid:${conditionUuid}`;
+        const headerEntryId = `urn:uuid:${messageId}`;
+
+        // TC16: Šaljemo Condition resurs (CEZIH 'Slučaj' = FHIR Condition)
+        // Profil bundle:  hr-create-health-issue-message
+        // Event code:     ehe-message-types / 2.1  (fixedCoding iz StructureDefinition)
+        // ZABRANJENO: clinicalStatus (max:0), recorder (max:0), recordedDate (max:0), abatement (max:0)
         const bundle = {
             resourceType: 'Bundle',
+            id: messageId,
+            meta: {
+                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-create-health-issue-message'],
+            },
             type: 'message',
+            timestamp: new Date().toISOString(),
             entry: [
                 {
-                    fullUrl: `urn:uuid:${messageId}`,
+                    fullUrl: headerEntryId,
                     resource: {
                         resourceType: 'MessageHeader',
                         id: messageId,
+                        meta: {
+                            profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-hi-management-message-header'],
+                        },
+                        // event[x] — fixedCoding iz hr-create-health-issue-message
                         eventCoding: {
-                            system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/message-events',
-                            code: 'episode-of-care-create',
+                            system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
+                            code: '2.1',
+                        },
+                        // DIGSIG-1: autor poruke mora biti jednak Bundle.signature.who
+                        author: {
+                            type: 'Practitioner',
+                            identifier: {
+                                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
+                                value: config.practitioner.hzjzId || config.practitioner.oib,
+                            }
                         },
                         source: {
                             endpoint: config.cezih.baseUrl,
@@ -179,54 +204,54 @@ class CaseService {
                             software: `${config.software.name}_${config.software.company}`,
                             version: config.software.version,
                         },
-                        focus: [{ reference: 'urn:uuid:case-1' }],
+                        focus: [{ reference: conditionEntryId }],
                     },
                 },
                 {
-                    fullUrl: 'urn:uuid:case-1',
+                    fullUrl: conditionEntryId,
                     resource: {
-                        resourceType: 'EpisodeOfCare',
-                        status: data.status,
+                        resourceType: 'Condition',
+                        id: localCaseId,
+                        meta: {
+                            profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-condition'],
+                        },
                         identifier: [
                             {
+                                // sliceName: lokalni-identifikator (globalni-identifikator je max:0)
                                 system: CEZIH_IDENTIFIERS.LOCAL_CASE_ID,
                                 value: localCaseId,
                             },
                         ],
-                        patient: {
+                        // clinicalStatus je max:0 u TC16 profilu — NE ŠALJEMO!
+                        verificationStatus: {
+                            // VS: health-issue-management-verification-status-create
+                            coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'confirmed' }],
+                        },
+                        ...(data.diagnosisCode ? {
+                            code: {
+                                coding: [{
+                                    system: ENCOUNTER_CODES.ICD10_HR,
+                                    code: data.diagnosisCode,
+                                    display: data.diagnosisDisplay,
+                                }],
+                                text: data.diagnosisDisplay,
+                            },
+                        } : {}),
+                        subject: {
+                            type: 'Patient',
                             identifier: {
                                 system: CEZIH_IDENTIFIERS.MBO,
                                 value: data.patientMbo,
                             },
                         },
-                        ...(data.diagnosisCode ? {
-                            diagnosis: [{
-                                condition: {
-                                    display: data.diagnosisDisplay,
-                                },
-                                role: {
-                                    coding: [{
-                                        system: ENCOUNTER_CODES.ICD10_HR,
-                                        code: data.diagnosisCode,
-                                        display: data.diagnosisDisplay,
-                                    }],
-                                },
-                            }]
-                        } : {}),
-                        period: {
-                            start: data.startDate,
-                            end: data.endDate,
-                        },
-                        managingOrganization: {
-                            identifier: {
-                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
-                                value: data.organizationId,
-                            },
-                        },
-                        careManager: {
+                        onsetDateTime: data.startDate || new Date().toISOString(),
+                        // recorder je max:0 u TC16 profilu — NE ŠALJEMO!
+                        // recordedDate je max:0 u TC16 profilu — NE ŠALJEMO!
+                        asserter: {
+                            type: 'Practitioner',
                             identifier: {
                                 system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
-                                value: data.practitionerId,
+                                value: data.practitionerId || config.practitioner.hzjzId,
                             },
                         },
                     },
@@ -243,6 +268,7 @@ class CaseService {
 
     async updateCase(caseId: string, data: Partial<CaseData>, userToken: string): Promise<any> {
         const messageId = uuidv4();
+        const conditionUuid = uuidv4();
 
         // Update DB
         try {
@@ -258,16 +284,33 @@ class CaseService {
 
         const bundle = {
             resourceType: 'Bundle',
+            id: messageId,
+            meta: {
+                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-update-health-issue-message'],
+                // NOTE: CEZIH selects profile by event code, not by meta.profile
+            },
             type: 'message',
+            timestamp: new Date().toISOString(),
             entry: [
                 {
                     fullUrl: `urn:uuid:${messageId}`,
                     resource: {
                         resourceType: 'MessageHeader',
                         id: messageId,
+                        meta: {
+                            profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-hi-management-message-header'],
+                        },
                         eventCoding: {
-                            system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/message-events',
-                            code: 'episode-of-care-update',
+                            system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
+                            code: '2.6', // 2.1=create 2.2=recurrence 2.3=remission 2.4=resolve 2.5=relapse 2.6=?
+                        },
+                        // DIGSIG-1: autor poruke = Bundle.signature.who
+                        author: {
+                            type: 'Practitioner',
+                            identifier: {
+                                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
+                                value: config.practitioner.hzjzId || config.practitioner.oib,
+                            }
                         },
                         source: {
                             endpoint: config.cezih.baseUrl,
@@ -275,35 +318,62 @@ class CaseService {
                             software: `${config.software.name}_${config.software.company}`,
                             version: config.software.version,
                         },
-                        focus: [{ reference: 'urn:uuid:case-1' }],
+                        focus: [{ reference: `urn:uuid:${conditionUuid}` }],
                     },
                 },
                 {
-                    fullUrl: 'urn:uuid:case-1',
+                    fullUrl: `urn:uuid:${conditionUuid}`,
                     resource: {
-                        resourceType: 'EpisodeOfCare',
+                        resourceType: 'Condition',
+                        id: conditionUuid,
+                        meta: {
+                            profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-condition'],
+                        },
                         identifier: [
                             {
+                                // globalni-identifikator: CEZIH-generated case ID
                                 system: CEZIH_IDENTIFIERS.CASE_ID,
                                 value: caseId,
                             },
                         ],
-                        status: data.status,
-                        ...(data.endDate && {
-                            period: { end: data.endDate },
+                        ...(data.status === 'resolved' || data.status === 'inactive' ? {
+                            clinicalStatus: {
+                                coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: data.status }],
+                            },
+                        } : {
+                            clinicalStatus: {
+                                coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }],
+                            },
                         }),
-                        ...(data.diagnosisCode && {
-                            diagnosis: [{
-                                condition: { display: data.diagnosisDisplay },
-                                role: {
-                                    coding: [{
-                                        system: ENCOUNTER_CODES.ICD10_HR,
-                                        code: data.diagnosisCode,
-                                        display: data.diagnosisDisplay,
-                                    }],
-                                },
-                            }],
-                        }),
+                        verificationStatus: {
+                            coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'confirmed' }],
+                        },
+                        ...(data.diagnosisCode ? {
+                            code: {
+                                coding: [{
+                                    system: ENCOUNTER_CODES.ICD10_HR,
+                                    code: data.diagnosisCode,
+                                    display: data.diagnosisDisplay,
+                                }],
+                                text: data.diagnosisDisplay,
+                            },
+                        } : {}),
+                        subject: {
+                            type: 'Patient',
+                            identifier: {
+                                system: CEZIH_IDENTIFIERS.MBO,
+                                value: data.patientMbo || '999999423',
+                            },
+                        },
+                        onsetDateTime: data.startDate || new Date().toISOString(),
+                        ...(data.endDate ? { abatementDateTime: data.endDate } : {}),
+                        asserter: {
+                            type: 'Practitioner',
+                            identifier: {
+                                system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
+                                value: data.practitionerId || config.practitioner.hzjzId,
+                            },
+                        },
                     },
                 },
             ],
@@ -339,6 +409,8 @@ class CaseService {
             const headers = authService.getUserAuthHeaders(userToken);
             const url = `${config.cezih.gatewayBase}${config.cezih.services.healthIssue}/$process-message`;
             console.log('[CaseService] Sending to:', url);
+            console.log('[CaseService] Auth headers keys:', Object.keys(headers));
+            console.log('[CaseService] Using gateway?', !!headers['Cookie'], '| Cookie preview:', (headers['Cookie'] || '').substring(0, 60));
             const response = await axios.post(url, bundleToSend, { headers });
 
             console.log('[CaseService] Message sent successfully');
@@ -376,7 +448,7 @@ class CaseService {
                 id: undefined,
             };
         } finally {
-            auditService.log({
+            await auditService.log({
                 visitId: undefined,
                 patientMbo,
                 action,
@@ -392,6 +464,64 @@ class CaseService {
             success: true,
             result: finalResponse ?? { cezihStatus: 'sent' },
         };
+    }
+    // TEMP: testira event kodove prema health-issue-services
+    async testEventCodes(userToken: string): Promise<any[]> {
+        const headers = authService.getUserAuthHeaders(userToken);
+        const url = `${config.cezih.gatewayBase}${config.cezih.services.healthIssue}/$process-message`;
+
+        const CODES = [
+            // Correct per StructureDefinition hr-create-health-issue-message (fixedCoding):
+            { system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types', code: '2.1' },
+            // Alternatives tested previously:
+            { system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/message-events', code: 'condition-create' },
+            { system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/message-events', code: 'health-issue-create' },
+            { system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types', code: 'condition-create' },
+            { system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types', code: 'health-issue-create' },
+            { system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types', code: 'HI_CREATE' },
+        ];
+
+        const results: any[] = [];
+        for (const c of CODES) {
+            const msgId = uuidv4(); const condId = uuidv4();
+            const bundle = {
+                resourceType: 'Bundle', id: msgId, type: 'message', timestamp: new Date().toISOString(),
+                entry: [
+                    {
+                        fullUrl: `urn:uuid:${msgId}`, resource: {
+                            resourceType: 'MessageHeader', id: msgId,
+                            eventCoding: { system: c.system, code: c.code },
+                            source: { endpoint: config.cezih.baseUrl, name: 'test', software: 'test', version: '1.0' },
+                            focus: [{ reference: `urn:uuid:${condId}` }],
+                        }
+                    },
+                    {
+                        fullUrl: `urn:uuid:${condId}`, resource: {
+                            resourceType: 'Condition', id: condId,
+                            meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-condition'] },
+                            identifier: [{ system: CEZIH_IDENTIFIERS.LOCAL_CASE_ID, value: uuidv4() }],
+                            // clinicalStatus: max:0 — NE ŠALJI!
+                            verificationStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'confirmed' }] },
+                            code: { coding: [{ system: ENCOUNTER_CODES.ICD10_HR, code: 'M17.1', display: 'Primarna gonartroza' }] },
+                            subject: { type: 'Patient', identifier: { system: CEZIH_IDENTIFIERS.MBO, value: '999999423' } },
+                            onsetDateTime: '2026-03-01',
+                            // recorder: max:0 — NE ŠALJI! recordedDate: max:0 — NE ŠALJI!
+                            asserter: { type: 'Practitioner', identifier: { system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER, value: '30160453873' } },
+                        }
+                    },
+                ],
+            };
+            try {
+                const r = await axios.post(url, bundle, { headers, timeout: 20000 });
+                results.push({ code: c.code, system: c.system, status: r.status, success: true, body: r.data });
+            } catch (e: any) {
+                const oo = e.response?.data?.entry?.find((x: any) => x.resource?.resourceType === 'OperationOutcome')?.resource;
+                const errCode = oo?.issue?.[0]?.details?.coding?.[0]?.code || '';
+                const errMsg = oo?.issue?.[0]?.details?.coding?.[0]?.display || e.message;
+                results.push({ code: c.code, system: c.system, status: e.response?.status, success: false, errCode, errMsg: errMsg?.substring(0, 200) });
+            }
+        }
+        return results;
     }
 }
 

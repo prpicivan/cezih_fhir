@@ -75,12 +75,11 @@ export interface CezihNotification {
 class RemoteSignService {
     private httpClient: AxiosInstance;
 
-    // The external signer base URL (CEZIH extsigner microservice)
-    // e.g. https://certws2.cezih.hr:8443/services-router/gateway/extsigner
-    private get baseUrl(): string {
-        // Derive base from the full remoteSignUrl by stripping /api/remoteSign suffix
-        const fullUrl = config.remoteSigning.remoteSignUrl;
-        return fullUrl.replace(/\/api\/remoteSign$/, '').replace(/\/api\/sign$/, '');
+    // The external signer base URL
+    // Confirmed working: https://certws2.cezih.hr:8443/services-router/gateway/extsigner/api/sign
+    // Uses certws2 gateway + gateway session cookies (probe verified 2026-03-01)
+    private get baseSignUrl(): string {
+        return config.remoteSigning.remoteSignUrl;
     }
 
     constructor() {
@@ -90,7 +89,7 @@ class RemoteSignService {
     }
 
     /**
-     * Build combined headers: user Bearer token + gateway session cookies.
+     * Build combined headers: gateway session cookies (required for certws2 extsigner).
      */
     private buildHeaders(userToken: string): Record<string, string> {
         const gatewayHeaders = authService.hasGatewaySession()
@@ -98,9 +97,10 @@ class RemoteSignService {
             : {};
 
         return {
-            'Authorization': `Bearer ${userToken}`,
             'Content-Type': 'application/json',
-            ...(gatewayHeaders.Cookie ? { Cookie: gatewayHeaders.Cookie } : {}),
+            ...(gatewayHeaders.Cookie ? { Cookie: gatewayHeaders.Cookie } : {
+                'Authorization': `Bearer ${userToken}`,
+            }),
         };
     }
 
@@ -128,48 +128,14 @@ class RemoteSignService {
         console.log(`[RemoteSign] OIB: ${oib}, RequestID: ${requestId}`);
         console.log(`[RemoteSign] Payload:`, JSON.stringify(payload, null, 2).substring(0, 800));
 
-        const url = `${this.baseUrl}/api/remoteSign`;
+        const url = this.baseSignUrl;
         console.log(`[RemoteSign] POST ${url}`);
 
         try {
-            // For certpubws (public gateway), we need the user's Certilia session token.
-            // The sessionToken from the gateway auth is an OIDC access token issued by certsso2.cezih.hr
-            // which certpubws trusts (same SSO provider).
-            let authHeaders: Record<string, string>;
-            const isPublicGateway = url.includes('certpubws');
-
-            if (isPublicGateway) {
-                // Use the OIDC session token from Certilia auth (mod_auth_openid_session value)
-                // as Bearer token for the public gateway
-                const gatewayHeaders = authService.hasGatewaySession()
-                    ? authService.getGatewayAuthHeaders()
-                    : {};
-
-                const sessionToken = gatewayHeaders[config.auth.ssoSessionHeader];
-
-                if (sessionToken) {
-                    authHeaders = {
-                        'Authorization': `Bearer ${sessionToken}`,
-                        'Content-Type': 'application/json',
-                    };
-                    console.log('[RemoteSign] Using Certilia OIDC session token for certpubws');
-                } else {
-                    // Fallback: try with system token
-                    const systemToken = await authService.getSystemToken();
-                    authHeaders = {
-                        'Authorization': `Bearer ${systemToken}`,
-                        'Content-Type': 'application/json',
-                    };
-                    console.warn('[RemoteSign] No Certilia session token, falling back to system token');
-                }
-            } else {
-                authHeaders = this.buildHeaders(userToken);
-            }
-
             const response = await this.httpClient.post<RemoteSignResponse>(
                 url,
                 payload,
-                { headers: authHeaders }
+                { headers: this.buildHeaders(userToken) }
             );
 
             console.log(`[RemoteSign] ✅ Submitted! Transaction: ${response.data.transactionCode}`);
@@ -197,52 +163,28 @@ class RemoteSignService {
     async pollForSignatureNotification(
         transactionCode: string,
         userToken: string,
-        recipientHzzoCode: string
+        _recipientHzzoCode: string
     ): Promise<boolean> {
         try {
-            const now = new Date();
-            const fiveMinAgo = new Date(now.getTime() - 5 * 60 * 1000);
-
-            const params = new URLSearchParams({
-                recipient: `http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije|${recipientHzzoCode}`,
-                recipient_type: 'organization',
-                date_from: fiveMinAgo.toISOString(),
-            });
-
-            // Notification service lives on the main gateway, not the extsigner
-            const notifUrl = `${config.cezih.gatewayBase}${config.cezih.services.notification}/getNotifications?${params.toString()}`;
-            console.log(`[RemoteSign] Polling notifications: ${notifUrl}`);
-
-            const response = await this.httpClient.get<CezihNotification[]>(
-                notifUrl,
-                { headers: this.buildHeaders(userToken) }
-            );
-
-            const notifications = response.data || [];
-
-            // Look for FULLY_SIGNED notification matching our transaction
-            for (const notif of notifications) {
-                if (notif.operation === 'FULLY_SIGNED') {
-                    try {
-                        const resource = typeof notif.resource === 'string'
-                            ? JSON.parse(notif.resource)
-                            : notif.resource;
-                        if (resource.transactionCode === transactionCode) {
-                            console.log(`[RemoteSign] ✅ Potpis odobren! (notification: ${notif.uuid})`);
-                            return true;
-                        }
-                    } catch (e) {
-                        // resource might not be parseable, skip
-                    }
-                }
+            // Notification endpoint is not available on this gateway.
+            // Instead, poll getSignedDocuments directly — it returns signatureStatus.
+            const result = await this.getSignedDocuments(transactionCode, userToken);
+            if (result.signatureStatus === 'FULLY_SIGNED') {
+                console.log(`[RemoteSign] ✅ Potpis detektiran via getSignedDocuments!`);
+                return true;
             }
-
+            console.log(`[RemoteSign] ⏳ Signature status: ${result.signatureStatus}`);
             return false;
         } catch (error: any) {
-            console.warn(`[RemoteSign] Notification poll error: ${error.message}`);
+            // 404 or 4XX = document not yet signed, keep polling
+            if (error.response?.status === 404 || error.response?.status === 400) {
+                return false;
+            }
+            console.warn(`[RemoteSign] Poll error: ${error.message}`);
             return false;
         }
     }
+
 
     /**
      * Step 3: Fetch the signed documents after receiving FULLY_SIGNED notification.
@@ -253,8 +195,9 @@ class RemoteSignService {
     ): Promise<GetSignedDocumentsResponse> {
         console.log(`[RemoteSign] Dohvaćanje potpisanih dokumenata (tx: ${transactionCode})...`);
 
-        const url = `${this.baseUrl}/api/getSignedDocuments`;
+        const url = this.baseSignUrl.replace('/api/sign', '/api/getSignedDocuments');
         console.log(`[RemoteSign] GET ${url}`);
+
 
         try {
             const response = await this.httpClient.get<GetSignedDocumentsResponse>(

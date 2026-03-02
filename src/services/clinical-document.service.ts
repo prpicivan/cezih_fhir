@@ -166,7 +166,9 @@ class ClinicalDocumentService {
         // Do NOT call closeVisit here to avoid duplicate REALIZATION in audit log
 
         // Step 4: Handle Signing based on mode
-        const signingMode = signatureService.getMode();
+        // Read directly from env to avoid stale cache
+        const signingMode = process.env.SIGNING_MODE || 'certilia';
+        console.log(`[ClinicalDocumentService] Signing mode: ${signingMode}`);
 
         if (signingMode === 'certilia') {
             return this.initiateRemoteSigning(data, documentOid, documentBundle, userToken);
@@ -208,7 +210,30 @@ class ClinicalDocumentService {
             // Update local DB status to indicate we are waiting for signature
             db.prepare('UPDATE documents SET status = ? WHERE id = ?').run('pending_signature', documentOid);
 
-            const doc = remoteSignService.prepareFhirMessageDocument(documentBundle);
+            // Add required signature placeholder to Bundle before sending for signing
+            const bundleToSign = {
+                ...documentBundle,
+                signature: {
+                    type: [{ system: 'urn:iso-astm:E1762-95:2013', code: '1.2.840.10065.1.12.1.1' }],
+                    when: new Date().toISOString(),
+                    who: {
+                        identifier: {
+                            system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
+                            value: config.practitioner.hzjzId
+                        },
+                        type: 'Practitioner'
+                    },
+                    data: ''
+                }
+            };
+
+            const base64Document = Buffer.from(JSON.stringify(bundleToSign), 'utf-8').toString('base64');
+            const doc: import('./remote-sign.service').RemoteSignDocument = {
+                documentType: 'FHIR_DOCUMENT',
+                mimeType: 'JSON',
+                base64Document,
+                messageId: documentOid,
+            };
             const submitResult = await remoteSignService.submitForRemoteSigning(
                 [doc],
                 config.remoteSigning.signerOib,
@@ -357,6 +382,9 @@ class ClinicalDocumentService {
             responseData = response.data;
         } catch (error: any) {
             console.warn('[ClinicalDocumentService] CEZIH send failed:', error.message);
+            console.warn('[ClinicalDocumentService] Response status:', error.response?.status);
+            console.warn('[ClinicalDocumentService] Response data:', JSON.stringify(error.response?.data)?.substring(0, 500));
+            console.warn('[ClinicalDocumentService] Response headers:', JSON.stringify(error.response?.headers)?.substring(0, 500));
             errorMessage = error.message;
 
             const cezihDetail = error.response?.data?.issue?.[0]?.diagnostics

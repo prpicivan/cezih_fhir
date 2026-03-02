@@ -259,56 +259,103 @@ class SignatureService {
             ? (jwk.crv === 'P-384' ? 'ES384' : (jwk.crv === 'P-521' ? 'ES512' : 'ES256'))
             : 'RS256';
 
-        // Placeholder for JCS canonicalization
+        // Signature placeholder — Bundle.signature.data mora biti prazan string pri potpisivanju
+        // CEZIH spec: signature je OBJEKT (ne array), who koristi identifier (ne reference), nema sigFormat
         const bundleWithSigPlaceholder = {
             ...bundle,
-            signature: [{
-                type: [{ system: 'urn:iso-astm:E1762-95:2013', code: '1.2.840.10065.1.12.1.1', display: "Author's Signature" }],
+            signature: {
+                type: [{ system: 'urn:iso-astm:E1762-95:2013', code: '1.2.840.10065.1.12.1.1' }],
                 when: new Date().toISOString(),
-                who: { reference: authorRef },
-                sigFormat: 'application/jose',
+                who: authorRef,   // { identifier: { system, value }, type: 'Practitioner' }
                 data: '',
-            }],
+            },
         };
 
         const canonicalized = jcsCanonialize(bundleWithSigPlaceholder);
         const payloadB64url = base64urlEncode(canonicalized);
 
-        const header: any = {
-            alg: finalAlg,
-            jwk: { kty: jwk.kty },
-            x5c: [this.keyPair.certificateDer.toString('base64')],
+        // x5c certifikat
+        const x5cValue = this.keyPair.certificateDer.toString('base64');
+
+        // Izračunaj x5t#S256 (SHA-256 thumbprint certifikata)
+        const x5tS256 = require('crypto')
+            .createHash('sha256')
+            .update(this.keyPair.certificateDer)
+            .digest('base64url');
+
+        // Izvuci nbf/exp iz certifikata ako je moguće
+        let nbf: number | undefined;
+        let exp: number | undefined;
+        try {
+            const x509 = new (require('crypto').X509Certificate)(this.keyPair.certificateDer);
+            nbf = Math.floor(new Date(x509.validFrom).getTime() / 1000);
+            exp = Math.floor(new Date(x509.validTo).getTime() / 1000);
+        } catch (_) { }
+
+        // JWK s x5c UNUTAR jwk (prema CEZIH specifikaciji!)
+        const jwkWithCert: any = {
+            kty: jwk.kty,
+            use: 'sig',
+            'x5t#S256': x5tS256,
+            x5c: [x5cValue],
         };
 
+        if (nbf !== undefined) jwkWithCert.nbf = nbf;
+        if (exp !== undefined) jwkWithCert.exp = exp;
+
         if (jwk.kty === 'EC') {
-            header.jwk.crv = jwk.crv;
-            header.jwk.x = jwk.x;
-            header.jwk.y = jwk.y;
+            jwkWithCert.crv = jwk.crv;
+            jwkWithCert.x = jwk.x;
+            jwkWithCert.y = jwk.y;
         } else {
-            header.jwk.n = jwk.n;
-            header.jwk.e = jwk.e;
+            jwkWithCert.n = jwk.n;
+            jwkWithCert.e = jwk.e;
         }
 
-        const headerB64url = base64urlEncode(JSON.stringify(header));
-        const signingInput = `${headerB64url}.${payloadB64url}`;
+        // JOSE zaglavlje — x5c je unutar jwk, ne na top-levelu
+        const header: any = {
+            alg: finalAlg,
+            jwk: jwkWithCert,
+        };
 
+        const headerB64url = base64urlEncode(JSON.stringify(header));
+
+        // Potpisujemo: header.payload (standard JWS signing input)
+        const signingInput = `${headerB64url}.${payloadB64url}`;
         const signatureBytes = await this.performSignature(signingInput, finalAlg);
         const signatureB64url = base64urlEncode(signatureBytes);
 
-        const jwsCompact = `${headerB64url}.${payloadB64url}.${signatureB64url}`;
+        // DETACHED JWS: header..signature (prazan payload u compact formi)
+        // prema CEZIH spec: "JWS payload je opcionalan" — primjer pokazuje ".."
+        const jwsCompact = `${headerB64url}..${signatureB64url}`;
 
         return {
             bundle: {
                 ...bundleWithSigPlaceholder,
-                signature: [{ ...bundleWithSigPlaceholder.signature[0], data: base64Encode(jwsCompact) }]
+                // signature.data = JWS compact string još jednom Base64 enkodiran (per CEZIH spec)
+                signature: { ...bundleWithSigPlaceholder.signature, data: base64Encode(jwsCompact) }
             },
             jwsCompact
         };
     }
 
-    private extractAuthorFromBundle(bundle: any): string {
+    private extractAuthorFromBundle(bundle: any): any {
         const mh = bundle.entry?.find((e: any) => e.resource?.resourceType === 'MessageHeader')?.resource;
-        return mh?.author?.reference || mh?.sender?.reference || 'Practitioner/unknown';
+        // Per CEZIH spec DIGSIG-1: Bundle.signature.who = MessageHeader.author
+        // who mora biti logička referenca s identifierom (HZJZ broj), ne string referenca
+        const author = mh?.author;
+        if (author && author.identifier) {
+            return author; // Already in { identifier: { system, value }, type } format
+        }
+        // Fallback: construct from config
+        const { config } = require('../config');
+        return {
+            type: 'Practitioner',
+            identifier: {
+                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
+                value: config.practitioner.hzjzId || config.practitioner.oib
+            }
+        };
     }
 
     async verifySignedBundle(signedBundle: any): Promise<{ valid: boolean; error?: string }> {

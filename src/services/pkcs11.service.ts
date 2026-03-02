@@ -21,6 +21,9 @@ class Pkcs11Service {
     private pkcs11Session: Buffer | null = null;
     private privateKeyHandle: Buffer | null = null;
     private keyInfo: Pkcs11KeyInfo | null = null;
+    // Čuvamo za re-login nakon session expiry
+    private savedPin: string = '';
+    private savedSlot: Buffer | null = null;
 
     isActive(): boolean {
         return this.privateKeyHandle !== null;
@@ -32,11 +35,73 @@ class Pkcs11Service {
 
     /**
      * Initialize the PKCS#11 module and login to the token.
+     * Certilia kartica ima dva tokena:
+     *   - "Sign" token (SIGN_PIN) — za digitalni potpis dokumenata (ne-poricanje)
+     *   - "Iden" token (IDEN_PIN) — za autentikaciju
+     * Za potpisivanje FHIR Bundle-a koristimo Sign token.
      */
+    /**
+     * Test if a token can perform signing programmatically.
+     * Some tokens (like Sign with CKA_ALWAYS_AUTHENTICATE=true) require
+     * per-operation PIN via middleware UI and can't be used headlessly.
+     */
+    private testTokenSigning(slot: Buffer, pin: string): boolean {
+        if (!this.pkcs11Module) return false;
+        let testSession: Buffer | null = null;
+        try {
+            testSession = this.pkcs11Module.C_OpenSession(slot, 0x04 | 0x02);
+            this.pkcs11Module.C_Login(testSession, 1, pin);
+
+            // Find a private key
+            this.pkcs11Module.C_FindObjectsInit(testSession, []);
+            const objs: Buffer[] = [];
+            let o: Buffer[];
+            while ((o = this.pkcs11Module.C_FindObjects(testSession, 1)).length > 0) objs.push(o[0]);
+            this.pkcs11Module.C_FindObjectsFinal(testSession);
+
+            let privKey: Buffer | null = null;
+            for (const obj of objs) {
+                const attrs = this.pkcs11Module.C_GetAttributeValue(testSession, obj, [{ type: 0x00000000 }]);
+                const cls = attrs[0]?.value?.readUInt32LE?.(0) ?? attrs[0]?.value?.[0];
+                if (cls === 3 || cls === 3n) { privKey = obj; break; }
+            }
+
+            if (!privKey) return false;
+
+            // Check CKA_ALWAYS_AUTHENTICATE
+            try {
+                const aa = this.pkcs11Module.C_GetAttributeValue(testSession, privKey, [{ type: 0x00000202, value: Buffer.alloc(4) }]);
+                if (aa[0]?.value?.[0] === 1) {
+                    console.log('[Pkcs11Service] Token has CKA_ALWAYS_AUTHENTICATE=true — not usable for headless signing.');
+                    return false;
+                }
+            } catch (_) { /* attribute not supported = probably fine */ }
+
+            // Try an actual test sign
+            const hash = crypto.createHash('sha256').update('pkcs11-test').digest();
+            const kt = this.pkcs11Module.C_GetAttributeValue(testSession, privKey, [{ type: 0x00000100 }]);
+            const keyType = kt[0]?.value?.[0];
+            const mech = keyType === 3 ? 0x00001041 : 0x00000040; // CKM_ECDSA or CKM_SHA256_RSA_PKCS
+            this.pkcs11Module.C_SignInit(testSession, { mechanism: mech, parameter: null }, privKey);
+            this.pkcs11Module.C_Sign(testSession, keyType === 3 ? hash : Buffer.from('pkcs11-test'), Buffer.alloc(4096));
+            console.log('[Pkcs11Service] Test sign successful on this token.');
+            return true;
+        } catch (e: any) {
+            console.log(`[Pkcs11Service] Test sign failed: ${e.message}`);
+            return false;
+        } finally {
+            if (testSession) {
+                try { this.pkcs11Module.C_Logout(testSession); } catch (_) { }
+                try { this.pkcs11Module.C_CloseSession(testSession); } catch (_) { }
+            }
+        }
+    }
+
     initialize(): boolean {
         if (!pkcs11js) return false;
 
-        const PKCS11_MODULE_PATH = process.env.PKCS11_MODULE_PATH || '/Applications/CertiliaMiddleware.app/Contents/pkcs11/libCertiliaPkcs11.dylib';
+        const PKCS11_MODULE_PATH = process.env.PKCS11_MODULE_PATH || 'C:\\Program Files\\AKD\\Certilia Middleware\\pkcs11\\CertiliaPkcs11_64.dll';
+        const signPin = process.env.SIGN_PIN;
         const idenPin = process.env.IDEN_PIN;
 
         if (!fs.existsSync(PKCS11_MODULE_PATH)) {
@@ -44,8 +109,8 @@ class Pkcs11Service {
             return false;
         }
 
-        if (!idenPin) {
-            console.log('[Pkcs11Service] IDEN_PIN not set in environment.');
+        if (!signPin && !idenPin) {
+            console.log('[Pkcs11Service] Neither SIGN_PIN nor IDEN_PIN is set in environment.');
             return false;
         }
 
@@ -62,23 +127,56 @@ class Pkcs11Service {
             }
 
             const slots = this.pkcs11Module.C_GetSlotList(true);
-            let targetSlot = null;
+            console.log(`[Pkcs11Service] Found ${slots.length} slot(s) with tokens.`);
 
+            let targetSlot: Buffer | null = null;
+            let targetPin: string = '';
+            let tokenLabel: string = '';
+
+            // Collect all available slots
+            let signSlot: Buffer | null = null;
+            let idenSlot: Buffer | null = null;
             for (const slot of slots) {
                 const tokenInfo = this.pkcs11Module.C_GetTokenInfo(slot);
-                if (tokenInfo.label.trim().includes('Iden')) {
-                    targetSlot = slot;
-                    break;
+                const label = tokenInfo.label.trim();
+                console.log(`[Pkcs11Service] Slot token label: "${label}"`);
+                if (label.toLowerCase().includes('sign')) signSlot = slot;
+                if (label.toLowerCase().includes('iden')) idenSlot = slot;
+            }
+
+            // Strategy: Try Sign token first, but if CKA_ALWAYS_AUTHENTICATE=true,
+            // fall back to Iden token (Sign requires per-operation PIN via middleware UI dialog
+            // which is incompatible with automatic/programmatic signing)
+            if (signSlot && signPin) {
+                const canUseSign = this.testTokenSigning(signSlot, signPin);
+                if (canUseSign) {
+                    targetSlot = signSlot;
+                    targetPin = signPin;
+                    tokenLabel = 'Sign';
+                    console.log('[Pkcs11Service] ✅ Sign token radi za programsko potpisivanje.');
+                } else {
+                    console.log('[Pkcs11Service] ⚠️  Sign token zahtijeva per-operation PIN (CKA_ALWAYS_AUTHENTICATE), prebacujem na Iden.');
                 }
             }
 
+            // Fallback (or primary): Iden token
+            if (!targetSlot && idenSlot && idenPin) {
+                targetSlot = idenSlot;
+                targetPin = idenPin;
+                tokenLabel = 'Iden';
+                console.log('[Pkcs11Service] ✅ Koristim Iden token za potpisivanje.');
+            }
+
             if (!targetSlot) {
-                console.warn('[Pkcs11Service] Smart card Iden token not found.');
+                console.warn('[Pkcs11Service] Ni Sign ni Iden token nisu dostupni za programsko potpisivanje.');
                 return false;
             }
 
             this.pkcs11Session = this.pkcs11Module.C_OpenSession(targetSlot, 0x04 | 0x02); // CKF_SERIAL_SESSION | CKF_RW_SESSION
-            this.pkcs11Module.C_Login(this.pkcs11Session, 1, idenPin); // CKU_USER = 1
+            this.pkcs11Module.C_Login(this.pkcs11Session, 1, targetPin); // CKU_USER = 1
+            // Spremi za re-login kad sesija istekne
+            this.savedPin = targetPin;
+            this.savedSlot = targetSlot;
 
             // Fetch objects
             this.pkcs11Module.C_FindObjectsInit(this.pkcs11Session, []);
@@ -122,7 +220,7 @@ class Pkcs11Service {
                 algo: algo as any,
             };
 
-            console.log(`[Pkcs11Service] PKCS#11 initialized (${algo})`);
+            console.log(`[Pkcs11Service] ✅ PKCS#11 inicijaliziran — token: "${tokenLabel}", algoritam: ${algo}, subjekt: ${x509.subject}`);
             return true;
         } catch (error: any) {
             console.error('[Pkcs11Service] Initialization failed:', error.message);
@@ -133,12 +231,48 @@ class Pkcs11Service {
 
     /**
      * Perform hardware signature of the input data.
+     * IMPORTANT: Certilia Sign token (non-repudiation) auto-logs-out after each operation.
+     * We must login immediately before every C_Sign call.
      */
     sign(signingInput: string, finalAlg: string): Buffer {
-        if (!this.pkcs11Session || !this.privateKeyHandle) {
+        if (!this.pkcs11Session || !this.privateKeyHandle || !this.pkcs11Module) {
             throw new Error('PKCS#11 session not initialized');
         }
 
+        // Login immediately before signing (Sign token auto-logouts for non-repudiation)
+        try {
+            this.pkcs11Module.C_Login(this.pkcs11Session, 1, this.savedPin);
+            console.log('[Pkcs11Service] C_Login before sign: OK');
+        } catch (loginErr: any) {
+            // CKR_USER_ALREADY_LOGGED_IN is fine — proceed
+            if (!loginErr.message?.includes('CKR_USER_ALREADY_LOGGED_IN')) {
+                // Try fresh session if odd error
+                console.warn('[Pkcs11Service] Login before sign failed, trying fresh session...', loginErr.message);
+                try {
+                    try { this.pkcs11Module.C_CloseSession(this.pkcs11Session); } catch (_) { }
+                    this.pkcs11Session = this.pkcs11Module.C_OpenSession(this.savedSlot!, 0x04 | 0x02);
+                    this.pkcs11Module.C_Login(this.pkcs11Session, 1, this.savedPin);
+                    console.log('[Pkcs11Service] Fresh session opened OK.');
+                } catch (freshErr: any) {
+                    throw new Error(`PKCS#11 login failed: ${freshErr.message}`);
+                }
+            }
+        }
+
+        try {
+            const result = this._doSign(signingInput, finalAlg);
+            // Logout after signing (maintains non-repudiation: PIN required for each signature)
+            try { this.pkcs11Module.C_Logout(this.pkcs11Session); } catch (_) { }
+            console.log('[Pkcs11Service] ✅ Signature created, logged out for non-repudiation.');
+            return result;
+        } catch (signErr: any) {
+            try { this.pkcs11Module.C_Logout(this.pkcs11Session); } catch (_) { }
+            throw new Error(`PKCS#11 sign failed: ${signErr.message}`);
+        }
+    }
+
+
+    private _doSign(signingInput: string, finalAlg: string): Buffer {
         let mechanismBase: number;
         let dataToSign: Buffer;
 

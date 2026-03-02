@@ -18,8 +18,12 @@ dist/
 server_logs/
 *.log
 
+# Error output
+*.err
+
 # Certificates (sensitive)
 certs/
+cert/
 
 # Next.js (client)
 client/.next/
@@ -34,11 +38,29 @@ Thumbs.db
 
 # Resolved docs (generated)
 *.resolved
-next.err  
-server.err  
-client/next.err  
-*.log  
 
 # Temporary/debug scripts
 tmp/
 tmp_get_links*.js
+
+# Start/stop scripts (local only)
+Pokretanje back_fro/
+
+# Implementation plans (working docs)
+implementation_plan.md
+
+# Untracked working docs
+docs/cezih-osnova/
+docs/posjeta.pdf
+docs/test_cases_master_20260301.md
+
+# Untracked working scripts
+scripts/brute-event-codes.ps1
+scripts/check-cezih-roles.ts
+scripts/dump-cezih-response.mjs
+scripts/patch-auth-me.cjs
+scripts/probe-encounter-create.mjs
+scripts/probe-gateway-remote-sign.ts
+scripts/probe-notification-endpoint.ts
+scripts/test-condition-curl.ps1
+scripts/test-event-codes.mjs

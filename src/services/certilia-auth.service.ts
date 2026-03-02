@@ -338,8 +338,34 @@ export class CertiliaAuthClient {
         const cookies = await this.jar.getCookies(`${config.cezih.baseUrl}`);
         const cookieStrings = cookies.map(c => `${c.key}=${c.value}`);
         const session = cookies.find(c => c.key.includes('mod_auth_openidc_session'));
+
+        // Try to get userinfo via SSO, using any cookies that may carry the token
+        // mod_auth_openidc internally holds the access_token — try to extract via SSO /userinfo
+        try {
+            const ssoCookies = await this.jar.getCookies('https://certsso2.cezih.hr');
+            const allCookies = [...cookies, ...ssoCookies].map(c => `${c.key}=${c.value}`);
+            const cookieHeader = allCookies.join('; ');
+
+            const userinfoResp = await this.client.get(
+                'https://certsso2.cezih.hr/auth/realms/CEZIH/protocol/openid-connect/userinfo',
+                { headers: { Cookie: cookieHeader }, validateStatus: () => true }
+            );
+
+            if (userinfoResp.status === 200 && userinfoResp.data?.sub) {
+                const claims = userinfoResp.data;
+                console.log('[CertiliaAuth] 🎯 User info obtained!');
+                console.log('[CertiliaAuth] User:', claims.preferred_username || claims.sub);
+                console.log('[CertiliaAuth] Roles:', JSON.stringify(claims.realm_access?.roles || claims.authorities?.roles || []));
+            } else {
+                console.log('[CertiliaAuth] /userinfo returned:', userinfoResp.status, '— token not accessible via cookie');
+            }
+        } catch (e: any) {
+            console.log('[CertiliaAuth] /userinfo probe failed:', e.message);
+        }
+
         return { success: true, gatewayCookies: cookieStrings, sessionToken: session?.value };
     }
+
 
     private async handleSSOConfirmation(body: string): Promise<CertiliaAuthResult> {
         console.log('[CertiliaAuth] ⏳ SSO confirmation page...');

@@ -1,9 +1,12 @@
 /**
  * grab-gateway-cookie.js
  *
- * Automatski otvara CEZIH gateway u Chromium browseru,
+ * Automatski otvara CEZIH gateway u sistemskom Chrome/Edge browseru,
  * čeka da korisnik izvrši autentifikaciju pametnom karticom,
  * pa izvlači mod_auth_openidc_session cookie i šalje ga backendu.
+ *
+ * VAŽNO: Koristi sistemski instalirani Chrome ili Edge (ne Playwright Chromium)
+ * jer samo sistemski browser ima pristup Windows cert storeu i pametnoj kartici.
  *
  * Pokretanje:
  *   node scripts/grab-gateway-cookie.js
@@ -13,8 +16,27 @@
  */
 
 const { chromium } = require('playwright');
+const fs = require('fs');
 const http = require('http');
 require('dotenv').config();
+
+// ─── Detekcija sistemskog Chrome/Edge ──────────────────────────────
+const SYSTEM_BROWSERS = [
+    // Chrome (64-bit)
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    // Chrome (32-bit)
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    // Edge
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+];
+
+function findSystemBrowser() {
+    for (const p of SYSTEM_BROWSERS) {
+        if (fs.existsSync(p)) return p;
+    }
+    return null;
+}
 
 const BACKEND_PORT = process.env.PORT || 3010;
 const BACKEND_HOST = 'localhost';
@@ -128,13 +150,25 @@ async function main() {
 
     let browser;
     try {
-        // Pokrećemo vidljivi (headed) browser — TLS certifikat mora odabrati korisnik
+        // Koristimo sistemski Chrome/Edge jer ima pristup Windows cert storeu (pametna kartica)
+        // Playwright-ov bundled Chromium je izoliran i ne vidi smart card middleware
+        const executablePath = findSystemBrowser();
+
+        if (executablePath) {
+            info(`Koristim sistemski browser: ${executablePath}`);
+        } else {
+            warn('Sistemski Chrome/Edge nije pronađen — koristim Playwright Chromium.');
+            warn('Pametna kartica možda neće biti dostupna!');
+        }
+
         info('Pokrećem browser...');
         browser = await chromium.launch({
             headless: false,        // MORA biti false — TLS cert dialog zahtijeva UI
+            executablePath: executablePath || undefined,
             args: [
                 '--ignore-certificate-errors',
                 '--start-maximized',
+                '--disable-features=IsolateOrigins',
             ],
         });
 

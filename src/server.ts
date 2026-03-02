@@ -64,16 +64,15 @@ app.get('/auth/callback', async (req, res) => {
         return res.redirect(`${frontendUrl}/?auth_error=${encodeURIComponent('Prijava nije uspjela: nedostaje autorizacijski kod')}`);
     }
 
-    try {
-        const { authService } = await import('./services');
 
+    try {
         // Pokuša razmijeniti OIDC authorization code za token
         // certsso2 (Keycloak) token endpoint
         let gatewayToken = code as string;
         let gatewayCookies: string[] = [];
 
         try {
-            const axios = (await import('axios')).default;
+            const axiosLib = (await import('axios')).default;
             const tokenUrl = process.env.CEZIH_TOKEN_URL || 'https://certsso2.cezih.hr/auth/realms/CEZIH/protocol/openid-connect/token';
             const clientId = process.env.CEZIH_CLIENT_ID || '';
             const clientSecret = process.env.CEZIH_CLIENT_SECRET || '';
@@ -86,7 +85,7 @@ app.get('/auth/callback', async (req, res) => {
             params.append('client_id', clientId);
             params.append('client_secret', clientSecret);
 
-            const tokenRes = await axios.post(tokenUrl, params.toString(), {
+            const tokenRes = await axiosLib.post(tokenUrl, params.toString(), {
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 timeout: 10000,
             });
@@ -94,16 +93,50 @@ app.get('/auth/callback', async (req, res) => {
             const accessToken = tokenRes.data?.access_token;
             if (accessToken) {
                 gatewayToken = accessToken;
-                gatewayCookies = [`mod_auth_openid_session=${accessToken}`];
                 console.log('[Auth/Callback] ✅ OIDC token exchange uspješan! Token length:', accessToken.length);
+
+                // Pokušaj dohvatiti pravi CEZIH gateway session cookie koristeći access_token
+                // Gateway prihvaća Bearer token i vraća pravu session via Set-Cookie
+                try {
+                    const https = await import('https');
+                    const gatewayBase = process.env.CEZIH_BASE_URL || 'https://certws2.cezih.hr:8443';
+                    const gatewayProbeUrl = `${gatewayBase}/services-router/gateway/encounter-services/api/v1`;
+
+                    const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+                    const probeRes = await axiosLib.get(gatewayProbeUrl, {
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`,
+                            'Content-Type': 'application/fhir+json',
+                        },
+                        httpsAgent,
+                        maxRedirects: 0,
+                        validateStatus: (s) => true,
+                        timeout: 8000,
+                    });
+
+                    const setCookieHeaders = probeRes.headers['set-cookie'] || [];
+                    if (setCookieHeaders.length > 0) {
+                        // Ekstrahiraj cookie name=value parove (bez atributa Path, HttpOnly itd.)
+                        gatewayCookies = setCookieHeaders.map((c: string) => c.split(';')[0]);
+                        console.log('[Auth/Callback] ✅ Gateway cookies dobiveni:', gatewayCookies.length, 'cookies');
+                        console.log('[Auth/Callback] Cookies preview:', gatewayCookies.map((c: string) => c.substring(0, 40)));
+                    } else {
+                        // Fallback: spremi access_token kao mod_auth_openid_session
+                        console.warn('[Auth/Callback] Gateway nije vratio Set-Cookie (status:', probeRes.status, ') — koristimo Bearer token fallback');
+                        gatewayCookies = [`mod_auth_openid_session=${accessToken}`];
+                    }
+                } catch (probeErr: any) {
+                    console.warn('[Auth/Callback] Gateway probe nije uspio:', probeErr.message);
+                    gatewayCookies = [`mod_auth_openid_session=${accessToken}`];
+                }
             }
         } catch (tokenErr: any) {
-            // Token exchange može ne uspjeti u test env-u — koristimo code kao fallback
-            console.warn('[Auth/Callback] Token exchange nije uspio (očekivano u test env):', tokenErr.message);
+            console.warn('[Auth/Callback] Token exchange nije uspio:', tokenErr.message);
             gatewayCookies = [`auth_session=${(code as string).substring(0, 32)}`];
         }
 
         // Pohrani sesiju — frontend će moći nastaviti
+        const { authService } = await import('./services');
         authService.storeGatewaySession(gatewayCookies, gatewayToken);
         console.log('[Auth/Callback] ✅ Gateway sesija pohranjena. Redirect na dashboard.');
 
@@ -136,78 +169,53 @@ app.get('/auth/callback', async (req, res) => {
     }
 });
 
-// Root endpoint
+// ============================================================
+// DEBUG ENDPOINT (privremeno za test) — OBRISATI NAKON TESTA!
+// ============================================================
+app.get('/api/debug/gateway-cookie', async (_req, res) => {
+    const { authService } = await import('./services');
+    try {
+        const headers = authService.getGatewayAuthHeaders();
+        res.json({ success: true, cookie: headers.Cookie, sessionHeader: headers[process.env.CEZIH_SSO_SESSION_HEADER || 'mod_auth_openid_session'] });
+    } catch (e: any) {
+        res.status(401).json({ success: false, error: e.message });
+    }
+});
+// DEBUG ENDPOINT za testiranje event kodova
+app.get('/api/debug/test-event-codes', async (_req, res) => {
+    const { authService, caseService } = await import('./services');
+    if (!authService.hasGatewaySession()) {
+        return res.status(401).json({ error: 'Nema gateway session' });
+    }
+    // Koristimo userToken="" jer getUserAuthHeaders() preferira gateway session
+    try {
+        const results = await caseService.testEventCodes('');
+        return res.json({ results });
+    } catch (e: any) {
+        return res.status(500).json({ error: e.message });
+    }
+});
+
+// DEBUG ENDPOINT za provjeru stanja potpisa
+app.get('/api/debug/signing-status', async (_req, res) => {
+    const { signatureService } = await import('./services/signature.service');
+    const { pkcs11Service } = await import('./services/pkcs11.service');
+    return res.json({
+        mode: signatureService.getMode(),
+        isAvailable: signatureService.isAvailable(),
+        pkcs11Active: pkcs11Service.isActive(),
+        pkcs11KeyInfo: pkcs11Service.getKeyInfo() ? {
+            algo: pkcs11Service.getKeyInfo()!.algo,
+            subject: new (require('crypto').X509Certificate)(pkcs11Service.getKeyInfo()!.certificateDer).subject
+        } : null,
+    });
+});
+
+
 app.get('/', (_req, res) => {
     res.json({
-        service: 'CEZIH FHIR Integration',
+        service: 'WBS_FHIR',
         version: '1.0.0',
-        description: 'Standalone FHIR R4 integration service for CEZIH private clinic certification',
-        endpoints: {
-            health: '/api/health',
-            auth: {
-                systemToken: 'POST /api/auth/system-token',
-                smartCard: 'GET /api/auth/smartcard',
-                certilia: 'GET /api/auth/certilia',
-                callback: 'GET /api/auth/callback',
-            },
-            oid: {
-                generate: 'POST /api/oid/generate',
-            },
-            terminology: {
-                sync: 'POST /api/terminology/sync',
-                codeSystems: 'GET /api/terminology/code-systems',
-                valueSets: 'GET /api/terminology/value-sets',
-            },
-            registry: {
-                organizations: 'GET /api/registry/organizations',
-                practitioners: 'GET /api/registry/practitioners',
-            },
-            patient: {
-                search: 'GET /api/patient/search?mbo=...',
-                registerForeigner: 'POST /api/patient/foreigner/register',
-            },
-            visit: {
-                create: 'POST /api/visit/create',
-                update: 'PUT /api/visit/:id',
-                close: 'POST /api/visit/:id/close',
-            },
-            case: {
-                getPatientCases: 'GET /api/case/patient/:mbo',
-                create: 'POST /api/case/create',
-                update: 'PUT /api/case/:id',
-            },
-            document: {
-                send: 'POST /api/document/send',
-                replace: 'POST /api/document/replace',
-                cancel: 'POST /api/document/cancel',
-                search: 'GET /api/document/search',
-                retrieve: 'GET /api/document/retrieve?url=...',
-            },
-        },
-        testCaseMapping: {
-            '1': 'GET /api/auth/smartcard',
-            '2': 'GET /api/auth/certilia',
-            '3': 'POST /api/auth/system-token',
-            '4': 'Digital signature (integrated in document/message sending)',
-            '5': 'Digital signature (integrated in document/message sending)',
-            '6': 'POST /api/oid/generate',
-            '7': 'GET /api/terminology/code-systems',
-            '8': 'GET /api/terminology/value-sets',
-            '9': 'GET /api/registry/organizations + /api/registry/practitioners',
-            '10': 'GET /api/patient/search',
-            '11': 'POST /api/patient/foreigner/register',
-            '12': 'POST /api/visit/create',
-            '13': 'PUT /api/visit/:id',
-            '14': 'POST /api/visit/:id/close',
-            '15': 'GET /api/case/patient/:mbo',
-            '16': 'POST /api/case/create',
-            '17': 'PUT /api/case/:id',
-            '18': 'POST /api/document/send',
-            '19': 'POST /api/document/replace',
-            '20': 'POST /api/document/cancel',
-            '21': 'GET /api/document/search',
-            '22': 'GET /api/document/retrieve',
-        },
     });
 });
 
