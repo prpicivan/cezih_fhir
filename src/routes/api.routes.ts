@@ -164,6 +164,9 @@ let playwrightSession: { pid: number; startedAt: number } | null = null;
 
 router.post('/auth/smartcard/playwright-start', (_req: Request, res: Response) => {
     try {
+        // Clear existing session so poll starts fresh
+        authService.clearGatewaySession();
+
         // Prevent duplicate launches
         if (playwrightSession) {
             const ageMs = Date.now() - playwrightSession.startedAt;
@@ -223,6 +226,72 @@ router.get('/auth/smartcard/playwright-status', (_req: Request, res: Response) =
         pid: playwrightSession?.pid,
         ageMs: playwrightSession ? Date.now() - playwrightSession.startedAt : null,
     });
+});
+
+// TC1 — Interactive smart card auth (no browser window)
+// Uses PowerShell/.NET HttpClient with Automatic cert selection.
+// Windows will show the native cert picker and PIN dialogs.
+router.post('/auth/smartcard/interactive', async (_req: Request, res: Response) => {
+    try {
+        console.log('[SmartCard/Interactive] Starting interactive TLS auth...');
+
+        const psScriptPath = path.join(process.cwd(), 'scripts', 'smartcard-auth-interactive.ps1');
+
+        const { execFile } = require('child_process');
+        const { promisify } = require('util');
+        const execFileAsync = promisify(execFile);
+
+        const { stdout, stderr } = await execFileAsync('powershell', [
+            '-NoProfile', '-ExecutionPolicy', 'Bypass',
+            '-File', psScriptPath,
+        ], {
+            timeout: 5 * 60 * 1000, // 5 min — wait for user to interact with cert/PIN dialogs
+            maxBuffer: 1024 * 256,
+            windowsHide: false, // MUST be false — cert/PIN dialogs need to be visible
+        });
+
+        if (stderr) console.log('[SmartCard/Interactive] PS stderr:', stderr.substring(0, 500));
+
+        const jsonLine = stdout.split('\n').find((l: string) => l.trim().startsWith('{'));
+        if (!jsonLine) {
+            return res.status(500).json({ success: false, error: 'No JSON output from PowerShell script' });
+        }
+
+        const psResult = JSON.parse(jsonLine.trim());
+        console.log(`[SmartCard/Interactive] Result: success=${psResult.success}, status=${psResult.statusCode}, cookies=${psResult.cookieCount}`);
+
+        if (psResult.success && psResult.cookies && psResult.cookies.length > 0) {
+            // Store session in auth service
+            const sessionToken = psResult.cookies
+                .find((c: string) => c.includes('mod_auth_openidc'))
+                ?.split('=').slice(1).join('=');
+            authService.storeGatewaySession(psResult.cookies, sessionToken);
+
+            return res.json({
+                success: true,
+                authenticated: true,
+                message: 'Smart card autentifikacija uspješna!',
+                cookiesCount: psResult.cookies.length,
+            });
+        }
+
+        // Auth failed
+        res.json({
+            success: false,
+            error: psResult.error || `Autentifikacija nije uspjela (status: ${psResult.statusCode})`,
+        });
+
+    } catch (error: any) {
+        console.error('[SmartCard/Interactive] Error:', error.message);
+        // User may have cancelled the dialog or timed out
+        const isTimeout = error.message?.includes('TIMEOUT') || error.killed;
+        res.status(isTimeout ? 408 : 500).json({
+            success: false,
+            error: isTimeout
+                ? 'Isteklo je vrijeme čekanja. Pokušajte ponovo.'
+                : error.message,
+        });
+    }
 });
 
 // Legacy: Certilia auth URL (backward compat)

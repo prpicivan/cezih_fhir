@@ -268,6 +268,17 @@ class AuthService {
     }
 
     /**
+     * Clear the current gateway session (used before re-authentication).
+     */
+    clearGatewaySession(): void {
+        this.gatewaySession = null;
+        try {
+            db.prepare("DELETE FROM settings WHERE key = 'gateway_session'").run();
+        } catch (_) { }
+        console.log('[AuthService] Gateway session cleared');
+    }
+
+    /**
      * Get decoded user claims from the active session (if available).
      */
     getUserClaims(): Record<string, any> | null {

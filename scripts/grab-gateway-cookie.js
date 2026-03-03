@@ -162,22 +162,26 @@ async function main() {
         }
 
         info('Pokrećem browser...');
-        browser = await chromium.launch({
-            headless: false,        // MORA biti false — TLS cert dialog zahtijeva UI
+        const os = require('os');
+        const path = require('path');
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sc-auth-'));
+
+        // launchPersistentContext = fresh profile so cert dialog always appears
+        const context = await chromium.launchPersistentContext(tempDir, {
+            headless: false,
             executablePath: executablePath || undefined,
             args: [
                 '--ignore-certificate-errors',
-                '--start-maximized',
+                '--window-size=520,420',
+                '--window-position=50,50',
                 '--disable-features=IsolateOrigins',
             ],
-        });
-
-        const context = await browser.newContext({
             ignoreHTTPSErrors: true,
-            viewport: null, // koristi sistemsku veličinu prozora
+            viewport: { width: 500, height: 400 },
         });
+        browser = context; // persistent context IS the closeable handle
 
-        const page = await context.newPage();
+        const page = context.pages()[0] || await context.newPage();
 
         // Postavi listener za certificate selector — Playwright ga ne može
         // automatski kliknuti (OS-razina dialog), ali može otvoriti stranicu
@@ -188,6 +192,9 @@ async function main() {
         }).catch(() => {
             // 404 / Whitelabel error je normalan — autentifikacija je prošla
         });
+
+        // Force Chrome window to foreground (Windows hides new windows in taskbar)
+        await page.bringToFront();
 
         log('');
         warn('Ako browser pita za certifikat — odaberite IDEN certifikat i unesite PIN.');

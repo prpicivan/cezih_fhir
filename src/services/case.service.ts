@@ -336,7 +336,7 @@ class CaseService {
                                 value: caseId,
                             },
                         ],
-                        ...(data.status === 'resolved' || data.status === 'inactive' ? {
+                        ...((data.status as string) === 'resolved' || (data.status as string) === 'inactive' ? {
                             clinicalStatus: {
                                 coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: data.status }],
                             },

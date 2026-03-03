@@ -186,6 +186,57 @@ function CertiliaPhoneMock({ seconds }: { seconds: number }) {
     );
 }
 
+// ── Smart card reader image scene ──────────────────────────────────────────
+function SmartCardMock({ phase }: { phase: number }) {
+    return (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '16px 0 8px', position: 'relative' }}>
+            <div style={{ width: 220, height: 160, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {/* Pulse rings */}
+                {[0, 1, 2].map(i => (
+                    <div key={i} style={{
+                        position: 'absolute',
+                        borderRadius: 16,
+                        border: '1px solid rgba(99,102,241,0.15)',
+                        width: 180 + i * 30,
+                        height: 130 + i * 20,
+                        animation: `sc-reader-pulse 2.4s ease-out ${i * 0.6}s infinite`,
+                    }} />
+                ))}
+
+                {/* Card reader image */}
+                <div style={{
+                    position: 'relative', zIndex: 2,
+                    filter: phase >= 3 ? 'drop-shadow(0 0 20px rgba(74,222,128,0.5))' : 'drop-shadow(0 0 16px rgba(99,102,241,0.3))',
+                    transition: 'filter 0.8s',
+                }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                        src="/card-reader.png"
+                        alt="Smart card reader"
+                        style={{
+                            width: 140, height: 'auto',
+                            borderRadius: 8,
+                            opacity: 0.9,
+                        }}
+                    />
+                    {/* Active indicator LED overlay */}
+                    {phase >= 1 && (
+                        <div style={{
+                            position: 'absolute',
+                            bottom: 8, right: 12,
+                            width: 8, height: 8,
+                            borderRadius: '50%',
+                            background: phase >= 3 ? '#4ade80' : '#818cf8',
+                            boxShadow: phase >= 3 ? '0 0 12px rgba(74,222,128,0.8)' : '0 0 10px rgba(99,102,241,0.6)',
+                            animation: phase < 3 ? 'sc-led-blink 1.2s ease-in-out infinite' : 'none',
+                        }} />
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // ── Main login page ───────────────────────────────────────────────────────────
 export default function LoginPage() {
     const router = useRouter();
@@ -308,18 +359,26 @@ export default function LoginPage() {
     };
 
     // ── Smart card flow ───────────────────────────────────────────────────────
+    const [scPhase, setScPhase] = useState(0); // 0=outside, 1=inserting, 2=inserted
+
     const handleSmartCardLogin = async () => {
         setError(null);
-        setAuthView('certilia-initiating');
-        setStepMessage('Pokrećem browser za prijavu pametnom karticom...');
+        setScPhase(0);
+        setAuthView('smartcard-waiting');
+        setStepMessage('Pokrećem sigurnu vezu s CEZIH sustavom...');
+
+        // Card insertion animation (visual only — doesn't affect stepper)
+        setTimeout(() => setScPhase(1), 800);
+
         try {
+            // Launch Chrome via Playwright (cert/PIN dialogs appear in Chrome window)
             const res = await fetch('/api/auth/smartcard/playwright-start', { method: 'POST' });
             const data = await res.json();
-            if (!data.success) throw new Error(data.error || 'Pokretanje browsera nije uspjelo');
-            setAuthView('smartcard-waiting');
-            setStepMessage(data.alreadyRunning
-                ? 'Browser je već otvoren. Dovršite autentifikaciju pametnom karticom.'
-                : 'Browser se otvorio. Odaberite IDEN certifikat i unesite PIN.');
+            if (!data.success) throw new Error(data.error || 'Pokretanje nije uspjelo');
+
+            setStepMessage('Odaberite IDEN certifikat i unesite PIN u Chrome prozoru.');
+
+            // Poll for auth status — stepper advances only on actual auth success
             const deadline = Date.now() + 6 * 60 * 1000;
             const pollId = setInterval(async () => {
                 if (Date.now() > deadline) {
@@ -333,8 +392,11 @@ export default function LoginPage() {
                     const statusData = await statusRes.json();
                     if (statusData.authenticated) {
                         clearInterval(pollId);
-                        setAuthView('authenticated');
-                        setTimeout(() => router.push('/dashboard/patients'), 1500);
+                        setScPhase(3); // all steps completed
+                        setTimeout(() => {
+                            setAuthView('authenticated');
+                            setTimeout(() => router.push('/dashboard/patients'), 1500);
+                        }, 800); // brief pause to show all-green stepper
                     }
                 } catch { /* keep polling */ }
             }, 2000);
@@ -424,6 +486,36 @@ export default function LoginPage() {
                 }
                 @keyframes progress-fill {
                     from { width: 0%; }
+                }
+                @keyframes sc-reader-pulse {
+                    0%   { transform: scale(1);    opacity: 0.5; }
+                    50%  { transform: scale(1.05); opacity: 0.2; }
+                    100% { transform: scale(1.1);  opacity: 0; }
+                }
+                @keyframes sc-led-blink {
+                    0%, 100% { opacity: 1; }
+                    50%      { opacity: 0.4; }
+                }
+                @keyframes sc-chip-pulse {
+                    0%, 100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 4px rgba(0,0,0,0.3), 0 0 8px rgba(212,168,67,0.3); }
+                    50%      { box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 4px rgba(0,0,0,0.3), 0 0 20px rgba(212,168,67,0.7); }
+                }
+                .sc-outside  { transform: translateY(-70px) rotate(-2deg); }
+                .sc-inserting { transform: translateY(-25px) rotate(0deg); }
+                .sc-inserted  { transform: translateY(-10px) rotate(0deg); }
+                .sc-led-idle {
+                    background: rgba(255,255,255,0.15);
+                    box-shadow: none;
+                }
+                .sc-led-active {
+                    background: #4ade80;
+                    box-shadow: 0 0 12px rgba(74,222,128,0.6);
+                    animation: sc-led-blink 1s ease-in-out infinite;
+                }
+                .sc-led-reading {
+                    background: #f59e0b;
+                    box-shadow: 0 0 12px rgba(245,158,11,0.5);
+                    animation: sc-led-blink 0.4s ease-in-out infinite;
                 }
                 .anim-slide-up   { animation: slide-up 0.4s ease-out forwards; }
                 .anim-fade-in    { animation: fade-in 0.3s ease-out forwards; }
@@ -897,63 +989,80 @@ export default function LoginPage() {
                 )}
 
                 {/* ══════════════════════════════════════════════════
-                    VIEW: Smart Card Waiting
+                    VIEW: Smart Card Waiting (animated)
                 ══════════════════════════════════════════════════ */}
                 {authView === 'smartcard-waiting' && (
-                    <div className="anim-slide-up" style={{ padding: '8px 24px 28px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                        <div style={{ position: 'relative', marginBottom: 20 }}>
-                            <div className="anim-pulse-ring" style={{
-                                width: 96, height: 96, borderRadius: '50%',
-                                background: 'rgba(14,165,233,0.1)',
-                                border: '1px solid rgba(14,165,233,0.2)',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            }}>
-                                <Shield style={{ width: 48, height: 48, color: '#38bdf8' }} />
-                            </div>
-                            <div style={{
-                                position: 'absolute', top: -4, right: -4,
-                                width: 28, height: 28, borderRadius: '50%',
-                                background: 'rgba(255,255,255,0.08)',
-                                border: '1px solid rgba(255,255,255,0.12)',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            }}>
-                                <Loader2 className="anim-spin" style={{ width: 16, height: 16, color: '#38bdf8' }} />
-                            </div>
-                        </div>
+                    <div className="anim-slide-up" style={{ padding: '4px 24px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
 
-                        <h3 style={{ fontSize: 17, fontWeight: 800, color: '#fff', margin: '0 0 6px' }}>Prijava pametnom karticom</h3>
-                        <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', textAlign: 'center', maxWidth: 280, margin: '0 0 20px' }}>
-                            {stepMessage}
+                        <h3 style={{ fontSize: 17, fontWeight: 800, color: '#fff', margin: '0 0 4px' }}>Prijava pametnom karticom</h3>
+                        <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', textAlign: 'center', margin: '0 0 8px', maxWidth: 300 }}>
+                            Odaberite <strong style={{ color: 'rgba(255,255,255,0.65)' }}>IDEN certifikat</strong> u Windows dijalogu i unesite <strong style={{ color: 'rgba(255,255,255,0.65)' }}>PIN</strong>
                         </p>
 
-                        <div style={{ width: '100%', maxWidth: 280, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {/* Animated card reader scene */}
+                        <SmartCardMock phase={scPhase} />
+
+                        {/* 4-step stepper */}
+                        <div style={{ width: '100%', maxWidth: 300, display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                            {/* Step 1: Connected — always done */}
                             <div style={{
                                 display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
                                 background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.15)', borderRadius: 10,
                             }}>
                                 <CheckCircle style={{ width: 16, height: 16, color: '#4ade80', flexShrink: 0 }} />
-                                <span style={{ fontSize: 12, color: '#4ade80' }}>Browser otvoren</span>
+                                <span style={{ fontSize: 12, color: '#4ade80' }}>Povezivanje s CEZIH sustavom</span>
                             </div>
+
+                            {/* Step 2: Select certificate — active until auth completes */}
                             <div style={{
                                 display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
-                                background: 'rgba(14,165,233,0.08)', border: '1px solid rgba(14,165,233,0.2)', borderRadius: 10,
+                                background: scPhase >= 3 ? 'rgba(74,222,128,0.08)' : 'rgba(99,102,241,0.1)',
+                                border: `1px solid ${scPhase >= 3 ? 'rgba(74,222,128,0.15)' : 'rgba(99,102,241,0.25)'}`,
+                                borderRadius: 10, transition: 'all 0.5s',
                             }}>
-                                <Loader2 className="anim-spin" style={{ width: 16, height: 16, color: '#38bdf8', flexShrink: 0 }} />
-                                <span style={{ fontSize: 12, color: '#38bdf8', fontWeight: 600 }}>Čeka se IDEN PIN i certifikat...</span>
+                                {scPhase >= 3
+                                    ? <CheckCircle style={{ width: 16, height: 16, color: '#4ade80', flexShrink: 0 }} />
+                                    : <Loader2 className="anim-spin" style={{ width: 16, height: 16, color: '#818cf8', flexShrink: 0 }} />
+                                }
+                                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                    <span style={{ fontSize: 12, color: scPhase >= 3 ? '#4ade80' : '#a5b4fc', fontWeight: 600 }}>Odabir certifikata</span>
+                                    {scPhase < 3 && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 1 }}>Odaberite IDEN certifikat u Chrome prozoru</span>}
+                                </div>
                             </div>
+
+                            {/* Step 3: Enter PIN */}
                             <div style={{
                                 display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
-                                background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10,
+                                background: scPhase >= 3 ? 'rgba(74,222,128,0.08)' : 'rgba(255,255,255,0.03)',
+                                border: `1px solid ${scPhase >= 3 ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.08)'}`,
+                                borderRadius: 10, transition: 'all 0.5s',
                             }}>
-                                <div style={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.15)', flexShrink: 0 }} />
-                                <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.25)' }}>Automatska prijava u sustav</span>
+                                {scPhase >= 3
+                                    ? <CheckCircle style={{ width: 16, height: 16, color: '#4ade80', flexShrink: 0 }} />
+                                    : <div style={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.15)', flexShrink: 0 }} />
+                                }
+                                <span style={{ fontSize: 12, color: scPhase >= 3 ? '#4ade80' : 'rgba(255,255,255,0.25)', fontWeight: scPhase >= 3 ? 600 : 400 }}>Unos PIN-a</span>
+                            </div>
+
+                            {/* Step 4: Login */}
+                            <div style={{
+                                display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                                background: scPhase >= 3 ? 'rgba(74,222,128,0.08)' : 'rgba(255,255,255,0.03)',
+                                border: `1px solid ${scPhase >= 3 ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.08)'}`,
+                                borderRadius: 10, transition: 'all 0.5s',
+                            }}>
+                                {scPhase >= 3
+                                    ? <CheckCircle style={{ width: 16, height: 16, color: '#4ade80', flexShrink: 0 }} />
+                                    : <div style={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.15)', flexShrink: 0 }} />
+                                }
+                                <span style={{ fontSize: 12, color: scPhase >= 3 ? '#4ade80' : 'rgba(255,255,255,0.25)' }}>Prijava u sustav</span>
                             </div>
                         </div>
 
                         <button
                             onClick={goBack}
                             style={{
-                                marginTop: 16, background: 'none', border: 'none', cursor: 'pointer',
+                                marginTop: 14, background: 'none', border: 'none', cursor: 'pointer',
                                 fontSize: 12, color: 'rgba(255,255,255,0.25)',
                                 display: 'flex', alignItems: 'center', gap: 6, transition: 'color 0.2s',
                             }}
