@@ -290,18 +290,36 @@ class VisitService {
             console.error('[VisitService] DB Start Error', dbError);
         }
 
-        const bundle = {
+        const encounterUuid = uuidv4();
+
+        const bundle: any = {
             resourceType: 'Bundle',
+            id: uuidv4(),
+            meta: {
+                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-update-encounter-message'],
+            },
             type: 'message',
+            timestamp: new Date().toISOString(),
             entry: [
                 {
                     fullUrl: `urn:uuid:${messageId}`,
                     resource: {
                         resourceType: 'MessageHeader',
                         id: messageId,
+                        meta: {
+                            profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-encounter-management-message-header'],
+                        },
                         eventCoding: {
-                            system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/message-events',
-                            code: 'encounter-start',
+                            // ehe-message-types / 1.2 — Start/Update Encounter
+                            system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
+                            code: '1.2',
+                        },
+                        author: {
+                            type: 'Practitioner',
+                            identifier: {
+                                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
+                                value: config.practitioner.hzjzId || config.practitioner.oib,
+                            }
                         },
                         source: {
                             endpoint: config.cezih.baseUrl,
@@ -309,11 +327,11 @@ class VisitService {
                             software: `${config.software.name}_${config.software.company}`,
                             version: config.software.version,
                         },
-                        focus: [{ reference: `urn:uuid:encounter-1` }],
+                        focus: [{ reference: `urn:uuid:${encounterUuid}` }],
                     },
                 },
                 {
-                    fullUrl: 'urn:uuid:encounter-1',
+                    fullUrl: `urn:uuid:${encounterUuid}`,
                     resource: {
                         resourceType: 'Encounter',
                         meta: {
@@ -363,18 +381,37 @@ class VisitService {
             console.error('[VisitService] DB Update Error', dbError);
         }
 
-        const bundle = {
+        const encounterUuid = uuidv4();
+
+        const bundle: any = {
             resourceType: 'Bundle',
+            id: uuidv4(),
+            meta: {
+                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-update-encounter-message'],
+            },
             type: 'message',
+            timestamp: new Date().toISOString(),
             entry: [
                 {
                     fullUrl: `urn:uuid:${messageId}`,
                     resource: {
                         resourceType: 'MessageHeader',
                         id: messageId,
+                        meta: {
+                            profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-encounter-management-message-header'],
+                        },
                         eventCoding: {
-                            system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/message-events',
-                            code: 'encounter-update',
+                            // ehe-message-types / 1.2 — Update Encounter (1.1=create, 1.2=update, 1.3=close)
+                            system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
+                            code: '1.2',
+                        },
+                        // DIGSIG-1: autor poruke mora biti jednak Bundle.signature.who
+                        author: {
+                            type: 'Practitioner',
+                            identifier: {
+                                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
+                                value: config.practitioner.hzjzId || config.practitioner.oib,
+                            }
                         },
                         source: {
                             endpoint: config.cezih.baseUrl,
@@ -382,11 +419,11 @@ class VisitService {
                             software: `${config.software.name}_${config.software.company}`,
                             version: config.software.version,
                         },
-                        focus: [{ reference: `urn:uuid:encounter-1` }],
+                        focus: [{ reference: `urn:uuid:${encounterUuid}` }],
                     },
                 },
                 {
-                    fullUrl: 'urn:uuid:encounter-1',
+                    fullUrl: `urn:uuid:${encounterUuid}`,
                     resource: {
                         resourceType: 'Encounter',
                         meta: {
@@ -399,16 +436,35 @@ class VisitService {
                             },
                         ],
                         status: 'in-progress',
-                        ...(data.endDate && {
-                            period: { end: data.endDate },
-                        }),
-                        ...(data.diagnosisCode && {
+                        class: {
+                            system: ENCOUNTER_CLASS_SYSTEM,
+                            code: ENCOUNTER_CLASSES[data.class || 'AMB'] || '1',
+                        },
+                        subject: {
+                            type: 'Patient',
+                            identifier: {
+                                system: CEZIH_IDENTIFIERS.MBO,
+                                value: data.patientMbo || this.getVisit(visitId)?.patientMbo || '999999423',
+                            },
+                        },
+                        serviceProvider: {
+                            type: 'Organization',
+                            identifier: {
+                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                                value: data.organizationId || config.organization?.hzzoCode || '4981825',
+                            },
+                        },
+                        period: {
+                            start: data.startDate || this.getVisit(visitId)?.startDateTime || new Date().toISOString(),
+                            ...(data.endDate && { end: data.endDate }),
+                        },
+                        ...(data.caseId && {
                             diagnosis: [{
                                 condition: {
                                     type: 'Condition',
                                     identifier: {
                                         system: CEZIH_IDENTIFIERS.CASE_ID,
-                                        value: `case-${visitId}`
+                                        value: data.caseId
                                     }
                                 }
                             }],

@@ -24,6 +24,9 @@ class Pkcs11Service {
     // Čuvamo za re-login nakon session expiry
     private savedPin: string = '';
     private savedSlot: Buffer | null = null;
+    // Sign token with CKA_ALWAYS_AUTHENTICATE needs context-specific login (CKU=2)
+    // between C_SignInit and C_Sign
+    private requiresContextLogin: boolean = false;
 
     isActive(): boolean {
         return this.privateKeyHandle !== null;
@@ -45,12 +48,35 @@ class Pkcs11Service {
      * Some tokens (like Sign with CKA_ALWAYS_AUTHENTICATE=true) require
      * per-operation PIN via middleware UI and can't be used headlessly.
      */
-    private testTokenSigning(slot: Buffer, pin: string): boolean {
-        if (!this.pkcs11Module) return false;
+    private testTokenSigning(slot: Buffer, pin: string): { ok: boolean; needsContextLogin: boolean } {
+        if (!this.pkcs11Module) return { ok: false, needsContextLogin: false };
         let testSession: Buffer | null = null;
         try {
+            // Aggressively clean up stale sessions from previous backend processes
+            try { this.pkcs11Module.C_CloseAllSessions(slot); } catch (_) { }
+
             testSession = this.pkcs11Module.C_OpenSession(slot, 0x04 | 0x02);
-            this.pkcs11Module.C_Login(testSession, 1, pin);
+            try {
+                this.pkcs11Module.C_Login(testSession, 1, pin); // CKU_USER = 1
+            } catch (loginErr: any) {
+                if (loginErr.message?.includes('CKR_USER_ALREADY_LOGGED_IN')) {
+                    // Already logged in from this process — fine, proceed
+                    console.log('[Pkcs11Service] Already logged in on this slot — proceeding.');
+                } else if (loginErr.message?.includes('CKR_USER_ANOTHER_ALREADY_LOGGED_IN')) {
+                    // Another process has an active session — try full module reset
+                    console.log('[Pkcs11Service] Another session active, resetting PKCS#11 module...');
+                    try { this.pkcs11Module.C_CloseSession(testSession); } catch (_) { }
+                    try { this.pkcs11Module.C_Finalize(); } catch (_) { }
+                    try { this.pkcs11Module.C_Initialize(); } catch (ie: any) {
+                        if (!ie.message?.includes('CKR_CRYPTOKI_ALREADY_INITIALIZED')) throw ie;
+                    }
+                    testSession = this.pkcs11Module.C_OpenSession(slot, 0x04 | 0x02);
+                    this.pkcs11Module.C_Login(testSession, 1, pin);
+                    console.log('[Pkcs11Service] Module reset + login OK.');
+                } else {
+                    throw loginErr;
+                }
+            }
 
             // Find a private key
             this.pkcs11Module.C_FindObjectsInit(testSession, []);
@@ -66,14 +92,15 @@ class Pkcs11Service {
                 if (cls === 3 || cls === 3n) { privKey = obj; break; }
             }
 
-            if (!privKey) return false;
+            if (!privKey) return { ok: false, needsContextLogin: false };
 
             // Check CKA_ALWAYS_AUTHENTICATE
+            let alwaysAuth = false;
             try {
                 const aa = this.pkcs11Module.C_GetAttributeValue(testSession, privKey, [{ type: 0x00000202, value: Buffer.alloc(4) }]);
                 if (aa[0]?.value?.[0] === 1) {
-                    console.log('[Pkcs11Service] Token has CKA_ALWAYS_AUTHENTICATE=true — not usable for headless signing.');
-                    return false;
+                    alwaysAuth = true;
+                    console.log('[Pkcs11Service] Token has CKA_ALWAYS_AUTHENTICATE=true — will use context-specific login (CKU=2).');
                 }
             } catch (_) { /* attribute not supported = probably fine */ }
 
@@ -83,12 +110,19 @@ class Pkcs11Service {
             const keyType = kt[0]?.value?.[0];
             const mech = keyType === 3 ? 0x00001041 : 0x00000040; // CKM_ECDSA or CKM_SHA256_RSA_PKCS
             this.pkcs11Module.C_SignInit(testSession, { mechanism: mech, parameter: null }, privKey);
+
+            // If CKA_ALWAYS_AUTHENTICATE, do context-specific login between SignInit and Sign
+            if (alwaysAuth) {
+                this.pkcs11Module.C_Login(testSession, 2, pin); // CKU_CONTEXT_SPECIFIC = 2
+                console.log('[Pkcs11Service] Context-specific login (CKU=2) OK.');
+            }
+
             this.pkcs11Module.C_Sign(testSession, keyType === 3 ? hash : Buffer.from('pkcs11-test'), Buffer.alloc(4096));
-            console.log('[Pkcs11Service] Test sign successful on this token.');
-            return true;
+            console.log(`[Pkcs11Service] Test sign successful on this token (alwaysAuth=${alwaysAuth}).`);
+            return { ok: true, needsContextLogin: alwaysAuth };
         } catch (e: any) {
             console.log(`[Pkcs11Service] Test sign failed: ${e.message}`);
-            return false;
+            return { ok: false, needsContextLogin: false };
         } finally {
             if (testSession) {
                 try { this.pkcs11Module.C_Logout(testSession); } catch (_) { }
@@ -144,23 +178,8 @@ class Pkcs11Service {
                 if (label.toLowerCase().includes('iden')) idenSlot = slot;
             }
 
-            // Strategy: Try Sign token first, but if CKA_ALWAYS_AUTHENTICATE=true,
-            // fall back to Iden token (Sign requires per-operation PIN via middleware UI dialog
-            // which is incompatible with automatic/programmatic signing)
-            if (signSlot && signPin) {
-                const canUseSign = this.testTokenSigning(signSlot, signPin);
-                if (canUseSign) {
-                    targetSlot = signSlot;
-                    targetPin = signPin;
-                    tokenLabel = 'Sign';
-                    console.log('[Pkcs11Service] ✅ Sign token radi za programsko potpisivanje.');
-                } else {
-                    console.log('[Pkcs11Service] ⚠️  Sign token zahtijeva per-operation PIN (CKA_ALWAYS_AUTHENTICATE), prebacujem na Iden.');
-                }
-            }
-
-            // Fallback (or primary): Iden token
-            if (!targetSlot && idenSlot && idenPin) {
+            // Use Iden token (proven working with CEZIH on 2026-03-02)
+            if (idenSlot && idenPin) {
                 targetSlot = idenSlot;
                 targetPin = idenPin;
                 tokenLabel = 'Iden';
@@ -287,6 +306,18 @@ class Pkcs11Service {
 
         const signMechParams = { mechanism: mechanismBase, parameter: null };
         this.pkcs11Module.C_SignInit(this.pkcs11Session, signMechParams, this.privateKeyHandle);
+
+        // CKA_ALWAYS_AUTHENTICATE: context-specific login between SignInit and Sign
+        if (this.requiresContextLogin) {
+            try {
+                this.pkcs11Module.C_Login(this.pkcs11Session, 2, this.savedPin); // CKU_CONTEXT_SPECIFIC = 2
+            } catch (ctxErr: any) {
+                if (!ctxErr.message?.includes('CKR_USER_ALREADY_LOGGED_IN')) {
+                    throw new Error(`Context-specific login failed: ${ctxErr.message}`);
+                }
+            }
+        }
+
         const signatureBytes = this.pkcs11Module.C_Sign(this.pkcs11Session, dataToSign, Buffer.alloc(4096));
 
         // Format ECDSA if needed

@@ -390,6 +390,34 @@ router.get('/terminology/value-sets', async (req: Request, res: Response) => {
     }
 });
 
+// --- Local data endpoints (no CEZIH call, read from SQLite) ---
+router.get('/terminology/local-code-systems', (req: Request, res: Response) => {
+    try {
+        const codeSystems = terminologyService.getLocalCodeSystems();
+        res.json({ success: true, count: codeSystems.length, codeSystems });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.get('/terminology/local-value-sets', (req: Request, res: Response) => {
+    try {
+        const valueSets = terminologyService.getLocalValueSets();
+        res.json({ success: true, count: valueSets.length, valueSets });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.post('/terminology/sync', async (req: Request, res: Response) => {
+    try {
+        const result = await terminologyService.syncAll();
+        res.json({ success: true, codeSystems: result.codeSystems.length, valueSets: result.valueSets.length });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 router.get('/terminology/diagnoses', async (req: Request, res: Response) => {
     try {
         const query = (req.query.q as string || '').toLowerCase();

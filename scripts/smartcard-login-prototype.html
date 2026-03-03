@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Card Login — WBS_FHIR Prototype</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #0a0f1e 0%, #0d1a35 50%, #071225 100%);
+            font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* ── Ambient orbs ── */
+        .orb {
+            position: absolute;
+            border-radius: 50%;
+            pointer-events: none;
+        }
+        .orb-1 {
+            top: 10%; left: 15%;
+            width: 320px; height: 320px;
+            background: radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 70%);
+            animation: orb-float 7s ease-in-out infinite;
+        }
+        .orb-2 {
+            bottom: 8%; right: 12%;
+            width: 400px; height: 400px;
+            background: radial-gradient(circle, rgba(20,184,166,0.08) 0%, transparent 70%);
+            animation: orb-float 9s ease-in-out 2s infinite;
+        }
+        .orb-3 {
+            top: 50%; right: 20%;
+            width: 200px; height: 200px;
+            background: radial-gradient(circle, rgba(139,92,246,0.1) 0%, transparent 70%);
+            animation: orb-float 5s ease-in-out 1s infinite;
+        }
+
+        /* ── Glass card ── */
+        .card {
+            width: 100%;
+            max-width: 440px;
+            background: rgba(255,255,255,0.04);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 24px;
+            box-shadow: 0 32px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05) inset;
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ── Header ── */
+        .header {
+            padding: 32px 32px 8px;
+            text-align: center;
+        }
+        .logo-wrap {
+            width: 64px; height: 64px;
+            border-radius: 18px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.12);
+            display: flex; align-items: center; justify-content: center;
+            margin: 0 auto 14px;
+        }
+        .logo-wrap .shield-icon {
+            width: 36px; height: 36px;
+            color: #6366f1;
+        }
+        h1 {
+            font-size: 22px;
+            font-weight: 800;
+            color: #fff;
+            letter-spacing: -0.5px;
+            margin-bottom: 4px;
+        }
+        .subtitle {
+            font-size: 13px;
+            color: rgba(255,255,255,0.45);
+        }
+
+        /* ── Smart Card Animation Area ── */
+        .card-animation-wrap {
+            display: flex;
+            justify-content: center;
+            padding: 20px 0 12px;
+            position: relative;
+        }
+
+        .smart-card-scene {
+            width: 220px;
+            height: 160px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Pulse rings behind the reader */
+        .reader-pulse {
+            position: absolute;
+            border-radius: 16px;
+            border: 1px solid rgba(99,102,241,0.15);
+        }
+        .reader-pulse:nth-child(1) { width: 180px; height: 130px; animation: reader-pulse-anim 2.4s ease-out 0s infinite; }
+        .reader-pulse:nth-child(2) { width: 210px; height: 150px; animation: reader-pulse-anim 2.4s ease-out 0.6s infinite; }
+        .reader-pulse:nth-child(3) { width: 240px; height: 170px; animation: reader-pulse-anim 2.4s ease-out 1.2s infinite; }
+
+        /* Card reader device */
+        .reader {
+            width: 140px;
+            height: 90px;
+            background: linear-gradient(160deg, #1a1d2e 0%, #0d1020 100%);
+            border-radius: 14px;
+            border: 2px solid rgba(99,102,241,0.3);
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06);
+            z-index: 2;
+        }
+
+        .reader-slot {
+            width: 100px;
+            height: 6px;
+            background: rgba(0,0,0,0.5);
+            border-radius: 3px;
+            border: 1px solid rgba(255,255,255,0.08);
+            position: absolute;
+            top: 12px;
+        }
+
+        .reader-led {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            position: absolute;
+            bottom: 12px;
+            right: 16px;
+            transition: all 0.5s;
+        }
+        .reader-led.idle {
+            background: rgba(255,255,255,0.15);
+            box-shadow: none;
+        }
+        .reader-led.active {
+            background: #4ade80;
+            box-shadow: 0 0 12px rgba(74,222,128,0.6);
+            animation: led-blink 1s ease-in-out infinite;
+        }
+        .reader-led.reading {
+            background: #f59e0b;
+            box-shadow: 0 0 12px rgba(245,158,11,0.5);
+            animation: led-blink 0.4s ease-in-out infinite;
+        }
+
+        .reader-label {
+            font-size: 8px;
+            letter-spacing: 2px;
+            color: rgba(255,255,255,0.2);
+            text-transform: uppercase;
+            position: absolute;
+            bottom: 14px;
+            left: 16px;
+        }
+
+        /* Smart card */
+        .smart-card {
+            width: 120px;
+            height: 76px;
+            background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e1b4b 100%);
+            border-radius: 10px;
+            border: 1.5px solid rgba(139,92,246,0.4);
+            position: absolute;
+            z-index: 3;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5), 0 0 20px rgba(99,102,241,0.15);
+            transition: transform 1.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .smart-card.outside {
+            transform: translateY(-70px) rotate(-2deg);
+        }
+        .smart-card.inserting {
+            transform: translateY(-25px) rotate(0deg);
+        }
+        .smart-card.inserted {
+            transform: translateY(-10px) rotate(0deg);
+        }
+
+        /* Gold chip on the card */
+        .chip {
+            width: 28px;
+            height: 22px;
+            background: linear-gradient(135deg, #d4a843 0%, #f5d060 40%, #c9952e 100%);
+            border-radius: 4px;
+            position: absolute;
+            top: 14px;
+            left: 16px;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .chip::after {
+            content: '';
+            position: absolute;
+            top: 4px; left: 4px;
+            width: 20px; height: 14px;
+            border: 1px solid rgba(180,130,40,0.5);
+            border-radius: 2px;
+        }
+        .chip::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 0;
+            width: 100%;
+            height: 1px;
+            background: rgba(180,130,40,0.4);
+        }
+
+        .chip-glow {
+            width: 28px;
+            height: 22px;
+            position: absolute;
+            top: 14px;
+            left: 16px;
+            border-radius: 4px;
+            opacity: 0;
+            transition: opacity 0.5s;
+            box-shadow: 0 0 16px rgba(212,168,67,0.6);
+        }
+        .smart-card.inserted .chip-glow {
+            opacity: 1;
+            animation: chip-pulse 1.5s ease-in-out infinite;
+        }
+
+        /* Card text elements */
+        .card-lines {
+            position: absolute;
+            bottom: 10px;
+            left: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .card-line {
+            height: 3px;
+            border-radius: 2px;
+            background: rgba(255,255,255,0.1);
+        }
+        .card-line:nth-child(1) { width: 60px; }
+        .card-line:nth-child(2) { width: 40px; }
+
+        .card-logo-mini {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 1px solid rgba(255,255,255,0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .card-logo-mini svg {
+            width: 10px;
+            height: 10px;
+            color: rgba(255,255,255,0.25);
+        }
+
+        /* ── Steps ── */
+        .steps {
+            padding: 0 28px 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .step {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            border-radius: 12px;
+            transition: all 0.5s ease-out;
+        }
+        .step.done {
+            background: rgba(74,222,128,0.08);
+            border: 1px solid rgba(74,222,128,0.15);
+        }
+        .step.active {
+            background: rgba(99,102,241,0.1);
+            border: 1px solid rgba(99,102,241,0.25);
+        }
+        .step.pending {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+
+        .step-icon {
+            width: 22px;
+            height: 22px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .step-icon svg { width: 18px; height: 18px; }
+        .step.done .step-icon svg { color: #4ade80; }
+        .step.active .step-icon svg { color: #818cf8; animation: spin 1s linear infinite; }
+        .step.pending .step-icon { border-radius: 50%; border: 2px solid rgba(255,255,255,0.15); }
+
+        .step-text {
+            display: flex;
+            flex-direction: column;
+        }
+        .step-title {
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .step.done .step-title { color: #4ade80; }
+        .step.active .step-title { color: #a5b4fc; }
+        .step.pending .step-title { color: rgba(255,255,255,0.25); }
+
+        .step-desc {
+            font-size: 11px;
+            margin-top: 2px;
+        }
+        .step.active .step-desc { color: rgba(255,255,255,0.35); }
+        .step.pending .step-desc { color: rgba(255,255,255,0.15); }
+
+        /* ── Progress bar ── */
+        .progress-section {
+            padding: 16px 28px 0;
+        }
+        .progress-meta {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px;
+            font-size: 11px;
+        }
+        .progress-meta .label { color: rgba(255,255,255,0.3); font-weight: 500; }
+        .progress-meta .value { color: #14b8a6; font-weight: 700; }
+        .progress-track {
+            height: 4px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 99px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #14b8a6, #10d9a0);
+            border-radius: 99px;
+            transition: width 1s ease-out;
+        }
+
+        /* ── Countdown area ── */
+        .countdown-section {
+            padding: 16px 28px 4px;
+            text-align: center;
+        }
+        .countdown-text {
+            font-size: 12px;
+            color: rgba(255,255,255,0.3);
+        }
+        .countdown-text strong {
+            color: rgba(255,255,255,0.6);
+            font-weight: 700;
+        }
+
+        /* ── Footer actions ── */
+        .footer-actions {
+            padding: 12px 28px 28px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-skip {
+            width: 100%;
+            padding: 10px;
+            background: rgba(99,102,241,0.08);
+            border: 1px solid rgba(99,102,241,0.2);
+            border-radius: 10px;
+            color: rgba(255,255,255,0.6);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+        .btn-skip:hover {
+            background: rgba(99,102,241,0.16);
+            border-color: rgba(99,102,241,0.4);
+            color: #fff;
+        }
+
+        .btn-back {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 12px;
+            color: rgba(255,255,255,0.25);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-family: inherit;
+            transition: color 0.2s;
+        }
+        .btn-back:hover { color: rgba(255,255,255,0.5); }
+
+        /* ── Success overlay ── */
+        .success-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(10,15,30,0.95);
+            backdrop-filter: blur(12px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s;
+        }
+        .success-overlay.show {
+            opacity: 1;
+            pointer-events: all;
+        }
+        .success-icon {
+            width: 84px; height: 84px;
+            border-radius: 50%;
+            background: rgba(74,222,128,0.12);
+            border: 1px solid rgba(74,222,128,0.3);
+            display: flex; align-items: center; justify-content: center;
+            margin-bottom: 16px;
+            box-shadow: 0 0 40px rgba(74,222,128,0.2);
+            animation: bounce-check 0.5s ease-out;
+        }
+        .success-icon svg { width: 44px; height: 44px; color: #4ade80; }
+        .success-title {
+            font-size: 18px; font-weight: 800; color: #4ade80;
+            margin-bottom: 6px;
+        }
+        .success-sub {
+            font-size: 13px; color: rgba(255,255,255,0.4);
+            margin-bottom: 20px;
+        }
+        .success-bar {
+            width: 200px; height: 4px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 99px; overflow: hidden;
+        }
+        .success-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4ade80, #14b8a6);
+            border-radius: 99px;
+            animation: progress-fill 1.5s ease-out forwards;
+            width: 100%;
+        }
+
+        /* ── Demo controls (bottom-right) ── */
+        .demo-controls {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            gap: 8px;
+            z-index: 100;
+        }
+        .demo-btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.15);
+            background: rgba(255,255,255,0.08);
+            backdrop-filter: blur(12px);
+            color: rgba(255,255,255,0.7);
+            font-size: 12px;
+            font-family: inherit;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .demo-btn:hover {
+            background: rgba(255,255,255,0.15);
+            color: #fff;
+        }
+        .demo-btn.primary {
+            background: rgba(99,102,241,0.2);
+            border-color: rgba(99,102,241,0.4);
+            color: #a5b4fc;
+        }
+        .demo-btn.primary:hover {
+            background: rgba(99,102,241,0.35);
+            color: #fff;
+        }
+        .demo-label {
+            font-size: 10px;
+            color: rgba(255,255,255,0.3);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-right: 8px;
+        }
+
+        /* ── Keyframes ── */
+        @keyframes orb-float {
+            0%, 100% { transform: translateY(0px) scale(1); }
+            50% { transform: translateY(-20px) scale(1.05); }
+        }
+        @keyframes reader-pulse-anim {
+            0%   { transform: scale(1);    opacity: 0.5; }
+            50%  { transform: scale(1.05); opacity: 0.2; }
+            100% { transform: scale(1.1);  opacity: 0; }
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        @keyframes led-blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        @keyframes chip-pulse {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 1; }
+        }
+        @keyframes bounce-check {
+            0%   { transform: scale(0); }
+            60%  { transform: scale(1.15); }
+            100% { transform: scale(1); }
+        }
+        @keyframes progress-fill {
+            from { width: 0%; }
+        }
+        @keyframes slide-up {
+            from { opacity: 0; transform: translateY(20px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .anim-slide-up { animation: slide-up 0.4s ease-out forwards; }
+    </style>
+</head>
+<body>
+
+    <!-- Ambient orbs -->
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+
+    <!-- Main card -->
+    <div class="card anim-slide-up" id="mainCard">
+
+        <!-- Success overlay (hidden initially) -->
+        <div class="success-overlay" id="successOverlay">
+            <div class="success-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/></svg>
+            </div>
+            <div class="success-title">Certifikat prihvaćen!</div>
+            <div class="success-sub">Preusmjeravanje na CEZIH gateway...</div>
+            <div class="success-bar"><div class="success-bar-fill"></div></div>
+        </div>
+
+        <!-- Header -->
+        <div class="header">
+            <div class="logo-wrap">
+                <svg class="shield-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/>
+                </svg>
+            </div>
+            <h1>WBS_FHIR</h1>
+            <p class="subtitle">Prijava pametnom karticom</p>
+        </div>
+
+        <!-- Smart card animation -->
+        <div class="card-animation-wrap">
+            <div class="smart-card-scene">
+                <!-- Pulse rings -->
+                <div class="reader-pulse"></div>
+                <div class="reader-pulse"></div>
+                <div class="reader-pulse"></div>
+
+                <!-- Card reader -->
+                <div class="reader">
+                    <div class="reader-slot"></div>
+                    <div class="reader-led idle" id="readerLed"></div>
+                    <span class="reader-label">IDEN</span>
+                </div>
+
+                <!-- Smart card -->
+                <div class="smart-card outside" id="smartCard">
+                    <div class="chip"></div>
+                    <div class="chip-glow"></div>
+                    <div class="card-logo-mini">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/>
+                        </svg>
+                    </div>
+                    <div class="card-lines">
+                        <div class="card-line"></div>
+                        <div class="card-line"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Progress bar -->
+        <div class="progress-section">
+            <div class="progress-meta">
+                <span class="label" id="progressLabel">Korak 1/3</span>
+                <span class="value" id="progressValue">Povezivanje</span>
+            </div>
+            <div class="progress-track">
+                <div class="progress-fill" id="progressFill" style="width: 33%"></div>
+            </div>
+        </div>
+
+        <!-- Steps -->
+        <div class="steps" id="stepsContainer">
+            <div class="step done" id="step1">
+                <div class="step-icon">
+                    <!-- Check circle -->
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>
+                    </svg>
+                </div>
+                <div class="step-text">
+                    <div class="step-title">Povezivanje s CEZIH sustavom</div>
+                </div>
+            </div>
+
+            <div class="step active" id="step2">
+                <div class="step-icon" id="step2Icon">
+                    <!-- Spinner -->
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"/>
+                    </svg>
+                </div>
+                <div class="step-text">
+                    <div class="step-title">Odabir certifikata</div>
+                    <div class="step-desc">Windows će prikazati popis certifikata na kartici</div>
+                </div>
+            </div>
+
+            <div class="step pending" id="step3">
+                <div class="step-icon" id="step3Icon">
+                    <!-- Empty circle (rendered via CSS border) -->
+                </div>
+                <div class="step-text">
+                    <div class="step-title">Unos PIN-a</div>
+                    <div class="step-desc">Unesite PIN za odabrani IDEN certifikat</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Countdown -->
+        <div class="countdown-section" id="countdownSection">
+            <p class="countdown-text">
+                Automatsko preusmjeravanje za <strong id="countdownNum">5</strong> sekundi
+            </p>
+        </div>
+
+        <!-- Footer actions -->
+        <div class="footer-actions">
+            <button class="btn-skip" id="btnSkip" onclick="skipToGateway()">
+                Nastavi odmah →
+            </button>
+            <button class="btn-back" onclick="resetDemo()">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:14px;height:14px">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"/>
+                </svg>
+                Odustani
+            </button>
+        </div>
+    </div>
+
+    <!-- Demo controls -->
+    <div class="demo-controls">
+        <span class="demo-label">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:12px;height:12px">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z"/>
+            </svg>
+            PROTOTYPE CONTROLS
+        </span>
+        <button class="demo-btn" onclick="resetDemo()">⟲ Reset</button>
+        <button class="demo-btn primary" onclick="nextStep()">Sljedeći korak →</button>
+    </div>
+
+    <script>
+        let currentPhase = 0;
+        // Phases:
+        // 0 = initial (connecting done, waiting for cert selection)
+        // 1 = card inserting animation
+        // 2 = card inserted, step 2 done, step 3 active (PIN entry)
+        // 3 = all done, success overlay
+
+        const smartCard = document.getElementById('smartCard');
+        const readerLed = document.getElementById('readerLed');
+        const step1 = document.getElementById('step1');
+        const step2 = document.getElementById('step2');
+        const step3 = document.getElementById('step3');
+        const step2Icon = document.getElementById('step2Icon');
+        const step3Icon = document.getElementById('step3Icon');
+        const progressFill = document.getElementById('progressFill');
+        const progressLabel = document.getElementById('progressLabel');
+        const progressValue = document.getElementById('progressValue');
+        const successOverlay = document.getElementById('successOverlay');
+        const countdownSection = document.getElementById('countdownSection');
+        const countdownNum = document.getElementById('countdownNum');
+
+        // Start countdown on load
+        let countdownVal = 5;
+        const cdInterval = setInterval(() => {
+            countdownVal--;
+            countdownNum.textContent = countdownVal;
+            if (countdownVal <= 0) {
+                clearInterval(cdInterval);
+                countdownSection.innerHTML = '<p class="countdown-text" style="color: rgba(255,255,255,0.5)">⏳ Preusmjeravanje na CEZIH gateway...</p>';
+            }
+        }, 1000);
+
+        // Auto-trigger card insertion after 2 seconds
+        setTimeout(() => {
+            if (currentPhase === 0) {
+                smartCard.classList.remove('outside');
+                smartCard.classList.add('inserting');
+                readerLed.classList.remove('idle');
+                readerLed.classList.add('reading');
+                currentPhase = 1;
+
+                // Complete insertion after 1.5s
+                setTimeout(() => {
+                    smartCard.classList.remove('inserting');
+                    smartCard.classList.add('inserted');
+                    readerLed.classList.remove('reading');
+                    readerLed.classList.add('active');
+                }, 1500);
+            }
+        }, 2000);
+
+        function nextStep() {
+            if (currentPhase === 0) {
+                // Phase 0 → 1: Insert card animation
+                smartCard.classList.remove('outside');
+                smartCard.classList.add('inserting');
+                readerLed.classList.remove('idle');
+                readerLed.classList.add('reading');
+                currentPhase = 1;
+
+                setTimeout(() => {
+                    smartCard.classList.remove('inserting');
+                    smartCard.classList.add('inserted');
+                    readerLed.classList.remove('reading');
+                    readerLed.classList.add('active');
+                }, 1500);
+
+            } else if (currentPhase === 1) {
+                // Phase 1 → 2: Cert selected, now PIN entry
+                step2.classList.remove('active');
+                step2.classList.add('done');
+                step2Icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>';
+
+                step3.classList.remove('pending');
+                step3.classList.add('active');
+                step3Icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"/></svg>';
+                step3Icon.style.borderRadius = '0';
+                step3Icon.style.border = 'none';
+
+                progressFill.style.width = '66%';
+                progressLabel.textContent = 'Korak 2/3';
+                progressValue.textContent = 'Unos PIN-a';
+
+                currentPhase = 2;
+
+            } else if (currentPhase === 2) {
+                // Phase 2 → 3: PIN entered, success
+                step3.classList.remove('active');
+                step3.classList.add('done');
+                step3Icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>';
+
+                progressFill.style.width = '100%';
+                progressLabel.textContent = 'Korak 3/3';
+                progressValue.textContent = 'Gotovo';
+
+                setTimeout(() => {
+                    successOverlay.classList.add('show');
+                }, 600);
+
+                currentPhase = 3;
+
+            } else if (currentPhase === 3) {
+                resetDemo();
+            }
+        }
+
+        function skipToGateway() {
+            // Simulate immediate redirect
+            countdownSection.innerHTML = '<p class="countdown-text" style="color: #14b8a6; font-weight: 600;">🔒 Preusmjeravanje na CEZIH gateway...</p>';
+            document.getElementById('btnSkip').disabled = true;
+            document.getElementById('btnSkip').style.opacity = '0.5';
+
+            setTimeout(() => {
+                // In real implementation, this would redirect to the gateway URL
+                alert('🔗 Redirect na CEZIH gateway URL\n\nhttps://cezih-gateway.hzzo.hr/...\n\n(U produkciji, ovdje bi se otvorio pravi CEZIH gateway)');
+            }, 800);
+        }
+
+        function resetDemo() {
+            currentPhase = 0;
+
+            smartCard.className = 'smart-card outside';
+            readerLed.className = 'reader-led idle';
+
+            step1.className = 'step done';
+            step2.className = 'step active';
+            step2Icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"/></svg>';
+
+            step3.className = 'step pending';
+            step3Icon.innerHTML = '';
+            step3Icon.style.borderRadius = '50%';
+            step3Icon.style.border = '2px solid rgba(255,255,255,0.15)';
+
+            progressFill.style.width = '33%';
+            progressLabel.textContent = 'Korak 1/3';
+            progressValue.textContent = 'Povezivanje';
+
+            successOverlay.classList.remove('show');
+
+            countdownVal = 5;
+            countdownNum.textContent = '5';
+            countdownSection.innerHTML = '<p class="countdown-text">Automatsko preusmjeravanje za <strong id="countdownNum">5</strong> sekundi</p>';
+
+            document.getElementById('btnSkip').disabled = false;
+            document.getElementById('btnSkip').style.opacity = '1';
+
+            // Re-trigger card animation
+            setTimeout(() => {
+                if (currentPhase === 0) {
+                    smartCard.classList.remove('outside');
+                    smartCard.classList.add('inserting');
+                    readerLed.classList.remove('idle');
+                    readerLed.classList.add('reading');
+                    currentPhase = 1;
+                    setTimeout(() => {
+                        smartCard.classList.remove('inserting');
+                        smartCard.classList.add('inserted');
+                        readerLed.classList.remove('reading');
+                        readerLed.classList.add('active');
+                    }, 1500);
+                }
+            }, 2000);
+        }
+    </script>
+</body>
+</html>

@@ -302,8 +302,8 @@ function ClinicalWorkspace() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     patientMbo: effectiveMbo,
-                    practitionerId: 'practitioner-1', // Mock ID
-                    organizationId: 'org-1', // Mock ID
+                    practitionerId: '4981825',
+                    organizationId: '999001425',
                     startDate: new Date(startDate).toISOString(),
                     class: visitType,
                     caseId: selectedCaseId || undefined
@@ -346,8 +346,8 @@ function ClinicalWorkspace() {
                 body: JSON.stringify({
                     type,
                     patientMbo: effectiveMbo,
-                    practitionerId: 'practitioner-1',
-                    organizationId: 'org-1',
+                    practitionerId: '4981825',
+                    organizationId: '999001425',
                     visitId: visitId,
                     caseId: caseIdParam || undefined,
                     title: 'Medicinski nalaz',

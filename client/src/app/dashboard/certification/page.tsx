@@ -43,7 +43,7 @@ interface TCGroup {
 // Test definitions
 // ─────────────────────────────────────────────────────────────────
 const PATIENT_MBO = '999999423';
-const PRACTITIONER_OIB = '30160453873';
+const PRACTITIONER_OIB = '4981825';
 const ORGANIZATION_ID = '174900715';
 
 function buildGroups(): TCGroup[] {
@@ -81,12 +81,12 @@ function buildGroups(): TCGroup[] {
             name: 'Posjeti i Slučajevi',
             icon: Layout,
             cases: [
-                { id: 'tc-15', title: 'TC15 — Dohvat slučajeva (QEDm)', description: 'Pretraživanje aktivnih epizoda liječenja za pacijenta.', endpoint: `/api/case/patient/${PATIENT_MBO}?refresh=true`, method: 'GET', status: 'idle' },
-                { id: 'tc-16', title: 'TC16 — Kreiranje slučaja (EpisodeOfCare)', description: 'Kreiranje nove epizode skrbi na CEZIH sustavu.', endpoint: '/api/case/create', method: 'POST', status: 'idle' },
-                { id: 'tc-17', title: 'TC17 — Ažuriranje slučaja', description: 'Ažuriranje dijagnoze i statusa aktivne epizode.', endpoint: '/api/case/:id', method: 'PUT', status: 'idle' },
                 { id: 'tc-12', title: 'TC12 — Otvaranje posjete', description: 'Slanje FHIR poruke za početak ambulantnog pregleda (ENCOUNTER_START).', endpoint: '/api/visit/create', method: 'POST', status: 'idle' },
                 { id: 'tc-13', title: 'TC13 — Izmjena posjete', description: 'Ažuriranje podataka aktivnog posjeta (dijagnoza, status).', endpoint: '/api/visit/:id', method: 'PUT', status: 'idle' },
                 { id: 'tc-14', title: 'TC14 — Zatvaranje posjete', description: 'Slanje konačnog statusa posjeta — REALIZATION poruka.', endpoint: '/api/visit/:id/close', method: 'POST', status: 'idle' },
+                { id: 'tc-15', title: 'TC15 — Dohvat slučajeva (QEDm)', description: 'Pretraživanje aktivnih epizoda liječenja za pacijenta.', endpoint: `/api/case/patient/${PATIENT_MBO}?refresh=true`, method: 'GET', status: 'idle' },
+                { id: 'tc-16', title: 'TC16 — Kreiranje slučaja (EpisodeOfCare)', description: 'Kreiranje nove epizode skrbi na CEZIH sustavu.', endpoint: '/api/case/create', method: 'POST', status: 'idle' },
+                { id: 'tc-17', title: 'TC17 — Ažuriranje slučaja', description: 'Ažuriranje dijagnoze i statusa aktivne epizode.', endpoint: '/api/case/:id', method: 'PUT', status: 'idle' },
             ]
         },
         {
@@ -322,8 +322,12 @@ async function runTC(id: string, groups: TCGroup[]): Promise<TCResult> {
     }
 
     const durationMs = Date.now() - start;
-    // API wraps result in { success, result: { localOnly, cezihStatus, cezihError } }
-    const inner = res.response?.result ?? res.response;
+    // API may double-wrap: { success, result: { success, result: { localOnly, cezihStatus, cezihError } } }
+    let inner = res.response?.result ?? res.response;
+    // Unwrap nested result layers until we find the actual payload
+    while (inner?.result && (inner.result.localOnly !== undefined || inner.result.cezihStatus !== undefined)) {
+        inner = inner.result;
+    }
     const localOnly = inner?.localOnly === true || inner?.cezihStatus === 'failed';
     const cezihError = inner?.cezihError;
 
@@ -342,7 +346,11 @@ function resolveStatus(id: string, result: TCResult): TCStatus {
     if (code === 0) return 'failed';
     if (code >= 200 && code < 300) {
         // Check both top-level and nested result for failure indicators
-        const inner = result.response?.result ?? result.response;
+        let inner = result.response?.result ?? result.response;
+        // Unwrap nested result layers
+        while (inner?.result && (inner.result.localOnly !== undefined || inner.result.cezihStatus !== undefined)) {
+            inner = inner.result;
+        }
         if (result.response?.success === false) return 'failed';
         if (result.localOnly || inner?.localOnly === true || inner?.cezihStatus === 'failed') return 'local';
         return 'passed';

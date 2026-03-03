@@ -245,7 +245,7 @@ export function initDatabase() {
   const defaultMenu = [
     { id: 'dashboard', name: 'Nadzorna ploča', href: '/dashboard', icon: 'LayoutDashboard', isVisible: false, orderIndex: 0 },
     { id: 'patients', name: 'Pacijenti', href: '/dashboard/patients', icon: 'Users', isVisible: true, orderIndex: 1 },
-    { id: 'calendar', name: 'Kalendar', href: '/dashboard/calendar', icon: 'Calendar', isVisible: true, orderIndex: 2 },
+    { id: 'calendar', name: 'Termini', href: '/dashboard/calendar', icon: 'Calendar', isVisible: true, orderIndex: 2 },
     { id: 'documents', name: 'Klinički dokumenti', href: '/dashboard/documents', icon: 'Activity', isVisible: true, orderIndex: 3 },
     { id: 'audit', name: 'Praćenje statusa', href: '/dashboard/audit', icon: 'ShieldCheck', isVisible: true, orderIndex: 4 },
     { id: 'registry', name: 'CEZIH Registri', href: '/dashboard/registry', icon: 'BookOpen', isVisible: true, orderIndex: 5 },

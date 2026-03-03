@@ -137,6 +137,11 @@ class RegistryService {
         if (userToken) {
             return authService.getUserAuthHeaders(userToken);
         }
+        // Prefer gateway auth (cookie-based) — mCSD endpoints require it
+        if (authService.hasGatewaySession()) {
+            return authService.getUserAuthHeaders('');
+        }
+        // Fallback: system token
         try {
             const systemToken = await authService.getSystemToken();
             if (systemToken) {
@@ -146,7 +151,7 @@ class RegistryService {
                 };
             }
         } catch (e) {
-            console.log('[RegistryService] System token not available, trying gateway auth');
+            console.log('[RegistryService] System token not available');
         }
         return authService.getUserAuthHeaders('');
     }
@@ -174,8 +179,11 @@ class RegistryService {
 
         const queryString = searchParams.toString();
 
-        // Try system auth first, then gateway
-        for (const useSystem of [true, false]) {
+        // When we have gateway cookies, try gateway (8443) first, then system (9443)
+        // Gateway cookies only work on port 8443
+        const hasGateway = authService.hasGatewaySession();
+        const authOrder = hasGateway ? [false, true] : [true, false];
+        for (const useSystem of authOrder) {
             const baseUrl = this.getMcsdBaseUrl(useSystem);
             const url = queryString
                 ? `${baseUrl}/${resourceType}?${queryString}`

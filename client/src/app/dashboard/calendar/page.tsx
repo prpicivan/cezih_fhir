@@ -49,7 +49,7 @@ export default function CalendarPage() {
         <div className="space-y-6">
             <div className="flex justify-between items-center">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Raspored (Calendar)</h1>
+                    <h1 className="text-2xl font-bold text-gray-900">Termini</h1>
                     <p className="text-gray-600">Pregled naručenih pacijenata i termina</p>
                 </div>
                 <Link
@@ -93,8 +93,8 @@ export default function CalendarPage() {
                                                 </div>
                                                 <div className="mt-1">
                                                     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${visit.status === 'finished' ? 'bg-green-100 text-green-800' :
-                                                            visit.status === 'in-progress' ? 'bg-blue-100 text-blue-800' :
-                                                                'bg-gray-100 text-gray-800'
+                                                        visit.status === 'in-progress' ? 'bg-blue-100 text-blue-800' :
+                                                            'bg-gray-100 text-gray-800'
                                                         }`}>
                                                         {visit.status === 'finished' ? 'Završeno' :
                                                             visit.status === 'in-progress' ? 'U tijeku' : 'Planirano'}

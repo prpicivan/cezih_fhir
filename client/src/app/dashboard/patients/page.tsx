@@ -178,11 +178,11 @@ export default function PatientsPage() {
                                         <div className="text-xs font-bold text-emerald-600 uppercase mb-3">Pronađen pacijent</div>
                                         <div className="flex items-start gap-4">
                                             <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600 font-bold text-xl uppercase">
-                                                {remotePatient.name.family[0]}
+                                                {remotePatient.name?.family?.[0] || '?'}
                                             </div>
                                             <div>
                                                 <div className="font-bold text-slate-900 text-lg">
-                                                    {remotePatient.name.given.join(' ')} {remotePatient.name.family}
+                                                    {remotePatient.name?.given?.join(' ') || ''} {remotePatient.name?.family || ''}
                                                 </div>
                                                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2 text-xs">
                                                     <div><span className="text-slate-400">MBO:</span> <span className="font-mono">{remotePatient.mbo}</span></div>
@@ -228,11 +228,11 @@ export default function PatientsPage() {
                         >
                             <div className="flex items-center gap-4">
                                 <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center text-slate-500 font-bold text-lg group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors uppercase">
-                                    {patient.name.family[0]}
+                                    {patient.name?.family?.[0] || '?'}
                                 </div>
                                 <div>
                                     <h3 className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
-                                        {patient.name.given.join(' ')} {patient.name.family}
+                                        {patient.name?.given?.join(' ') || ''} {patient.name?.family || 'Nepoznato'}
                                     </h3>
                                     <div className="flex items-center gap-3 mt-1">
                                         <span className="text-xs font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded">MBO: {patient.mbo}</span>

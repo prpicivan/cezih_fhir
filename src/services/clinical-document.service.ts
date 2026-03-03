@@ -287,7 +287,7 @@ class ClinicalDocumentService {
             const data: ClinicalDocumentData = {
                 type: localDoc.type as ClinicalDocumentType,
                 patientMbo: localDoc.patientMbo,
-                practitionerId: 'practitioner-1', // Should probably be stored in DB too
+                practitionerId: config.practitioner.hzjzId,
                 organizationId: config.organization.hzzoCode,
                 visitId: localDoc.visitId,
                 title: 'Medicinski nalaz',

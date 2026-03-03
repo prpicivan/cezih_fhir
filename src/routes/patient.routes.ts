@@ -116,10 +116,13 @@ router.get('/search', async (req: Request, res: Response) => {
 
 router.post('/foreigner/register', async (req: Request, res: Response) => {
     try {
+        console.log('[TC11 Route] Body received:', JSON.stringify(req.body).slice(0, 300));
         const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
         const result = await patientService.registerForeigner(req.body, userToken);
         res.json({ success: true, result });
     } catch (error: any) {
+        console.error('[TC11 Route] ERROR:', error.message);
+        console.error('[TC11 Route] STACK:', error.stack);
         res.status(500).json({ error: error.message });
     }
 });

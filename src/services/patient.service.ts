@@ -407,6 +407,29 @@ class PatientService {
     }
 
     async registerForeigner(data: ForeignerRegistrationData, userToken: string): Promise<any> {
+        // Normalize input: accept both flat {firstName, lastName} and FHIR {name:{family, given}}
+        const rawData = data as any;
+        if (!rawData.name && (rawData.firstName || rawData.lastName)) {
+            (data as any).name = {
+                family: rawData.lastName || '',
+                given: [rawData.firstName || ''],
+            };
+        }
+        // Map documentType/documentNumber to passportNumber/euCardNumber
+        if (!data.passportNumber && !data.euCardNumber && rawData.documentNumber) {
+            if (rawData.documentType === 'euCard' || rawData.documentType === 'EKZO') {
+                data.euCardNumber = rawData.documentNumber;
+            } else {
+                // Default to passport
+                data.passportNumber = rawData.documentNumber;
+            }
+        }
+        if (!data.gender && rawData.gender) data.gender = rawData.gender;
+        if (!data.birthDate && rawData.birthDate) data.birthDate = rawData.birthDate;
+        if (!data.nationality && rawData.nationality) data.nationality = rawData.nationality;
+
+        console.log('[PatientService] registerForeigner normalized data.name:', JSON.stringify(data.name));
+
         try {
             // 1. Save to local DB first
             const stmt = db.prepare(`

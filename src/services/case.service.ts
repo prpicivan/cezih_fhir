@@ -286,8 +286,8 @@ class CaseService {
             resourceType: 'Bundle',
             id: messageId,
             meta: {
-                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-update-health-issue-message'],
-                // NOTE: CEZIH selects profile by event code, not by meta.profile
+                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-update-health-issue-data-message'],
+                // NOTE: CEZIH selects profile by event code (2.6), not by meta.profile
             },
             type: 'message',
             timestamp: new Date().toISOString(),
@@ -302,7 +302,7 @@ class CaseService {
                         },
                         eventCoding: {
                             system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
-                            code: '2.6', // 2.1=create 2.2=recurrence 2.3=remission 2.4=resolve 2.5=relapse 2.6=?
+                            code: '2.6', // 2.6=update health issue data (per hr-update-health-issue-data-message)
                         },
                         // DIGSIG-1: autor poruke = Bundle.signature.who
                         author: {
@@ -506,7 +506,7 @@ class CaseService {
                             subject: { type: 'Patient', identifier: { system: CEZIH_IDENTIFIERS.MBO, value: '999999423' } },
                             onsetDateTime: '2026-03-01',
                             // recorder: max:0 — NE ŠALJI! recordedDate: max:0 — NE ŠALJI!
-                            asserter: { type: 'Practitioner', identifier: { system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER, value: '30160453873' } },
+                            asserter: { type: 'Practitioner', identifier: { system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER, value: config.practitioner.hzjzId } },
                         }
                     },
                 ],

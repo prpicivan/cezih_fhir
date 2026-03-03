@@ -150,8 +150,8 @@ router.post('/run/:tcId', async (req: Request, res: Response) => {
                 break;
 
             case 'tc-9': // Registry Search
-                const orgs = await registryService.searchOrganizations({ active: true });
-                const pracs = await registryService.searchPractitioners({ active: true });
+                const orgs = await registryService.searchOrganizations({ active: true }, userToken);
+                const pracs = await registryService.searchPractitioners({ active: true }, userToken);
                 result = { organizations: orgs.length, practitioners: pracs.length, detail: 'Registry sync verified.' };
                 break;
 

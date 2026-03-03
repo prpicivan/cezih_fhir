@@ -7,7 +7,7 @@ import {
     FileText, User, Calendar,
     RefreshCw, CheckCircle2, AlertCircle,
     Stethoscope, ClipboardList, Activity,
-    History, ChevronRight, Edit2, Trash2, Plus
+    History, ChevronRight, ChevronDown, ChevronUp, Edit2, Trash2, Plus
 } from 'lucide-react';
 import ChangeDocumentModal from './ChangeDocumentModal';
 import CaseModal from './CaseModal';
@@ -27,6 +27,8 @@ export default function PatientChartPage() {
     const [syncingCases, setSyncingCases] = useState(false);
     const [retrieving, setRetrieving] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [docsCollapsed, setDocsCollapsed] = useState(false);
+    const [casesCollapsed, setCasesCollapsed] = useState(false);
 
     const fetchChartData = async (refresh: boolean = false) => {
         setLoading(!refresh); // Only show full loading if not a background refresh
@@ -203,6 +205,13 @@ export default function PatientChartPage() {
                             Sinkroniziraj
                         </button>
                         <button
+                            onClick={() => setCaseModal(undefined)}
+                            className="bg-white border border-emerald-200 text-emerald-700 px-5 py-2.5 rounded-xl font-bold hover:bg-emerald-50 hover:border-emerald-400 transition-all flex items-center gap-2"
+                        >
+                            <ClipboardList className="w-4 h-4" />
+                            Otvori novi slučaj
+                        </button>
+                        <button
                             onClick={() => handleStartVisit()}
                             className="bg-slate-900 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-slate-800 transition-all shadow-lg shadow-slate-200 flex items-center gap-2"
                         >
@@ -307,96 +316,107 @@ export default function PatientChartPage() {
                                 <History className="w-5 h-5 text-blue-500" />
                                 Povijest dokumenata
                             </h3>
-                            <span className="bg-slate-200 text-slate-600 text-[10px] font-black px-2 py-0.5 rounded-full">TC 21/22</span>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => setDocsCollapsed(prev => !prev)}
+                                    className="p-1.5 hover:bg-slate-200 rounded-lg transition-colors text-slate-400 hover:text-slate-600"
+                                    title={docsCollapsed ? 'Proširi' : 'Smanji'}
+                                >
+                                    {docsCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                                </button>
+                                <span className="bg-slate-200 text-slate-600 text-[10px] font-black px-2 py-0.5 rounded-full">TC 21/22</span>
+                            </div>
                         </div>
-                        <div className="p-2 space-y-1">
-                            {allDocuments && allDocuments.length > 0 ? (
-                                allDocuments.map((doc: any) => {
-                                    const isDeprecated = doc.status === 'replaced' || doc.status === 'cancelled';
-                                    const isActive = viewingDocument?.id === doc.id;
-                                    return (
-                                        <div
-                                            key={doc.id}
-                                            className={`rounded-2xl transition-all group ${isDeprecated
-                                                ? 'ml-4 border-l-2 border-slate-200 pl-2'
-                                                : ''
-                                                }`}
-                                        >
-                                            <div className={`w-full p-2.5 rounded-xl transition-all ${isActive
-                                                ? 'bg-blue-50 border border-blue-100'
-                                                : isDeprecated
-                                                    ? 'hover:bg-slate-50/50 border border-transparent opacity-60'
-                                                    : 'hover:bg-slate-50 border border-transparent'
-                                                }`}>
-                                                <button
-                                                    onClick={() => handleRetrieve(doc)}
-                                                    className="w-full text-left flex items-center gap-3"
-                                                >
-                                                    <div className={`rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${isDeprecated
-                                                        ? 'w-8 h-8 bg-slate-100 text-slate-300'
-                                                        : isActive
-                                                            ? 'w-10 h-10 bg-blue-600 text-white'
-                                                            : 'w-10 h-10 bg-slate-100 text-slate-400 group-hover:bg-white group-hover:text-blue-600'
-                                                        }`}>
-                                                        <FileText className={isDeprecated ? 'w-4 h-4' : 'w-5 h-5'} />
-                                                    </div>
-                                                    <div className="min-w-0 flex-1">
-                                                        <div className="flex items-center gap-1.5 flex-wrap">
-                                                            <p className={`font-bold text-xs truncate ${isActive ? 'text-blue-900' : isDeprecated ? 'text-slate-400' : 'text-slate-700'
-                                                                }`}>{doc.type || 'Nalaz'}</p>
-                                                            {isDeprecated && (
-                                                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${doc.status === 'cancelled'
-                                                                    ? 'bg-rose-50 text-rose-400'
-                                                                    : 'bg-slate-100 text-slate-400'
-                                                                    }`}>
-                                                                    {doc.status === 'cancelled' ? 'storniran' : 'zamijenjen'}
-                                                                </span>
+                        {!docsCollapsed && (
+                            <div className="p-2 space-y-1">
+                                {allDocuments && allDocuments.length > 0 ? (
+                                    allDocuments.map((doc: any) => {
+                                        const isDeprecated = doc.status === 'replaced' || doc.status === 'cancelled';
+                                        const isActive = viewingDocument?.id === doc.id;
+                                        return (
+                                            <div
+                                                key={doc.id}
+                                                className={`rounded-2xl transition-all group ${isDeprecated
+                                                    ? 'ml-4 border-l-2 border-slate-200 pl-2'
+                                                    : ''
+                                                    }`}
+                                            >
+                                                <div className={`w-full p-2.5 rounded-xl transition-all ${isActive
+                                                    ? 'bg-blue-50 border border-blue-100'
+                                                    : isDeprecated
+                                                        ? 'hover:bg-slate-50/50 border border-transparent opacity-60'
+                                                        : 'hover:bg-slate-50 border border-transparent'
+                                                    }`}>
+                                                    <button
+                                                        onClick={() => handleRetrieve(doc)}
+                                                        className="w-full text-left flex items-center gap-3"
+                                                    >
+                                                        <div className={`rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${isDeprecated
+                                                            ? 'w-8 h-8 bg-slate-100 text-slate-300'
+                                                            : isActive
+                                                                ? 'w-10 h-10 bg-blue-600 text-white'
+                                                                : 'w-10 h-10 bg-slate-100 text-slate-400 group-hover:bg-white group-hover:text-blue-600'
+                                                            }`}>
+                                                            <FileText className={isDeprecated ? 'w-4 h-4' : 'w-5 h-5'} />
+                                                        </div>
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                                                <p className={`font-bold text-xs truncate ${isActive ? 'text-blue-900' : isDeprecated ? 'text-slate-400' : 'text-slate-700'
+                                                                    }`}>{doc.type || 'Nalaz'}</p>
+                                                                {isDeprecated && (
+                                                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${doc.status === 'cancelled'
+                                                                        ? 'bg-rose-50 text-rose-400'
+                                                                        : 'bg-slate-100 text-slate-400'
+                                                                        }`}>
+                                                                        {doc.status === 'cancelled' ? 'storniran' : 'zamijenjen'}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <p className={`text-[10px] font-bold uppercase ${isDeprecated ? 'text-slate-300' : 'text-slate-400'}`}>
+                                                                {new Date(doc.createdAt).toLocaleDateString('hr-HR')}
+                                                            </p>
+                                                            {doc.diagnosisCode && (
+                                                                <p className={`text-[10px] mt-0.5 ${isDeprecated ? 'text-slate-300' : 'text-slate-500'}`}>
+                                                                    <span className="font-mono font-bold">{doc.diagnosisCode}</span>
+                                                                    {doc.diagnosisDisplay && (
+                                                                        <span className="font-medium"> — {doc.diagnosisDisplay}</span>
+                                                                    )}
+                                                                </p>
                                                             )}
                                                         </div>
-                                                        <p className={`text-[10px] font-bold uppercase ${isDeprecated ? 'text-slate-300' : 'text-slate-400'}`}>
-                                                            {new Date(doc.createdAt).toLocaleDateString('hr-HR')}
-                                                        </p>
-                                                        {doc.diagnosisCode && (
-                                                            <p className={`text-[10px] mt-0.5 ${isDeprecated ? 'text-slate-300' : 'text-slate-500'}`}>
-                                                                <span className="font-mono font-bold">{doc.diagnosisCode}</span>
-                                                                {doc.diagnosisDisplay && (
-                                                                    <span className="font-medium"> — {doc.diagnosisDisplay}</span>
-                                                                )}
-                                                            </p>
+                                                        {doc.isRemote && (
+                                                            <div className="w-2 h-2 bg-blue-400 rounded-full flex-shrink-0" title="Udaljeni dokument"></div>
                                                         )}
-                                                    </div>
-                                                    {doc.isRemote && (
-                                                        <div className="w-2 h-2 bg-blue-400 rounded-full flex-shrink-0" title="Udaljeni dokument"></div>
+                                                    </button>
+                                                    {/* Edit / Remove actions — only for active local docs */}
+                                                    {!doc.isRemote && !isDeprecated && (
+                                                        <div className="flex gap-1.5 mt-2 pl-13">
+                                                            <button
+                                                                onClick={() => setEditingDocument(doc)}
+                                                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-all"
+                                                            >
+                                                                <Edit2 className="w-3 h-3" />
+                                                                Izmijeni
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleCancelDocument(doc)}
+                                                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-all"
+                                                            >
+                                                                <Trash2 className="w-3 h-3" />
+                                                                Storniraj
+                                                            </button>
+                                                        </div>
                                                     )}
-                                                </button>
-                                                {/* Edit / Remove actions — only for active local docs */}
-                                                {!doc.isRemote && !isDeprecated && (
-                                                    <div className="flex gap-1.5 mt-2 pl-13">
-                                                        <button
-                                                            onClick={() => setEditingDocument(doc)}
-                                                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-all"
-                                                        >
-                                                            <Edit2 className="w-3 h-3" />
-                                                            Izmijeni
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleCancelDocument(doc)}
-                                                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-all"
-                                                        >
-                                                            <Trash2 className="w-3 h-3" />
-                                                            Storniraj
-                                                        </button>
-                                                    </div>
-                                                )}
+                                                </div>
                                             </div>
-                                        </div>
-                                    );
-                                })
+                                        );
+                                    })
 
-                            ) : (
-                                <p className="text-center py-6 text-xs text-slate-400 italic">Nema dostupnih dokumenata.</p>
-                            )}
-                        </div>
+                                ) : (
+                                    <p className="text-center py-6 text-xs text-slate-400 italic">Nema dostupnih dokumenata.</p>
+                                )}
+                            </div>
+                        )}
                     </section>
                     {/* Zdravstveni slučajevi (TC 15-17) */}
                     <section className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
@@ -414,95 +434,97 @@ export default function PatientChartPage() {
                             </div>
                             <div className="flex items-center gap-2">
                                 <button
-                                    onClick={() => setCaseModal(undefined)}
-                                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-all"
+                                    onClick={() => setCasesCollapsed(prev => !prev)}
+                                    className="p-1.5 hover:bg-slate-200 rounded-lg transition-colors text-slate-400 hover:text-slate-600"
+                                    title={casesCollapsed ? 'Proširi' : 'Smanji'}
                                 >
-                                    <Plus className="w-3 h-3" />
-                                    Novi slučaj
+                                    {casesCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
                                 </button>
                                 <span className="bg-amber-50 text-amber-600 text-[10px] font-black px-2 py-0.5 rounded-full border border-amber-100">
                                     TC 15-17
                                 </span>
                             </div>
                         </div>
-                        <div className="p-3 space-y-2">
-                            {allCases.length > 0 ? (
-                                allCases.map((c: any) => {
-                                    const isActive = c.status === 'active';
-                                    const isFinished = c.status === 'finished';
-                                    return (
-                                        <div
-                                            key={c.id}
-                                            className={`p-4 rounded-2xl border transition-all group ${isActive
-                                                ? 'border-emerald-100 bg-emerald-50/30 hover:border-emerald-300 hover:shadow-sm'
-                                                : 'border-slate-100 bg-slate-50/30 hover:border-slate-200'
-                                                }`}
-                                        >
-                                            <div className="flex justify-between items-start gap-2">
-                                                <div className="min-w-0">
-                                                    <div className="flex items-center gap-2 mb-1">
-                                                        {c.diagnosisCode && (
-                                                            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
+                        {!casesCollapsed && (
+                            <div className="p-3 space-y-2">
+                                {allCases.length > 0 ? (
+                                    allCases.map((c: any) => {
+                                        const isActive = c.status === 'active';
+                                        const isFinished = c.status === 'finished';
+                                        return (
+                                            <div
+                                                key={c.id}
+                                                className={`p-4 rounded-2xl border transition-all group ${isActive
+                                                    ? 'border-emerald-100 bg-emerald-50/30 hover:border-emerald-300 hover:shadow-sm'
+                                                    : 'border-slate-100 bg-slate-50/30 hover:border-slate-200'
+                                                    }`}
+                                            >
+                                                <div className="flex justify-between items-start gap-2">
+                                                    <div className="min-w-0">
+                                                        <div className="flex items-center gap-2 mb-1">
+                                                            {c.diagnosisCode && (
+                                                                <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
+                                                                    }`}>
+                                                                    {c.diagnosisCode}
+                                                                </span>
+                                                            )}
+                                                            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${isActive
+                                                                ? 'bg-emerald-500 text-white'
+                                                                : 'bg-slate-300 text-white'
                                                                 }`}>
-                                                                {c.diagnosisCode}
+                                                                {isActive ? 'aktivan' : isFinished ? 'završen' : c.status}
                                                             </span>
+                                                        </div>
+                                                        <p className={`font-bold text-sm tracking-tight ${isActive ? 'text-slate-900' : 'text-slate-500'}`}>
+                                                            {c.title || c.diagnosisDisplay || 'Neimenovan slučaj'}
+                                                        </p>
+                                                        <div className="flex items-center gap-3 mt-1.5">
+                                                            <p className="text-[10px] font-bold text-slate-400 uppercase">
+                                                                Od: {new Date(c.start).toLocaleDateString('hr-HR')}
+                                                                {c.end && ` — Do: ${new Date(c.end).toLocaleDateString('hr-HR')}`}
+                                                            </p>
+                                                        </div>
+                                                        {c.practitionerName && (
+                                                            <p className="text-[10px] font-medium text-slate-400 mt-0.5">
+                                                                {c.practitionerName}
+                                                            </p>
                                                         )}
-                                                        <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${isActive
-                                                            ? 'bg-emerald-500 text-white'
-                                                            : 'bg-slate-300 text-white'
-                                                            }`}>
-                                                            {isActive ? 'aktivan' : isFinished ? 'završen' : c.status}
-                                                        </span>
                                                     </div>
-                                                    <p className={`font-bold text-sm tracking-tight ${isActive ? 'text-slate-900' : 'text-slate-500'}`}>
-                                                        {c.title || c.diagnosisDisplay || 'Neimenovan slučaj'}
-                                                    </p>
-                                                    <div className="flex items-center gap-3 mt-1.5">
-                                                        <p className="text-[10px] font-bold text-slate-400 uppercase">
-                                                            Od: {new Date(c.start).toLocaleDateString('hr-HR')}
-                                                            {c.end && ` — Do: ${new Date(c.end).toLocaleDateString('hr-HR')}`}
-                                                        </p>
-                                                    </div>
-                                                    {c.practitionerName && (
-                                                        <p className="text-[10px] font-medium text-slate-400 mt-0.5">
-                                                            {c.practitionerName}
-                                                        </p>
+                                                    {isActive && (
+                                                        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse flex-shrink-0 mt-2"></div>
                                                     )}
                                                 </div>
                                                 {isActive && (
-                                                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse flex-shrink-0 mt-2"></div>
+                                                    <div className="mt-3 flex gap-2">
+                                                        <button
+                                                            onClick={(e) => { e.preventDefault(); handleStartVisit(c.id); }}
+                                                            className="flex-1 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all"
+                                                        >
+                                                            Nastavi liječenje
+                                                        </button>
+                                                        <button
+                                                            onClick={(e) => { e.preventDefault(); setCaseModal(c); }}
+                                                            className="py-1.5 px-3 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-600 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all"
+                                                        >
+                                                            <Edit2 className="w-3 h-3 inline mr-1" />
+                                                            Uredi
+                                                        </button>
+                                                        <button
+                                                            onClick={(e) => { e.preventDefault(); handleCloseCase(c.id); }}
+                                                            className="py-1.5 px-3 bg-white border border-rose-200 rounded-lg text-xs font-black text-rose-500 hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all"
+                                                        >
+                                                            Zatvori
+                                                        </button>
+                                                    </div>
                                                 )}
                                             </div>
-                                            {isActive && (
-                                                <div className="mt-3 flex gap-2">
-                                                    <button
-                                                        onClick={(e) => { e.preventDefault(); handleStartVisit(c.id); }}
-                                                        className="flex-1 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all"
-                                                    >
-                                                        Nastavi liječenje
-                                                    </button>
-                                                    <button
-                                                        onClick={(e) => { e.preventDefault(); setCaseModal(c); }}
-                                                        className="py-1.5 px-3 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-600 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all"
-                                                    >
-                                                        <Edit2 className="w-3 h-3 inline mr-1" />
-                                                        Uredi
-                                                    </button>
-                                                    <button
-                                                        onClick={(e) => { e.preventDefault(); handleCloseCase(c.id); }}
-                                                        className="py-1.5 px-3 bg-white border border-rose-200 rounded-lg text-xs font-black text-rose-500 hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all"
-                                                    >
-                                                        Zatvori
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })
-                            ) : (
-                                <p className="text-center py-4 text-xs text-slate-400 italic">Nema zdravstvenih slučajeva.</p>
-                            )}
-                        </div>
+                                        );
+                                    })
+                                ) : (
+                                    <p className="text-center py-4 text-xs text-slate-400 italic">Nema zdravstvenih slučajeva.</p>
+                                )}
+                            </div>
+                        )}
                     </section>
 
                     {/* Recent Activity (Visits) */}
