@@ -376,9 +376,9 @@ export default function LoginPage() {
             const data = await res.json();
             if (!data.success) throw new Error(data.error || 'Pokretanje nije uspjelo');
 
-            setStepMessage('Odaberite IDEN certifikat i unesite PIN u Chrome prozoru.');
+            setStepMessage('Odaberite certifikat i unesite PIN u Chrome prozoru.');
 
-            // Poll for auth status — stepper advances only on actual auth success
+            // Poll for auth status + playwright phase for intermediate stepper feedback
             const deadline = Date.now() + 6 * 60 * 1000;
             const pollId = setInterval(async () => {
                 if (Date.now() > deadline) {
@@ -388,6 +388,7 @@ export default function LoginPage() {
                     return;
                 }
                 try {
+                    // Check auth status
                     const statusRes = await fetch('/api/auth/status');
                     const statusData = await statusRes.json();
                     if (statusData.authenticated) {
@@ -397,6 +398,15 @@ export default function LoginPage() {
                             setAuthView('authenticated');
                             setTimeout(() => router.push('/dashboard/patients'), 1500);
                         }, 800); // brief pause to show all-green stepper
+                        return;
+                    }
+
+                    // Check playwright phase for intermediate stepper updates
+                    const phaseRes = await fetch('/api/auth/smartcard/playwright-status');
+                    const phaseData = await phaseRes.json();
+                    if (phaseData.phase === 'waiting-cert' || phaseData.phase === 'cookie-found' || phaseData.phase === 'done') {
+                        // Cert dialog appeared or cookie captured — advance step 2 (cert selected)
+                        setScPhase(prev => Math.max(prev, 2));
                     }
                 } catch { /* keep polling */ }
             }, 2000);
@@ -577,10 +587,8 @@ export default function LoginPage() {
                     </h1>
                     <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)', margin: 0 }}>
                         {authView === 'login-options'
-                            ? 'Sustav za digitalnu razmjenu medicinske dokumentacije'
-                            : authView === 'authenticated'
-                                ? 'Prijava uspješna!'
-                                : 'Prijava putem Certilia mobile.ID'}
+                            ? 'Sustav za digitalnu razmjenu podatka pacijenata i medicinske dokumentacije putem CEZIH-a'
+                            : 'Prijava uspješna!'}
                     </p>
                 </div>
 
@@ -725,7 +733,7 @@ export default function LoginPage() {
                                 </div>
                                 <div style={{ textAlign: 'left' }}>
                                     <div style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>Pametna Kartica</div>
-                                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>Prijava za zdravstvene djelatnike</div>
+                                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>Prijava putem čitača kartica</div>
                                 </div>
                             </div>
                             <ArrowRight style={{ width: 18, height: 18, color: 'rgba(255,255,255,0.25)' }} />
@@ -996,7 +1004,7 @@ export default function LoginPage() {
 
                         <h3 style={{ fontSize: 17, fontWeight: 800, color: '#fff', margin: '0 0 4px' }}>Prijava pametnom karticom</h3>
                         <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', textAlign: 'center', margin: '0 0 8px', maxWidth: 300 }}>
-                            Odaberite <strong style={{ color: 'rgba(255,255,255,0.65)' }}>IDEN certifikat</strong> u Windows dijalogu i unesite <strong style={{ color: 'rgba(255,255,255,0.65)' }}>PIN</strong>
+                            Odaberite <strong style={{ color: 'rgba(255,255,255,0.65)' }}>certifikat</strong> u Windows dijalogu i unesite <strong style={{ color: 'rgba(255,255,255,0.65)' }}>PIN</strong>
                         </p>
 
                         {/* Animated card reader scene */}
@@ -1013,35 +1021,37 @@ export default function LoginPage() {
                                 <span style={{ fontSize: 12, color: '#4ade80' }}>Povezivanje s CEZIH sustavom</span>
                             </div>
 
-                            {/* Step 2: Select certificate — active until auth completes */}
+                            {/* Step 2: Select certificate — done when scPhase >= 2 */}
                             <div style={{
                                 display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
-                                background: scPhase >= 3 ? 'rgba(74,222,128,0.08)' : 'rgba(99,102,241,0.1)',
-                                border: `1px solid ${scPhase >= 3 ? 'rgba(74,222,128,0.15)' : 'rgba(99,102,241,0.25)'}`,
+                                background: scPhase >= 2 ? 'rgba(74,222,128,0.08)' : 'rgba(99,102,241,0.1)',
+                                border: `1px solid ${scPhase >= 2 ? 'rgba(74,222,128,0.15)' : 'rgba(99,102,241,0.25)'}`,
                                 borderRadius: 10, transition: 'all 0.5s',
                             }}>
-                                {scPhase >= 3
+                                {scPhase >= 2
                                     ? <CheckCircle style={{ width: 16, height: 16, color: '#4ade80', flexShrink: 0 }} />
                                     : <Loader2 className="anim-spin" style={{ width: 16, height: 16, color: '#818cf8', flexShrink: 0 }} />
                                 }
                                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                    <span style={{ fontSize: 12, color: scPhase >= 3 ? '#4ade80' : '#a5b4fc', fontWeight: 600 }}>Odabir certifikata</span>
-                                    {scPhase < 3 && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 1 }}>Odaberite IDEN certifikat u Chrome prozoru</span>}
+                                    <span style={{ fontSize: 12, color: scPhase >= 2 ? '#4ade80' : '#a5b4fc', fontWeight: 600 }}>Odabir certifikata</span>
+                                    {scPhase < 2 && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 1 }}>Odaberite certifikat u Chrome prozoru</span>}
                                 </div>
                             </div>
 
-                            {/* Step 3: Enter PIN */}
+                            {/* Step 3: Enter PIN — active when scPhase === 2 */}
                             <div style={{
                                 display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
-                                background: scPhase >= 3 ? 'rgba(74,222,128,0.08)' : 'rgba(255,255,255,0.03)',
-                                border: `1px solid ${scPhase >= 3 ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.08)'}`,
+                                background: scPhase >= 3 ? 'rgba(74,222,128,0.08)' : scPhase === 2 ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.03)',
+                                border: `1px solid ${scPhase >= 3 ? 'rgba(74,222,128,0.15)' : scPhase === 2 ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.08)'}`,
                                 borderRadius: 10, transition: 'all 0.5s',
                             }}>
                                 {scPhase >= 3
                                     ? <CheckCircle style={{ width: 16, height: 16, color: '#4ade80', flexShrink: 0 }} />
-                                    : <div style={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.15)', flexShrink: 0 }} />
+                                    : scPhase === 2
+                                        ? <Loader2 className="anim-spin" style={{ width: 16, height: 16, color: '#818cf8', flexShrink: 0 }} />
+                                        : <div style={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.15)', flexShrink: 0 }} />
                                 }
-                                <span style={{ fontSize: 12, color: scPhase >= 3 ? '#4ade80' : 'rgba(255,255,255,0.25)', fontWeight: scPhase >= 3 ? 600 : 400 }}>Unos PIN-a</span>
+                                <span style={{ fontSize: 12, color: scPhase >= 3 ? '#4ade80' : scPhase === 2 ? '#a5b4fc' : 'rgba(255,255,255,0.25)', fontWeight: scPhase >= 2 ? 600 : 400 }}>Unos PIN-a</span>
                             </div>
 
                             {/* Step 4: Login */}

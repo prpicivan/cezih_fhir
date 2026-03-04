@@ -133,6 +133,16 @@ export function initDatabase() {
     } catch (e) { /* column already exists */ }
   }
 
+  // Migration: add bundleJson column to documents (for deferred signing)
+  try {
+    db.exec('ALTER TABLE documents ADD COLUMN bundleJson TEXT');
+  } catch (e) { /* column already exists */ }
+
+  // Migration: add cezihVisitId column to visits (CEZIH-assigned identifier for TC13/TC14)
+  try {
+    db.exec('ALTER TABLE visits ADD COLUMN cezihVisitId TEXT');
+  } catch (e) { /* column already exists */ }
+
   // Migration: remove FK constraints from cases if they exist
   try {
     const caseInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='cases'").get() as any;

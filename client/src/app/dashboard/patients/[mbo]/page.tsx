@@ -1,13 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useToast, Toast } from '@/components/Toast';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
     FileText, User, Calendar,
     RefreshCw, CheckCircle2, AlertCircle,
     Stethoscope, ClipboardList, Activity,
-    History, ChevronRight, ChevronDown, ChevronUp, Edit2, Trash2, Plus
+    History, ChevronRight, ChevronDown, ChevronUp, Edit2, Trash2, Plus,
+    Globe, FolderOpen, Printer, X
 } from 'lucide-react';
 import ChangeDocumentModal from './ChangeDocumentModal';
 import CaseModal from './CaseModal';
@@ -16,6 +18,7 @@ export default function PatientChartPage() {
     const params = useParams();
     const router = useRouter();
     const mbo = params.mbo as string;
+    const { toast, showToast, hideToast } = useToast();
 
     const [chartData, setChartData] = useState<any>(null);
     const [viewingDocument, setViewingDocument] = useState<any>(null);
@@ -28,6 +31,10 @@ export default function PatientChartPage() {
     const [retrieving, setRetrieving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [docsCollapsed, setDocsCollapsed] = useState(false);
+    const [docTab, setDocTab] = useState<'local' | 'cezih'>('local');
+    const [cezihDocs, setCezihDocs] = useState<any[]>([]);
+    const [cezihLoading, setCezihLoading] = useState(false);
+    const [cezihLoaded, setCezihLoaded] = useState(false);
     const [casesCollapsed, setCasesCollapsed] = useState(false);
 
     const fetchChartData = async (refresh: boolean = false) => {
@@ -111,10 +118,10 @@ export default function PatientChartPage() {
             if (data.success) {
                 fetchChartData();
             } else {
-                alert('Greška pri storniranju: ' + (data.error || 'Nepoznata pogreška'));
+                showToast('error', 'Greška pri storniranju: ' + (data.error || 'Nepoznata pogreška'));
             }
         } catch {
-            alert('Greška u komunikaciji s poslužiteljem.');
+            showToast('error', 'Greška u komunikaciji s poslužiteljem.');
         }
     };
 
@@ -130,12 +137,35 @@ export default function PatientChartPage() {
             const res = await fetch(`/api/document/retrieve?url=${encodeURIComponent(url)}`);
             const data = await res.json();
             if (data.success) {
-                setViewingDocument(data.document);
+                setViewingDocument({ ...doc, ...data.document });
             }
         } catch (err) {
             console.error("Failed to retrieve", err);
         } finally {
             setRetrieving(false);
+        }
+    };
+
+    const fetchCezihDocs = async () => {
+        setCezihLoading(true);
+        try {
+            const res = await fetch(`/api/document/search-remote?patientMbo=${mbo}`);
+            const data = await res.json();
+            if (data.success) {
+                setCezihDocs(data.documents || []);
+            }
+        } catch (err) {
+            console.error('Failed to fetch CEZIH docs', err);
+        } finally {
+            setCezihLoading(false);
+            setCezihLoaded(true);
+        }
+    };
+
+    const handleSwitchDocTab = (tab: 'local' | 'cezih') => {
+        setDocTab(tab);
+        if (tab === 'cezih' && !cezihLoaded) {
+            fetchCezihDocs();
         }
     };
 
@@ -165,6 +195,7 @@ export default function PatientChartPage() {
 
     return (
         <div className="space-y-6">
+            <Toast toast={toast} onClose={hideToast} />
             {/* HERRO SECTION: Patient Identity & Freshness */}
             <header className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm overflow-hidden relative group">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-blue-50/50 rounded-full -mr-32 -mt-32 transition-transform group-hover:scale-110 duration-700"></div>
@@ -238,57 +269,103 @@ export default function PatientChartPage() {
                             )}
                         </div>
 
+                        {/* Metadata Bar */}
+                        {viewingDocument && !retrieving && (
+                            <div className="px-6 py-3 border-b border-slate-100 flex justify-between items-start flex-wrap gap-3">
+                                <div className="space-y-1">
+                                    <div className="flex items-center gap-2">
+                                        <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Vrsta</p>
+                                        <p className="font-bold text-slate-900 text-sm">{viewingDocument.type || viewingDocument.title || 'Nalaz'}</p>
+                                    </div>
+                                    {viewingDocument.id && (
+                                        <p className="text-[10px] font-mono text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-100 inline-block">
+                                            {viewingDocument.id}
+                                        </p>
+                                    )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <div className="text-right">
+                                        <p className="text-[10px] uppercase font-bold text-slate-400">Datum</p>
+                                        <p className="font-bold text-slate-900 text-sm">{new Date(viewingDocument.createdAt).toLocaleDateString('hr-HR')}</p>
+                                    </div>
+                                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${viewingDocument.status === 'cancelled' ? 'bg-rose-50 text-rose-500 border border-rose-100'
+                                        : viewingDocument.status === 'replaced' ? 'bg-slate-100 text-slate-500 border border-slate-200'
+                                            : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                        }`}>
+                                        {viewingDocument.status === 'cancelled' ? 'storniran' : viewingDocument.status === 'replaced' ? 'zamijenjen' : 'aktivan'}
+                                    </span>
+                                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${viewingDocument.isRemote ? 'bg-blue-50 text-blue-600 border border-blue-100' : 'bg-slate-100 text-slate-500 border border-slate-200'
+                                        }`}>
+                                        {viewingDocument.isRemote ? 'CEZIH' : 'Lokalni'}
+                                    </span>
+                                </div>
+                            </div>
+                        )}
+
                         <div className="flex-1 p-8">
                             {retrieving ? (
                                 <div className="h-full flex flex-col items-center justify-center py-20 gap-4">
                                     <RefreshCw className="w-10 h-10 text-blue-500 animate-spin" />
                                     <p className="font-bold text-slate-400">Dohvaćam puni sadržaj dokumenta...</p>
+                                    <p className="text-[10px] text-slate-300 font-semibold">ITI-68 Retrieve Document</p>
                                 </div>
                             ) : viewingDocument ? (
-                                <div className="space-y-8 max-w-2xl mx-auto">
-                                    <div className="flex justify-between items-end border-b pb-4 border-slate-100">
-                                        <div>
-                                            <p className="text-[10px] uppercase font-bold text-slate-400">Vrsta dokumenta</p>
-                                            <p className="font-bold text-slate-900">{viewingDocument.type}</p>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className="text-[10px] uppercase font-bold text-slate-400">Datum izdavanja</p>
-                                            <p className="font-bold text-slate-900">{new Date(viewingDocument.createdAt).toLocaleDateString('hr-HR')}</p>
-                                        </div>
+                                <div className="space-y-5 max-w-2xl mx-auto">
+                                    {/* Anamneza */}
+                                    <div className="group border-l-[3px] border-blue-500 pl-4 hover:pl-5 transition-all">
+                                        <h3 className="text-[10px] uppercase font-black text-blue-600 tracking-[2px] mb-1.5 flex items-center gap-1.5">
+                                            <div className="w-1.5 h-1.5 bg-blue-600 rounded-full"></div>
+                                            Anamneza i anamnestički podaci
+                                        </h3>
+                                        <p className="text-slate-700 leading-relaxed text-sm font-medium bg-slate-50 p-4 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
+                                            {viewingDocument.anamnesis || 'Nema podataka.'}
+                                        </p>
                                     </div>
 
-                                    <div className="space-y-6">
-                                        <div className="group">
-                                            <h3 className="text-xs uppercase font-black text-blue-600 tracking-widest mb-2 flex items-center gap-2">
-                                                <div className="w-1.5 h-1.5 bg-blue-600 rounded-full"></div>
-                                                Anamneza i anamnestički podaci
-                                            </h3>
-                                            <p className="text-slate-700 leading-relaxed font-medium bg-slate-50 p-4 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
-                                                {viewingDocument.anamnesis || (viewingDocument.isRemote ? 'Sadržaj se učitava...' : 'Nema podataka o anamnezi.')}
+                                    {/* Klinički nalaz */}
+                                    <div className="group border-l-[3px] border-emerald-500 pl-4 hover:pl-5 transition-all">
+                                        <h3 className="text-[10px] uppercase font-black text-emerald-600 tracking-[2px] mb-1.5 flex items-center gap-1.5">
+                                            <div className="w-1.5 h-1.5 bg-emerald-600 rounded-full"></div>
+                                            Klinički nalaz i status
+                                        </h3>
+                                        <p className="text-slate-700 leading-relaxed text-sm font-medium bg-slate-50 p-4 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
+                                            {viewingDocument.finding || 'Nema podataka.'}
+                                        </p>
+                                    </div>
+
+                                    {/* Terapija */}
+                                    <div className="group border-l-[3px] border-purple-500 pl-4 hover:pl-5 transition-all">
+                                        <h3 className="text-[10px] uppercase font-black text-purple-600 tracking-[2px] mb-1.5 flex items-center gap-1.5">
+                                            <div className="w-1.5 h-1.5 bg-purple-600 rounded-full"></div>
+                                            Terapija
+                                        </h3>
+                                        <p className="text-slate-700 leading-relaxed text-sm font-medium bg-slate-50 p-4 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
+                                            {viewingDocument.therapy || viewingDocument.status_text || 'Nema podataka.'}
+                                        </p>
+                                    </div>
+
+                                    {/* Preporuka */}
+                                    <div className="group border-l-[3px] border-amber-500 pl-4 hover:pl-5 transition-all">
+                                        <h3 className="text-[10px] uppercase font-black text-amber-600 tracking-[2px] mb-1.5 flex items-center gap-1.5">
+                                            <div className="w-1.5 h-1.5 bg-amber-600 rounded-full"></div>
+                                            Preporuka
+                                        </h3>
+                                        <p className="text-slate-700 leading-relaxed text-sm font-medium bg-slate-50 p-4 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
+                                            {viewingDocument.recommendation || 'Nema podataka.'}
+                                        </p>
+                                    </div>
+
+                                    {/* Diagnosis Card */}
+                                    <div className="flex items-center justify-between p-4 bg-slate-900 rounded-2xl text-white shadow-xl shadow-slate-200">
+                                        <div>
+                                            <p className="text-[9px] uppercase font-bold text-slate-400 leading-none mb-1 tracking-wider">Dijagnoza (MKB-10)</p>
+                                            <p className="text-lg font-black tracking-tight">
+                                                {viewingDocument.diagnosisCode ? `${viewingDocument.diagnosisCode} — ` : ''}
+                                                {viewingDocument.diagnosisDisplay || (viewingDocument.diagnosisCode ? '' : 'Nije navedena')}
                                             </p>
                                         </div>
-
-                                        <div className="group">
-                                            <h3 className="text-xs uppercase font-black text-emerald-600 tracking-widest mb-2 flex items-center gap-2">
-                                                <div className="w-1.5 h-1.5 bg-emerald-600 rounded-full"></div>
-                                                Klinički nalaz i status
-                                            </h3>
-                                            <p className="text-slate-700 leading-relaxed font-medium bg-slate-50 p-4 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
-                                                {viewingDocument.finding || (viewingDocument.isRemote ? 'Sadržaj se učitava...' : 'Nema podataka o nalazu.')}
-                                            </p>
-                                        </div>
-
-                                        <div className="pt-4 flex items-center justify-between p-4 bg-slate-900 rounded-2xl text-white shadow-xl shadow-slate-200">
-                                            <div>
-                                                <p className="text-[10px] uppercase font-bold text-slate-400 leading-none mb-1">Dijagnoza (MKB-10)</p>
-                                                <p className="text-lg font-black tracking-tight">
-                                                    {viewingDocument.diagnosisCode ? `${viewingDocument.diagnosisCode} - ` : ''}
-                                                    {viewingDocument.diagnosisDisplay || (viewingDocument.diagnosisCode ? '' : 'Nije navedena')}
-                                                </p>
-                                            </div>
-                                            <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center">
-                                                <Activity className="w-6 h-6 text-emerald-400" />
-                                            </div>
+                                        <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center">
+                                            <Activity className="w-6 h-6 text-emerald-400" />
                                         </div>
                                     </div>
                                 </div>
@@ -297,24 +374,44 @@ export default function PatientChartPage() {
                                     <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4 border border-slate-100 border-dashed">
                                         <History className="w-10 h-10 text-slate-300" />
                                     </div>
-                                    <h3 className="text-xl font-bold text-slate-400">Nema povijesti nalaza</h3>
+                                    <h3 className="text-xl font-bold text-slate-400">Odaberite dokument</h3>
                                     <p className="text-slate-400 max-w-xs mt-2 italic text-sm">
-                                        Za ovog pacijenta u lokalnom sustavu još nema pohranjenih medicinskih izvještaja.
+                                        Kliknite na dokument u popisu desno za prikaz sadržaja.
                                     </p>
                                 </div>
                             )}
                         </div>
+
+                        {/* Action bar */}
+                        {viewingDocument && !retrieving && (
+                            <div className="px-6 py-3 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-2">
+                                <button
+                                    onClick={() => window.print()}
+                                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-white border border-blue-200 text-blue-700 hover:bg-blue-50 transition-all"
+                                >
+                                    <Printer className="w-3.5 h-3.5" />
+                                    Ispiši PDF
+                                </button>
+                                <button
+                                    onClick={() => setViewingDocument(null)}
+                                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 transition-all"
+                                >
+                                    <X className="w-3.5 h-3.5" />
+                                    Zatvori
+                                </button>
+                            </div>
+                        )}
                     </section>
                 </div>
 
                 {/* RIGHT: SECONDARY FOCUS - ACTIVE PROBLEMS & RECENT ACTIVITY */}
                 <aside className="space-y-6">
-                    {/* Povijest dokumenata */}
+                    {/* Dokumenti — Lokalni / CEZIH tabovi */}
                     <section className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
                         <div className="p-5 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between">
                             <h3 className="font-black text-slate-800 flex items-center gap-2">
                                 <History className="w-5 h-5 text-blue-500" />
-                                Povijest dokumenata
+                                Dokumenti
                             </h3>
                             <div className="flex items-center gap-2">
                                 <button
@@ -324,98 +421,165 @@ export default function PatientChartPage() {
                                 >
                                     {docsCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
                                 </button>
-                                <span className="bg-slate-200 text-slate-600 text-[10px] font-black px-2 py-0.5 rounded-full">TC 21/22</span>
+                                <span className="bg-slate-200 text-slate-600 text-[10px] font-black px-2 py-0.5 rounded-full">TC 18-22</span>
                             </div>
                         </div>
+
+                        {/* Tabs */}
                         {!docsCollapsed && (
-                            <div className="p-2 space-y-1">
-                                {allDocuments && allDocuments.length > 0 ? (
-                                    allDocuments.map((doc: any) => {
-                                        const isDeprecated = doc.status === 'replaced' || doc.status === 'cancelled';
-                                        const isActive = viewingDocument?.id === doc.id;
-                                        return (
-                                            <div
-                                                key={doc.id}
-                                                className={`rounded-2xl transition-all group ${isDeprecated
-                                                    ? 'ml-4 border-l-2 border-slate-200 pl-2'
-                                                    : ''
-                                                    }`}
-                                            >
-                                                <div className={`w-full p-2.5 rounded-xl transition-all ${isActive
-                                                    ? 'bg-blue-50 border border-blue-100'
-                                                    : isDeprecated
-                                                        ? 'hover:bg-slate-50/50 border border-transparent opacity-60'
-                                                        : 'hover:bg-slate-50 border border-transparent'
-                                                    }`}>
-                                                    <button
-                                                        onClick={() => handleRetrieve(doc)}
-                                                        className="w-full text-left flex items-center gap-3"
-                                                    >
-                                                        <div className={`rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${isDeprecated
-                                                            ? 'w-8 h-8 bg-slate-100 text-slate-300'
-                                                            : isActive
-                                                                ? 'w-10 h-10 bg-blue-600 text-white'
-                                                                : 'w-10 h-10 bg-slate-100 text-slate-400 group-hover:bg-white group-hover:text-blue-600'
+                            <>
+                                <div className="flex border-b border-slate-100">
+                                    <button
+                                        onClick={() => handleSwitchDocTab('local')}
+                                        className={`flex-1 py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 border-b-2 transition-all ${docTab === 'local'
+                                            ? 'text-blue-700 border-blue-600 bg-blue-50/50'
+                                            : 'text-slate-400 border-transparent hover:text-slate-600 hover:bg-slate-50'
+                                            }`}
+                                    >
+                                        <FolderOpen className="w-3.5 h-3.5" />
+                                        Lokalni
+                                        <span className={`text-[10px] font-black px-1.5 py-0 rounded-full ${docTab === 'local' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'
+                                            }`}>
+                                            {allDocuments?.length || 0}
+                                        </span>
+                                    </button>
+                                    <button
+                                        onClick={() => handleSwitchDocTab('cezih')}
+                                        className={`flex-1 py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 border-b-2 transition-all ${docTab === 'cezih'
+                                            ? 'text-blue-700 border-blue-600 bg-blue-50/50'
+                                            : 'text-slate-400 border-transparent hover:text-slate-600 hover:bg-slate-50'
+                                            }`}
+                                    >
+                                        <Globe className="w-3.5 h-3.5" />
+                                        CEZIH
+                                        <span className={`text-[10px] font-black px-1.5 py-0 rounded-full ${docTab === 'cezih' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'
+                                            }`}>
+                                            {cezihLoaded ? cezihDocs.length : '—'}
+                                        </span>
+                                    </button>
+                                </div>
+
+                                {/* CEZIH toolbar */}
+                                {docTab === 'cezih' && (
+                                    <div className="flex items-center justify-between px-3 py-2 bg-blue-50 border-b border-blue-100">
+                                        <span className="text-[10px] font-semibold text-blue-600">Dokumenti s nacionalnog sustava</span>
+                                        <button
+                                            onClick={fetchCezihDocs}
+                                            disabled={cezihLoading}
+                                            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-white border border-blue-200 text-blue-600 hover:bg-blue-100 transition-all disabled:opacity-50"
+                                        >
+                                            <RefreshCw className={`w-3 h-3 ${cezihLoading ? 'animate-spin' : ''}`} />
+                                            Osvježi
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* Document list */}
+                                <div className="p-2 space-y-1">
+                                    {docTab === 'local' ? (
+                                        /* LOCAL TAB */
+                                        allDocuments && allDocuments.length > 0 ? (
+                                            allDocuments.map((doc: any) => {
+                                                const isDeprecated = doc.status === 'replaced' || doc.status === 'cancelled';
+                                                const isViewing = viewingDocument?.id === doc.id;
+                                                return (
+                                                    <div key={doc.id} className={`rounded-2xl transition-all group ${isDeprecated ? 'ml-4 border-l-2 border-slate-200 pl-2' : ''}`}>
+                                                        <div className={`w-full p-2.5 rounded-xl transition-all ${isViewing ? 'bg-blue-50 border border-blue-100'
+                                                            : isDeprecated ? 'hover:bg-slate-50/50 border border-transparent opacity-60'
+                                                                : 'hover:bg-slate-50 border border-transparent'
                                                             }`}>
-                                                            <FileText className={isDeprecated ? 'w-4 h-4' : 'w-5 h-5'} />
-                                                        </div>
-                                                        <div className="min-w-0 flex-1">
-                                                            <div className="flex items-center gap-1.5 flex-wrap">
-                                                                <p className={`font-bold text-xs truncate ${isActive ? 'text-blue-900' : isDeprecated ? 'text-slate-400' : 'text-slate-700'
-                                                                    }`}>{doc.type || 'Nalaz'}</p>
-                                                                {isDeprecated && (
-                                                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${doc.status === 'cancelled'
-                                                                        ? 'bg-rose-50 text-rose-400'
-                                                                        : 'bg-slate-100 text-slate-400'
-                                                                        }`}>
-                                                                        {doc.status === 'cancelled' ? 'storniran' : 'zamijenjen'}
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                            <p className={`text-[10px] font-bold uppercase ${isDeprecated ? 'text-slate-300' : 'text-slate-400'}`}>
-                                                                {new Date(doc.createdAt).toLocaleDateString('hr-HR')}
-                                                            </p>
-                                                            {doc.diagnosisCode && (
-                                                                <p className={`text-[10px] mt-0.5 ${isDeprecated ? 'text-slate-300' : 'text-slate-500'}`}>
-                                                                    <span className="font-mono font-bold">{doc.diagnosisCode}</span>
-                                                                    {doc.diagnosisDisplay && (
-                                                                        <span className="font-medium"> — {doc.diagnosisDisplay}</span>
+                                                            <button onClick={() => handleRetrieve(doc)} className="w-full text-left flex items-center gap-3">
+                                                                <div className={`rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${isDeprecated ? 'w-8 h-8 bg-slate-100 text-slate-300'
+                                                                    : isViewing ? 'w-10 h-10 bg-blue-600 text-white'
+                                                                        : 'w-10 h-10 bg-slate-100 text-slate-400 group-hover:bg-white group-hover:text-blue-600'
+                                                                    }`}>
+                                                                    <FileText className={isDeprecated ? 'w-4 h-4' : 'w-5 h-5'} />
+                                                                </div>
+                                                                <div className="min-w-0 flex-1">
+                                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                                        <p className={`font-bold text-xs truncate ${isViewing ? 'text-blue-900' : isDeprecated ? 'text-slate-400' : 'text-slate-700'}`}>
+                                                                            {doc.type || 'Nalaz'}
+                                                                        </p>
+                                                                        {isDeprecated && (
+                                                                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${doc.status === 'cancelled' ? 'bg-rose-50 text-rose-400' : 'bg-slate-100 text-slate-400'
+                                                                                }`}>
+                                                                                {doc.status === 'cancelled' ? 'storniran' : 'zamijenjen'}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    <p className={`text-[10px] font-bold uppercase ${isDeprecated ? 'text-slate-300' : 'text-slate-400'}`}>
+                                                                        {new Date(doc.createdAt).toLocaleDateString('hr-HR')}
+                                                                    </p>
+                                                                    {doc.diagnosisCode && (
+                                                                        <p className={`text-[10px] mt-0.5 ${isDeprecated ? 'text-slate-300' : 'text-slate-500'}`}>
+                                                                            <span className="font-mono font-bold">{doc.diagnosisCode}</span>
+                                                                            {doc.diagnosisDisplay && <span className="font-medium"> — {doc.diagnosisDisplay}</span>}
+                                                                        </p>
                                                                     )}
-                                                                </p>
+                                                                </div>
+                                                            </button>
+                                                            {!doc.isRemote && !isDeprecated && (
+                                                                <div className="flex gap-1.5 mt-2 pl-13">
+                                                                    <button onClick={() => setEditingDocument(doc)} className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-all">
+                                                                        <Edit2 className="w-3 h-3" /> Izmijeni
+                                                                    </button>
+                                                                    <button onClick={() => handleCancelDocument(doc)} className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-all">
+                                                                        <Trash2 className="w-3 h-3" /> Storniraj
+                                                                    </button>
+                                                                </div>
                                                             )}
                                                         </div>
-                                                        {doc.isRemote && (
-                                                            <div className="w-2 h-2 bg-blue-400 rounded-full flex-shrink-0" title="Udaljeni dokument"></div>
-                                                        )}
-                                                    </button>
-                                                    {/* Edit / Remove actions — only for active local docs */}
-                                                    {!doc.isRemote && !isDeprecated && (
-                                                        <div className="flex gap-1.5 mt-2 pl-13">
-                                                            <button
-                                                                onClick={() => setEditingDocument(doc)}
-                                                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-all"
-                                                            >
-                                                                <Edit2 className="w-3 h-3" />
-                                                                Izmijeni
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleCancelDocument(doc)}
-                                                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-all"
-                                                            >
-                                                                <Trash2 className="w-3 h-3" />
-                                                                Storniraj
+                                                    </div>
+                                                );
+                                            })
+                                        ) : (
+                                            <p className="text-center py-6 text-xs text-slate-400 italic">Nema lokalnih dokumenata.</p>
+                                        )
+                                    ) : (
+                                        /* CEZIH TAB */
+                                        cezihLoading ? (
+                                            <div className="flex flex-col items-center py-8 gap-3">
+                                                <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
+                                                <p className="text-xs font-semibold text-slate-400">Pretražujem CEZIH (ITI-67)...</p>
+                                            </div>
+                                        ) : cezihDocs.length > 0 ? (
+                                            cezihDocs.map((doc: any) => {
+                                                const isViewing = viewingDocument?.id === doc.id;
+                                                return (
+                                                    <div key={doc.id} className="rounded-2xl transition-all group">
+                                                        <div className={`w-full p-2.5 rounded-xl transition-all ${isViewing ? 'bg-blue-50 border border-blue-100' : 'hover:bg-slate-50 border border-transparent'
+                                                            }`}>
+                                                            <button onClick={() => handleRetrieve(doc)} className="w-full text-left flex items-center gap-3">
+                                                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${isViewing ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400 group-hover:bg-white group-hover:text-blue-600'
+                                                                    }`}>
+                                                                    <FileText className="w-5 h-5" />
+                                                                </div>
+                                                                <div className="min-w-0 flex-1">
+                                                                    <p className={`font-bold text-xs truncate ${isViewing ? 'text-blue-900' : 'text-slate-700'}`}>
+                                                                        {doc.type || doc.title || 'Dokument'}
+                                                                    </p>
+                                                                    <p className="text-[10px] font-bold uppercase text-slate-400">
+                                                                        {doc.createdAt ? new Date(doc.createdAt).toLocaleDateString('hr-HR') : ''}
+                                                                    </p>
+                                                                    {doc.diagnosisCode && (
+                                                                        <p className="text-[10px] mt-0.5 text-slate-500">
+                                                                            <span className="font-mono font-bold">{doc.diagnosisCode}</span>
+                                                                            {doc.diagnosisDisplay && <span className="font-medium"> — {doc.diagnosisDisplay}</span>}
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                                <div className="w-2 h-2 bg-blue-400 rounded-full flex-shrink-0" title="CEZIH"></div>
                                                             </button>
                                                         </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        );
-                                    })
-
-                                ) : (
-                                    <p className="text-center py-6 text-xs text-slate-400 italic">Nema dostupnih dokumenata.</p>
-                                )}
-                            </div>
+                                                    </div>
+                                                );
+                                            })
+                                        ) : cezihLoaded ? (
+                                            <p className="text-center py-6 text-xs text-slate-400 italic">Nema dokumenata na CEZIH-u za ovog pacijenta.</p>
+                                        ) : null
+                                    )}
+                                </div>
+                            </>
                         )}
                     </section>
                     {/* Zdravstveni slučajevi (TC 15-17) */}

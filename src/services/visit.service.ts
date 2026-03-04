@@ -129,6 +129,13 @@ class VisitService {
                             system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
                             code: '1.1',
                         },
+                        sender: {
+                            type: 'Organization',
+                            identifier: {
+                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                                value: data.organizationId || config.organization.hzzoCode,
+                            },
+                        },
                         // DIGSIG-1: autor poruke mora biti jednak Bundle.signature.who
                         author: {
                             type: 'Practitioner',
@@ -138,7 +145,7 @@ class VisitService {
                             }
                         },
                         source: {
-                            endpoint: config.cezih.baseUrl,
+                            endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
                             name: config.software.instance,
                             software: `${config.software.name}_${config.software.company}`,
                             version: config.software.version,
@@ -272,6 +279,22 @@ class VisitService {
         };
 
         const response = await this.sendMessage(bundle, userToken, 'ENCOUNTER_START', localVisitId, data.patientMbo);
+
+        // Extract CEZIH-assigned visit ID from response and save to local DB
+        // CEZIH returns identifikator-posjete which is required for TC13/TC14
+        try {
+            const encounter = response?.entry?.find((e: any) => e.resource?.resourceType === 'Encounter')?.resource;
+            const cezihVisitId = encounter?.identifier?.find(
+                (id: any) => id.system === CEZIH_IDENTIFIERS.VISIT_ID
+            )?.value;
+            if (cezihVisitId) {
+                db.prepare('UPDATE visits SET cezihVisitId = ? WHERE id = ?').run(cezihVisitId, localVisitId);
+                console.log('[VisitService] Saved CEZIH visit ID:', cezihVisitId, 'for local:', localVisitId);
+            }
+        } catch (e) {
+            console.warn('[VisitService] Could not extract CEZIH visit ID from response');
+        }
+
         return { ...response, localVisitId };
     }
 
@@ -314,6 +337,13 @@ class VisitService {
                             system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
                             code: '1.2',
                         },
+                        sender: {
+                            type: 'Organization',
+                            identifier: {
+                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                                value: config.organization.hzzoCode,
+                            },
+                        },
                         author: {
                             type: 'Practitioner',
                             identifier: {
@@ -322,7 +352,7 @@ class VisitService {
                             }
                         },
                         source: {
-                            endpoint: config.cezih.baseUrl,
+                            endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
                             name: config.software.instance,
                             software: `${config.software.name}_${config.software.company}`,
                             version: config.software.version,
@@ -371,6 +401,11 @@ class VisitService {
     async updateVisit(visitId: string, data: Partial<VisitData>, userToken: string): Promise<any> {
         const messageId = uuidv4();
 
+        // Resolve CEZIH visit ID — required for CEZIH to accept the update
+        const localVisit = this.getVisit(visitId);
+        const cezihVisitId = localVisit?.cezihVisitId || visitId;
+        console.log('[VisitService] Updating visit:', visitId, '→ CEZIH ID:', cezihVisitId);
+
         // Update Local DB
         try {
             if (data.endDate) {
@@ -405,6 +440,13 @@ class VisitService {
                             system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
                             code: '1.2',
                         },
+                        sender: {
+                            type: 'Organization',
+                            identifier: {
+                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                                value: data.organizationId || config.organization.hzzoCode,
+                            },
+                        },
                         // DIGSIG-1: autor poruke mora biti jednak Bundle.signature.who
                         author: {
                             type: 'Practitioner',
@@ -414,7 +456,7 @@ class VisitService {
                             }
                         },
                         source: {
-                            endpoint: config.cezih.baseUrl,
+                            endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
                             name: config.software.instance,
                             software: `${config.software.name}_${config.software.company}`,
                             version: config.software.version,
@@ -432,7 +474,7 @@ class VisitService {
                         identifier: [
                             {
                                 system: CEZIH_IDENTIFIERS.VISIT_ID,
-                                value: visitId,
+                                value: cezihVisitId,
                             },
                         ],
                         status: 'in-progress',
@@ -447,6 +489,17 @@ class VisitService {
                                 value: data.patientMbo || this.getVisit(visitId)?.patientMbo || '999999423',
                             },
                         },
+                        participant: [
+                            {
+                                individual: {
+                                    type: 'Practitioner',
+                                    identifier: {
+                                        system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
+                                        value: data.practitionerId || config.practitioner.hzjzId,
+                                    },
+                                },
+                            },
+                        ],
                         serviceProvider: {
                             type: 'Organization',
                             identifier: {
@@ -474,7 +527,9 @@ class VisitService {
             ],
         };
 
-        return this.sendMessage(bundle, userToken, 'ENCOUNTER_UPDATE', visitId, data.patientMbo);
+        // Resolve patientMbo — fallback to local DB lookup if not provided
+        const resolvedPatientMbo = data.patientMbo || localVisit?.patientMbo;
+        return this.sendMessage(bundle, userToken, 'ENCOUNTER_UPDATE', visitId, resolvedPatientMbo);
     }
 
     // ============================================================
@@ -484,6 +539,11 @@ class VisitService {
     async closeVisit(visitId: string, endDate: string, userToken: string, patientMbo?: string): Promise<any> {
         const messageId = uuidv4();
         const encounterUuid = uuidv4();
+
+        // Resolve CEZIH visit ID — required for CEZIH to accept the close
+        const localVisit = this.getVisit(visitId);
+        const cezihVisitId = localVisit?.cezihVisitId || visitId;
+        console.log('[VisitService] Closing visit:', visitId, '→ CEZIH ID:', cezihVisitId);
 
         // Update Local DB
         try {
@@ -515,6 +575,13 @@ class VisitService {
                             system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
                             code: '1.3', // Close Encounter (1.1=create, 1.2=update, 1.3=close)
                         },
+                        sender: {
+                            type: 'Organization',
+                            identifier: {
+                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                                value: config.organization.hzzoCode,
+                            },
+                        },
                         // DIGSIG-1: autor poruke = Bundle.signature.who
                         author: {
                             type: 'Practitioner',
@@ -524,7 +591,7 @@ class VisitService {
                             }
                         },
                         source: {
-                            endpoint: config.cezih.baseUrl,
+                            endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
                             name: config.software.instance,
                             software: `${config.software.name}_${config.software.company}`,
                             version: config.software.version,
@@ -542,7 +609,7 @@ class VisitService {
                         identifier: [
                             {
                                 system: CEZIH_IDENTIFIERS.VISIT_ID,
-                                value: visitId,
+                                value: cezihVisitId,
                             },
                         ],
                         status: 'finished',
@@ -557,6 +624,17 @@ class VisitService {
                                 value: patientMbo || this.getVisit(visitId)?.patientMbo || '999999423',
                             },
                         },
+                        participant: [
+                            {
+                                individual: {
+                                    type: 'Practitioner',
+                                    identifier: {
+                                        system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
+                                        value: config.practitioner.hzjzId,
+                                    },
+                                },
+                            },
+                        ],
                         serviceProvider: {
                             type: 'Organization',
                             identifier: {

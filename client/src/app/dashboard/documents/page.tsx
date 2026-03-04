@@ -1,14 +1,29 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { FileText, RefreshCw, XCircle, Search, Eye, Filter, Save } from 'lucide-react';
+import { FileText, RefreshCw, XCircle, Search, Eye, Filter, Save, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
+
+interface DiagnosisSuggestion {
+    code: string;
+    display: string;
+}
 
 export default function DocumentsPage() {
     const [documents, setDocuments] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
+
+    // Toast notification state
+    const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+    const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const showToast = (type: 'success' | 'error', message: string) => {
+        setToast({ type, message });
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = setTimeout(() => setToast(null), 5000);
+    };
 
     // Replacement State
     const [isReplaceModalOpen, setIsReplaceModalOpen] = useState(false);
@@ -17,8 +32,61 @@ export default function DocumentsPage() {
         anamnesis: '',
         status: '',
         finding: '',
-        recommendation: ''
+        recommendation: '',
+        diagnosisCode: '',
+        diagnosisDisplay: '',
     });
+
+    // Diagnosis autocomplete state
+    const [diagnosisQuery, setDiagnosisQuery] = useState('');
+    const [diagSuggestions, setDiagSuggestions] = useState<DiagnosisSuggestion[]>([]);
+    const [showDiagSuggestions, setShowDiagSuggestions] = useState(false);
+    const [searchingDiag, setSearchingDiag] = useState(false);
+    const [diagnosisSelected, setDiagnosisSelected] = useState(false);
+    const diagSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const diagDropdownRef = useRef<HTMLDivElement>(null);
+
+    const searchDiagnoses = useCallback(async (q: string) => {
+        if (q.length < 2) { setDiagSuggestions([]); return; }
+        setSearchingDiag(true);
+        try {
+            const res = await fetch(`/api/terminology/diagnoses?q=${encodeURIComponent(q)}&limit=10`);
+            const data = await res.json();
+            setDiagSuggestions(data.results || []);
+            setShowDiagSuggestions(true);
+        } catch {
+            setDiagSuggestions([]);
+        } finally {
+            setSearchingDiag(false);
+        }
+    }, []);
+
+    const handleDiagnosisInput = (value: string) => {
+        setDiagnosisQuery(value);
+        setDiagnosisSelected(false);
+        setReplaceData(d => ({ ...d, diagnosisCode: '', diagnosisDisplay: '' }));
+        if (diagSearchRef.current) clearTimeout(diagSearchRef.current);
+        diagSearchRef.current = setTimeout(() => searchDiagnoses(value), 300);
+    };
+
+    const handleSelectDiagnosis = (s: DiagnosisSuggestion) => {
+        setReplaceData(d => ({ ...d, diagnosisCode: s.code, diagnosisDisplay: s.display }));
+        setDiagnosisQuery(`${s.code} - ${s.display}`);
+        setDiagnosisSelected(true);
+        setShowDiagSuggestions(false);
+        setDiagSuggestions([]);
+    };
+
+    // Close suggestions on outside click
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (diagDropdownRef.current && !diagDropdownRef.current.contains(e.target as Node)) {
+                setShowDiagSuggestions(false);
+            }
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, []);
 
     const fetchDocuments = () => {
         setLoading(true);
@@ -89,13 +157,13 @@ export default function DocumentsPage() {
             });
             const data = await res.json();
             if (data.success) {
-                alert('Dokument uspješno storniran.');
+                showToast('success', 'Dokument uspješno storniran.');
                 fetchDocuments();
             } else {
-                alert('Greška: ' + data.error);
+                showToast('error', 'Greška: ' + data.error);
             }
         } catch (error) {
-            alert('Greška pri komunikaciji sa serverom.');
+            showToast('error', 'Greška pri komunikaciji sa serverom.');
         }
     };
 
@@ -105,13 +173,32 @@ export default function DocumentsPage() {
             anamnesis: doc.anamnesis || '',
             status: doc.status_text || '',
             finding: doc.finding || '',
-            recommendation: doc.recommendation || ''
+            recommendation: doc.recommendation || '',
+            diagnosisCode: doc.diagnosisCode || '',
+            diagnosisDisplay: doc.diagnosisDisplay || '',
         });
+        // Pre-fill diagnosis query if existing diagnosis
+        if (doc.diagnosisCode) {
+            setDiagnosisQuery(`${doc.diagnosisCode} - ${doc.diagnosisDisplay || ''}`);
+            setDiagnosisSelected(true);
+        } else {
+            setDiagnosisQuery('');
+            setDiagnosisSelected(false);
+        }
         setIsReplaceModalOpen(true);
     };
 
+    const [replaceError, setReplaceError] = useState<string | null>(null);
+
     const submitReplacement = async () => {
         if (!docToReplace) return;
+        setReplaceError(null);
+
+        if (!diagnosisSelected || !replaceData.diagnosisCode) {
+            setReplaceError('Morate odabrati MKB-10 dijagnozu iz ponuđenog popisa.');
+            return;
+        }
+
         setLoading(true);
 
         try {
@@ -132,14 +219,14 @@ export default function DocumentsPage() {
             });
             const data = await res.json();
             if (data.success) {
-                alert('Dokument uspješno zamijenjen novom verzijom.');
+                showToast('success', 'Dokument uspješno zamijenjen novom verzijom.');
                 setIsReplaceModalOpen(false);
                 fetchDocuments();
             } else {
-                alert('Greška: ' + data.error);
+                showToast('error', 'Greška: ' + data.error);
             }
         } catch (error) {
-            alert('Greška pri komunikaciji sa serverom.');
+            showToast('error', 'Greška pri komunikaciji sa serverom.');
         } finally {
             setLoading(false);
         }
@@ -177,6 +264,23 @@ export default function DocumentsPage() {
 
     return (
         <div className="space-y-6">
+            {/* Toast notification */}
+            {toast && (
+                <div className={`fixed top-6 right-6 z-[100] flex items-center gap-3 px-5 py-4 rounded-2xl shadow-2xl border transition-all animate-in slide-in-from-top-2 ${toast.type === 'success'
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                        : 'bg-rose-50 border-rose-200 text-rose-800'
+                    }`}>
+                    {toast.type === 'success'
+                        ? <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+                        : <AlertCircle className="w-5 h-5 text-rose-500 flex-shrink-0" />
+                    }
+                    <span className="text-sm font-semibold">{toast.message}</span>
+                    <button onClick={() => setToast(null)} className="ml-2 text-current opacity-50 hover:opacity-100">
+                        <XCircle className="w-4 h-4" />
+                    </button>
+                </div>
+            )}
+
             <div className="flex justify-between items-center">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900">Klinički Dokumenti</h1>
@@ -356,16 +460,58 @@ export default function DocumentsPage() {
                                 <RefreshCw className="w-5 h-5" />
                                 Zamjena Dokumenta (Nova Verzija)
                             </h3>
-                            <button onClick={() => setIsReplaceModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                            <button onClick={() => { setIsReplaceModalOpen(false); setReplaceError(null); }} className="text-gray-400 hover:text-gray-600">
                                 <XCircle className="w-6 h-6" />
                             </button>
                         </div>
                         <div className="p-6 overflow-y-auto space-y-4">
                             <p className="text-sm text-gray-600 mb-4 bg-yellow-50 p-3 rounded-lg border border-yellow-100">
-                                <strong>Napomena:</strong> Slanjem zamjenskog dokumenta, originalna verzija (OID: {docToReplace?.id}) će biti označena kao povučena (`replaced`), ali ostaje u arhivi radi povijesti.
+                                <strong>Napomena:</strong> Slanjem zamjenskog dokumenta, originalna verzija (OID: {docToReplace?.id}) će biti označena kao povučena (&apos;replaced&apos;), ali ostaje u arhivi radi povijesti.
                             </p>
 
                             <div className="grid grid-cols-1 gap-4">
+                                {/* MKB-10 Dijagnoza */}
+                                <div className="relative" ref={diagDropdownRef}>
+                                    <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1">
+                                        MKB-10 Dijagnoza <span className="text-rose-500">*</span>
+                                    </label>
+                                    <div className="relative mt-1">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                                        {searchingDiag && (
+                                            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-500 animate-spin pointer-events-none" />
+                                        )}
+                                        {diagnosisSelected && (
+                                            <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500 pointer-events-none" />
+                                        )}
+                                        <input
+                                            type="text"
+                                            value={diagnosisQuery}
+                                            onChange={e => handleDiagnosisInput(e.target.value)}
+                                            onFocus={() => diagSuggestions.length > 0 && setShowDiagSuggestions(true)}
+                                            placeholder="Pretraži po šifri ili nazivu (npr. J00, grip...)"
+                                            className={`w-full border rounded-lg pl-10 pr-10 p-3 text-sm font-medium focus:outline-none focus:ring-2 transition-all ${diagnosisSelected
+                                                ? 'border-emerald-300 bg-emerald-50 text-emerald-800 focus:border-emerald-400 focus:ring-emerald-100'
+                                                : 'border-gray-200 text-gray-800 focus:border-blue-400 focus:ring-blue-100'
+                                                }`}
+                                        />
+                                    </div>
+                                    {showDiagSuggestions && diagSuggestions.length > 0 && (
+                                        <div className="absolute z-10 top-full mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden max-h-60 overflow-y-auto">
+                                            {diagSuggestions.map(s => (
+                                                <button
+                                                    type="button"
+                                                    key={s.code}
+                                                    onMouseDown={() => handleSelectDiagnosis(s)}
+                                                    className="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors flex items-center gap-3 border-b border-gray-50 last:border-0"
+                                                >
+                                                    <span className="font-bold text-blue-700 text-xs font-mono bg-blue-50 px-2 py-0.5 rounded-lg flex-shrink-0">{s.code}</span>
+                                                    <span className="text-sm text-gray-700 font-medium truncate">{s.display}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
                                 <div className="space-y-1">
                                     <label className="text-xs font-bold text-gray-500 uppercase">Anamneza</label>
                                     <textarea
@@ -403,15 +549,25 @@ export default function DocumentsPage() {
                                     />
                                 </div>
                             </div>
+
+                            {replaceError && (
+                                <div className="flex items-start gap-3 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3">
+                                    <AlertCircle className="w-4 h-4 text-rose-500 flex-shrink-0 mt-0.5" />
+                                    <p className="text-sm font-medium text-rose-700">{replaceError}</p>
+                                </div>
+                            )}
                         </div>
                         <div className="p-4 border-t border-gray-100 bg-gray-50 rounded-b-xl flex justify-end gap-3">
-                            <button onClick={() => setIsReplaceModalOpen(false)} className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium text-sm">
+                            <button onClick={() => { setIsReplaceModalOpen(false); setReplaceError(null); }} className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium text-sm">
                                 Odustani
                             </button>
                             <button
                                 onClick={submitReplacement}
-                                disabled={loading}
-                                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-sm disabled:opacity-50 flex items-center gap-2"
+                                disabled={loading || !diagnosisSelected}
+                                className={`px-6 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-all ${loading || !diagnosisSelected
+                                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                                    }`}
                             >
                                 {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                                 Pošalji Zamjensku Verziju

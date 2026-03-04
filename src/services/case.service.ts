@@ -190,6 +190,13 @@ class CaseService {
                             system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
                             code: '2.1',
                         },
+                        sender: {
+                            type: 'Organization',
+                            identifier: {
+                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                                value: data.organizationId || config.organization.hzzoCode,
+                            },
+                        },
                         // DIGSIG-1: autor poruke mora biti jednak Bundle.signature.who
                         author: {
                             type: 'Practitioner',
@@ -199,7 +206,7 @@ class CaseService {
                             }
                         },
                         source: {
-                            endpoint: config.cezih.baseUrl,
+                            endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
                             name: config.software.instance,
                             software: `${config.software.name}_${config.software.company}`,
                             version: config.software.version,
@@ -304,6 +311,13 @@ class CaseService {
                             system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
                             code: '2.6', // 2.6=update health issue data (per hr-update-health-issue-data-message)
                         },
+                        sender: {
+                            type: 'Organization',
+                            identifier: {
+                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                                value: data.organizationId || config.organization.hzzoCode,
+                            },
+                        },
                         // DIGSIG-1: autor poruke = Bundle.signature.who
                         author: {
                             type: 'Practitioner',
@@ -313,7 +327,7 @@ class CaseService {
                             }
                         },
                         source: {
-                            endpoint: config.cezih.baseUrl,
+                            endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
                             name: config.software.instance,
                             software: `${config.software.name}_${config.software.company}`,
                             version: config.software.version,

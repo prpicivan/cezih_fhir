@@ -4,9 +4,11 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { UserPlus, ArrowLeft, Save, AlertCircle } from 'lucide-react';
+import { useToast, Toast } from '@/components/Toast';
 
 export default function RegisterForeignerPage() {
     const router = useRouter();
+    const { toast, showToast, hideToast } = useToast();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -39,7 +41,7 @@ export default function RegisterForeignerPage() {
             const data = await res.json();
 
             if (data.success) {
-                alert('Stranac uspješno registriran u CEZIH sustav (PMIR).');
+                showToast('success', 'Stranac uspješno registriran u CEZIH sustav (PMIR).');
                 router.push('/dashboard/patients');
             } else {
                 setError(data.error || 'Registracija nije uspjela.');
@@ -53,6 +55,7 @@ export default function RegisterForeignerPage() {
 
     return (
         <div className="max-w-2xl mx-auto space-y-6">
+            <Toast toast={toast} onClose={hideToast} />
             <div className="flex items-center gap-4 mb-8">
                 <Link href="/dashboard/patients" className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
                     <ArrowLeft className="w-5 h-5 text-slate-500" />

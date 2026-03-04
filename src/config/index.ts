@@ -44,6 +44,9 @@ export const config = {
         hzzoCode: process.env.ORGANIZATION_HZZO_CODE || '',
         hzjzCode: process.env.ORGANIZATION_HZJZ_CODE || '',
         name: process.env.ORGANIZATION_NAME || 'Privatna poliklinika',
+        // OID identifikator sustava — dodjeljuje CEZIH prilikom registracije vanjskog sustava
+        // Koristi se u MessageHeader.source.endpoint (mora biti validan dotted-decimal OID)
+        sourceEndpointOid: process.env.SOURCE_ENDPOINT_OID || '1.2.3.4.5.6',
     },
 
     // Practitioner (liječnik koji koristi sustav)

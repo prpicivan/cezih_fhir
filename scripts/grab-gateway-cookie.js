@@ -109,6 +109,24 @@ async function injectSession(cookieValue) {
     });
 }
 
+// ─── Phase reporting to backend ────────────────────────────────────
+function reportPhase(phase) {
+    const body = JSON.stringify({ phase });
+    const req = http.request({
+        hostname: BACKEND_HOST,
+        port: BACKEND_PORT,
+        path: '/api/auth/smartcard/phase',
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(body),
+        },
+    }, () => { /* ignore response */ });
+    req.on('error', () => { /* ignore errors */ });
+    req.write(body);
+    req.end();
+}
+
 // ─── Polling za cookie ─────────────────────────────────────────────
 async function waitForCookie(context) {
     const deadline = Date.now() + TIMEOUT_MS;
@@ -175,7 +193,10 @@ async function main() {
                 '--window-size=520,420',
                 '--window-position=50,50',
                 '--disable-features=IsolateOrigins',
+                '--disable-infobars',
+                '--test-type',
             ],
+            ignoreDefaultArgs: ['--enable-automation'],
             ignoreHTTPSErrors: true,
             viewport: { width: 500, height: 400 },
         });
@@ -183,23 +204,20 @@ async function main() {
 
         const page = context.pages()[0] || await context.newPage();
 
-        // Postavi listener za certificate selector — Playwright ga ne može
-        // automatski kliknuti (OS-razina dialog), ali može otvoriti stranicu
+        // Report phase BEFORE goto — page.goto blocks during TLS handshake
+        // while the cert dialog is visible, so we report immediately
+        reportPhase('waiting-cert');
+
         log(`${c.cyan}🌐 Otvaram gateway...${c.reset}`);
         await page.goto(GATEWAY_URL, {
             waitUntil: 'domcontentloaded',
-            timeout: 30000,
+            timeout: 300000, // 5 min — includes time for cert/PIN dialogs
         }).catch(() => {
             // 404 / Whitelabel error je normalan — autentifikacija je prošla
         });
 
         // Force Chrome window to foreground (Windows hides new windows in taskbar)
         await page.bringToFront();
-
-        log('');
-        warn('Ako browser pita za certifikat — odaberite IDEN certifikat i unesite PIN.');
-        log(`${c.dim}   (Skripta čeka do 5 minuta)${c.reset}`);
-        log('');
 
         // Pollaj dok cookie ne bude dostupan
         const cookieValue = await waitForCookie(context);
@@ -213,6 +231,7 @@ async function main() {
         }
 
         ok(`Cookie detektiran: ${cookieValue.substring(0, 36)}...`);
+        reportPhase('cookie-found');
         log('');
 
         // Zatvori browser

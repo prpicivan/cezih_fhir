@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Users, Calendar, FileText, UserPlus, Activity, Clock, LogOut, CheckCircle, XCircle } from 'lucide-react';
+import { Users, Calendar, FileText, UserPlus, Activity, Clock, LogOut, CheckCircle, XCircle, Database, RefreshCw } from 'lucide-react';
+import { useToast, Toast } from '@/components/Toast';
 
 export default function DashboardPage() {
     const searchParams = useSearchParams();
@@ -182,6 +183,7 @@ export default function DashboardPage() {
 function SyncButton() {
     const [syncing, setSyncing] = useState(false);
     const [lastSync, setLastSync] = useState<string | null>(null);
+    const { toast, showToast, hideToast } = useToast();
 
     const handleSync = async () => {
         setSyncing(true);
@@ -190,25 +192,26 @@ function SyncButton() {
             const data = await res.json();
             if (data.success) {
                 setLastSync(new Date().toLocaleString('hr-HR'));
-                alert(`Sinkronizacija uspješna! Dohvaćeno ${data.codeSystems} sustava kodova.`);
+                showToast('success', `Sinkronizacija uspješna! Dohvaćeno ${data.codeSystems} sustava kodova.`);
             }
         } catch (err) {
-            alert('Greška pri sinkronizaciji.');
+            showToast('error', 'Greška pri sinkronizaciji.');
         } finally {
             setSyncing(false);
         }
     };
 
     return (
-        <button
-            onClick={handleSync}
-            disabled={syncing}
-            className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg transition-colors font-medium border border-slate-200 disabled:opacity-50"
-        >
-            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-            {syncing ? 'Sinkronizacija...' : 'Sinkroniziraj odmah'}
-        </button>
+        <>
+            <Toast toast={toast} onClose={hideToast} />
+            <button
+                onClick={handleSync}
+                disabled={syncing}
+                className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg transition-colors font-medium border border-slate-200 disabled:opacity-50"
+            >
+                <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+                {syncing ? 'Sinkronizacija...' : 'Sinkroniziraj odmah'}
+            </button>
+        </>
     );
 }
-
-import { Database, RefreshCw } from 'lucide-react';

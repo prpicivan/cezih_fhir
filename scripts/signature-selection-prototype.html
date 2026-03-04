@@ -1,0 +1,1524 @@
+<!DOCTYPE html>
+<html lang="hr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Potpis dokumenta — WBS_FHIR Prototype</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #0a0f1e 0%, #0d1a35 50%, #071225 100%);
+            font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* ── Ambient orbs ── */
+        .orb {
+            position: absolute;
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        .orb-1 {
+            top: 10%;
+            left: 15%;
+            width: 320px;
+            height: 320px;
+            background: radial-gradient(circle, rgba(99, 102, 241, 0.12) 0%, transparent 70%);
+            animation: orb-float 7s ease-in-out infinite;
+        }
+
+        .orb-2 {
+            bottom: 8%;
+            right: 12%;
+            width: 400px;
+            height: 400px;
+            background: radial-gradient(circle, rgba(20, 184, 166, 0.08) 0%, transparent 70%);
+            animation: orb-float 9s ease-in-out 2s infinite;
+        }
+
+        .orb-3 {
+            top: 50%;
+            right: 20%;
+            width: 200px;
+            height: 200px;
+            background: radial-gradient(circle, rgba(139, 92, 246, 0.1) 0%, transparent 70%);
+            animation: orb-float 5s ease-in-out 1s infinite;
+        }
+
+        /* ── Glass card ── */
+        .card {
+            width: 100%;
+            max-width: 420px;
+            background: rgba(255, 255, 255, 0.04);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 24px;
+            box-shadow: 0 32px 80px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ── Header ── */
+        .header {
+            padding: 32px 32px 16px;
+            text-align: center;
+        }
+
+        .logo-wrap {
+            width: 64px;
+            height: 64px;
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 14px;
+        }
+
+        .logo-wrap svg {
+            width: 36px;
+            height: 36px;
+            color: #6366f1;
+        }
+
+        h1 {
+            font-size: 22px;
+            font-weight: 800;
+            color: #fff;
+            letter-spacing: -0.5px;
+            margin-bottom: 4px;
+        }
+
+        .subtitle {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.45);
+            margin: 0;
+        }
+
+        /* ── Scene management ── */
+        .scene {
+            display: none;
+        }
+
+        .scene.active {
+            display: block;
+            animation: slide-up 0.4s ease-out forwards;
+        }
+
+        /* ── Scene 1: Login-style method buttons ── */
+        .method-buttons {
+            padding: 4px 24px 28px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .method-btn {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            border-radius: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: inherit;
+            color: #fff;
+            text-align: left;
+            border: none;
+        }
+
+        .method-btn-certilia {
+            background: rgba(99, 102, 241, 0.08);
+            border: 1px solid rgba(99, 102, 241, 0.25);
+        }
+
+        .method-btn-certilia:hover {
+            background: rgba(99, 102, 241, 0.16);
+            border-color: rgba(99, 102, 241, 0.5);
+            box-shadow: 0 4px 20px rgba(99, 102, 241, 0.15);
+        }
+
+        .method-btn-smartcard {
+            background: rgba(20, 184, 166, 0.08);
+            border: 1px solid rgba(20, 184, 166, 0.2);
+        }
+
+        .method-btn-smartcard:hover {
+            background: rgba(20, 184, 166, 0.14);
+            border-color: rgba(20, 184, 166, 0.4);
+            box-shadow: 0 4px 20px rgba(20, 184, 166, 0.12);
+        }
+
+        .method-btn .btn-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .method-btn .btn-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .method-btn .btn-icon svg {
+            width: 20px;
+            height: 20px;
+            color: #fff;
+        }
+
+        .method-btn-certilia .btn-icon {
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+        }
+
+        .method-btn-smartcard .btn-icon {
+            background: linear-gradient(135deg, #0ea5e9, #14b8a6);
+            box-shadow: 0 4px 12px rgba(20, 184, 166, 0.3);
+        }
+
+        .method-btn .btn-label {
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .method-btn .btn-arrow svg {
+            width: 18px;
+            height: 18px;
+            color: rgba(255, 255, 255, 0.25);
+        }
+
+        .method-btn-bottom {
+            text-align: center;
+            padding-top: 4px;
+        }
+
+        .method-btn-bottom button {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.25);
+            background: none;
+            border: none;
+            cursor: pointer;
+            transition: color 0.2s;
+            font-family: inherit;
+        }
+
+        .method-btn-bottom button:hover {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        /* ── Step indicators (matching page.tsx) ── */
+        .step-list {
+            width: 100%;
+            max-width: 300;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin: 0 auto;
+        }
+
+        .step-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            border-radius: 10px;
+            transition: all 0.5s;
+        }
+
+        .step-item.done {
+            background: rgba(74, 222, 128, 0.08);
+            border: 1px solid rgba(74, 222, 128, 0.15);
+        }
+
+        .step-item.active {
+            background: rgba(99, 102, 241, 0.1);
+            border: 1px solid rgba(99, 102, 241, 0.25);
+        }
+
+        .step-item.pending {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .step-item .si-icon {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .step-item .si-icon svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        .step-item.done .si-icon svg {
+            color: #4ade80;
+        }
+
+        .step-item.active .si-icon svg {
+            color: #818cf8;
+            animation: spin 1s linear infinite;
+        }
+
+        .step-item.pending .si-icon {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.15);
+        }
+
+        .step-item .si-text {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .step-item .si-title {
+            font-size: 12px;
+        }
+
+        .step-item.done .si-title {
+            color: #4ade80;
+        }
+
+        .step-item.active .si-title {
+            color: #818cf8;
+            font-weight: 600;
+        }
+
+        .step-item.pending .si-title {
+            color: rgba(255, 255, 255, 0.25);
+        }
+
+        .step-item .si-desc {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.35);
+            margin-top: 1px;
+        }
+
+        /* ── Progress bar ── */
+        .progress-bar-wrap {
+            margin: 0 24px 16px;
+        }
+
+        .progress-meta {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px;
+            font-size: 11px;
+        }
+
+        .progress-meta .label {
+            color: rgba(255, 255, 255, 0.3);
+            font-weight: 500;
+        }
+
+        .progress-meta .value {
+            color: #14b8a6;
+            font-weight: 700;
+        }
+
+        .progress-track {
+            height: 4px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 99px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #14b8a6, #10d9a0);
+            border-radius: 99px;
+            transition: width 0.7s ease-out;
+        }
+
+        /* ── CertiliaPhoneMock (from page.tsx) ── */
+        .phone-wrap {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 200px;
+            height: 340px;
+            margin: 0 auto;
+        }
+
+        .phone-pulse {
+            position: absolute;
+            border-radius: 50%;
+            border: 1px solid rgba(99, 102, 241, 0.2);
+        }
+
+        .phone-pulse:nth-child(1) {
+            width: 180px;
+            height: 300px;
+            animation: phone-pulse-anim 2.4s ease-out 0s infinite;
+        }
+
+        .phone-pulse:nth-child(2) {
+            width: 224px;
+            height: 344px;
+            animation: phone-pulse-anim 2.4s ease-out 0.6s infinite;
+        }
+
+        .phone-pulse:nth-child(3) {
+            width: 268px;
+            height: 388px;
+            animation: phone-pulse-anim 2.4s ease-out 1.2s infinite;
+        }
+
+        .phone-shell {
+            width: 160px;
+            height: 300px;
+            background: linear-gradient(160deg, #1e1b4b 0%, #0f172a 100%);
+            border-radius: 28px;
+            border: 2px solid rgba(139, 92, 246, 0.4);
+            box-shadow: 0 0 40px rgba(99, 102, 241, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .phone-notch {
+            width: 48px;
+            height: 8px;
+            background: #0f172a;
+            border-radius: 4px;
+            margin-top: 12px;
+        }
+
+        .phone-statusbar {
+            width: 100%;
+            padding: 4px 14px 2px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .phone-statusbar span {
+            font-size: 9px;
+            color: rgba(255, 255, 255, 0.5);
+            font-family: monospace;
+        }
+
+        .phone-statusbar svg {
+            width: 9px;
+            height: 9px;
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        .phone-header {
+            width: 100%;
+            padding: 8px 14px 6px;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .phone-header-logo {
+            width: 20px;
+            height: 20px;
+            border-radius: 5px;
+            background: rgba(255, 255, 255, 0.25);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .phone-header-logo svg {
+            width: 12px;
+            height: 12px;
+            color: #fff;
+        }
+
+        .phone-header-name {
+            font-size: 11px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: 0.5px;
+        }
+
+        .phone-badge {
+            margin-left: auto;
+            width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            background: #ef4444;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: badge-bounce 1.2s ease-in-out infinite;
+        }
+
+        .phone-badge span {
+            font-size: 9px;
+            color: #fff;
+            font-weight: 700;
+        }
+
+        .phone-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 10px 12px 8px;
+            width: 100%;
+        }
+
+        .phone-request-card {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 12px;
+            padding: 10px 10px 8px;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .phone-request-label {
+            font-size: 9px;
+            color: rgba(255, 255, 255, 0.5);
+            margin-bottom: 4px;
+        }
+
+        .phone-request-source {
+            font-size: 9px;
+            color: rgba(255, 255, 255, 0.7);
+            margin-bottom: 8px;
+        }
+
+        /* Mini circle timer inside phone */
+        .mini-timer {
+            position: relative;
+            width: 80px;
+            height: 80px;
+            margin: 0 auto;
+        }
+
+        .mini-timer svg {
+            transform: rotate(-90deg);
+        }
+
+        .mini-timer-bg {
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.1);
+            stroke-width: 6;
+        }
+
+        .mini-timer-fg {
+            fill: none;
+            stroke: url(#timerGrad);
+            stroke-width: 6;
+            stroke-linecap: round;
+            transition: stroke-dashoffset 1s linear;
+        }
+
+        .mini-timer-text {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .mini-timer-text .num {
+            font-family: monospace;
+            font-size: 17px;
+            font-weight: 700;
+            color: #fff;
+            line-height: 1;
+        }
+
+        .mini-timer-text .lbl {
+            font-size: 7px;
+            color: rgba(255, 255, 255, 0.45);
+            margin-top: 2px;
+        }
+
+        .phone-actions {
+            display: flex;
+            gap: 8px;
+            width: 100%;
+        }
+
+        .phone-btn-deny {
+            flex: 1;
+            padding: 7px 0;
+            border-radius: 8px;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .phone-btn-deny span {
+            font-size: 9px;
+            color: #f87171;
+            font-weight: 700;
+        }
+
+        .phone-btn-approve {
+            flex: 1;
+            padding: 7px 0;
+            border-radius: 8px;
+            background: linear-gradient(135deg, rgba(20, 184, 166, 0.3), rgba(16, 217, 160, 0.3));
+            border: 1px solid rgba(20, 184, 166, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .phone-btn-approve span {
+            font-size: 9px;
+            color: #2dd4bf;
+            font-weight: 700;
+        }
+
+        /* Signal dots */
+        .signal-dots {
+            position: absolute;
+            top: 10px;
+            right: -8px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .signal-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: #14b8a6;
+            opacity: 0.6;
+        }
+
+        .signal-dot:nth-child(1) {
+            animation: dot-blink 1.5s ease-in-out 0s infinite;
+        }
+
+        .signal-dot:nth-child(2) {
+            animation: dot-blink 1.5s ease-in-out 0.3s infinite;
+        }
+
+        .signal-dot:nth-child(3) {
+            animation: dot-blink 1.5s ease-in-out 0.6s infinite;
+        }
+
+        /* ── SmartCardMock (from page.tsx — uses image) ── */
+        .sc-reader-wrap {
+            display: flex;
+            justify-content: center;
+            padding: 16px 0 8px;
+            position: relative;
+        }
+
+        .sc-reader-scene {
+            width: 220px;
+            height: 160px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .sc-pulse {
+            position: absolute;
+            border-radius: 16px;
+            border: 1px solid rgba(99, 102, 241, 0.15);
+        }
+
+        .sc-pulse:nth-child(1) {
+            width: 180px;
+            height: 130px;
+            animation: sc-reader-pulse 2.4s ease-out 0s infinite;
+        }
+
+        .sc-pulse:nth-child(2) {
+            width: 210px;
+            height: 150px;
+            animation: sc-reader-pulse 2.4s ease-out 0.6s infinite;
+        }
+
+        .sc-pulse:nth-child(3) {
+            width: 240px;
+            height: 170px;
+            animation: sc-reader-pulse 2.4s ease-out 1.2s infinite;
+        }
+
+        .sc-reader-img-wrap {
+            position: relative;
+            z-index: 2;
+            transition: filter 0.8s;
+            filter: drop-shadow(0 0 16px rgba(99, 102, 241, 0.3));
+        }
+
+        .sc-reader-img-wrap.done-glow {
+            filter: drop-shadow(0 0 20px rgba(74, 222, 128, 0.5));
+        }
+
+        .sc-reader-img {
+            width: 140px;
+            height: auto;
+            border-radius: 8px;
+            opacity: 0.9;
+            /* Fallback: CSS-drawn reader when image unavailable */
+        }
+
+        .sc-led-overlay {
+            position: absolute;
+            bottom: 8px;
+            right: 12px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            transition: all 0.5s;
+        }
+
+        .sc-led-overlay.indigo {
+            background: #818cf8;
+            box-shadow: 0 0 10px rgba(99, 102, 241, 0.6);
+            animation: sc-led-blink 1.2s ease-in-out infinite;
+        }
+
+        .sc-led-overlay.green {
+            background: #4ade80;
+            box-shadow: 0 0 12px rgba(74, 222, 128, 0.8);
+            animation: none;
+        }
+
+        /* Fallback CSS reader (in case card-reader.png not available) */
+        .css-reader {
+            width: 140px;
+            height: 90px;
+            background: linear-gradient(160deg, #1a1d2e 0%, #0d1020 100%);
+            border-radius: 14px;
+            border: 2px solid rgba(99, 102, 241, 0.3);
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        }
+
+        .css-reader-slot {
+            width: 100px;
+            height: 6px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 3px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            position: absolute;
+            top: 12px;
+        }
+
+        .css-reader-label {
+            font-size: 8px;
+            letter-spacing: 2px;
+            color: rgba(255, 255, 255, 0.2);
+            text-transform: uppercase;
+            position: absolute;
+            bottom: 14px;
+            left: 16px;
+        }
+
+        /* ── Footer ── */
+        .footer {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 12px 24px 24px;
+        }
+
+        .btn-back {
+            margin-top: 14px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.25);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-family: inherit;
+            transition: color 0.2s;
+        }
+
+        .btn-back:hover {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        /* ── Success overlay ── */
+        .success-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(10, 15, 30, 0.95);
+            backdrop-filter: blur(12px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s;
+        }
+
+        .success-overlay.show {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .success-check {
+            width: 84px;
+            height: 84px;
+            border-radius: 50%;
+            background: rgba(74, 222, 128, 0.12);
+            border: 1px solid rgba(74, 222, 128, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 16px;
+            box-shadow: 0 0 40px rgba(74, 222, 128, 0.2);
+            animation: bounce-check 0.5s ease-out;
+        }
+
+        .success-check svg {
+            width: 44px;
+            height: 44px;
+            color: #4ade80;
+        }
+
+        .success-title {
+            font-size: 18px;
+            font-weight: 800;
+            color: #4ade80;
+            margin-bottom: 6px;
+        }
+
+        .success-sub {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.4);
+            margin-bottom: 20px;
+        }
+
+        .success-bar {
+            width: 200px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 99px;
+            overflow: hidden;
+        }
+
+        .success-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4ade80, #14b8a6);
+            border-radius: 99px;
+            animation: progress-fill 1.5s ease-out forwards;
+            width: 100%;
+        }
+
+        /* ── Demo controls ── */
+        .demo-controls {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            gap: 8px;
+            z-index: 100;
+        }
+
+        .demo-btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(12px);
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 12px;
+            font-family: inherit;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .demo-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
+        }
+
+        .demo-btn.primary {
+            background: rgba(99, 102, 241, 0.2);
+            border-color: rgba(99, 102, 241, 0.4);
+            color: #a5b4fc;
+        }
+
+        .demo-btn.primary:hover {
+            background: rgba(99, 102, 241, 0.35);
+            color: #fff;
+        }
+
+        .demo-label {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-right: 8px;
+        }
+
+        /* ── Keyframes ── */
+        @keyframes orb-float {
+
+            0%,
+            100% {
+                transform: translateY(0) scale(1)
+            }
+
+            50% {
+                transform: translateY(-20px) scale(1.05)
+            }
+        }
+
+        @keyframes slide-up {
+            from {
+                opacity: 0;
+                transform: translateY(20px)
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0)
+            }
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg)
+            }
+        }
+
+        @keyframes bounce-check {
+            0% {
+                transform: scale(0)
+            }
+
+            60% {
+                transform: scale(1.15)
+            }
+
+            100% {
+                transform: scale(1)
+            }
+        }
+
+        @keyframes progress-fill {
+            from {
+                width: 0%
+            }
+        }
+
+        @keyframes phone-pulse-anim {
+            0% {
+                transform: scale(1);
+                opacity: 0.5
+            }
+
+            50% {
+                transform: scale(1.04);
+                opacity: 0.25
+            }
+
+            100% {
+                transform: scale(1.08);
+                opacity: 0
+            }
+        }
+
+        @keyframes badge-bounce {
+
+            0%,
+            100% {
+                transform: scale(1)
+            }
+
+            50% {
+                transform: scale(1.25)
+            }
+        }
+
+        @keyframes dot-blink {
+
+            0%,
+            100% {
+                opacity: 0.2
+            }
+
+            50% {
+                opacity: 1
+            }
+        }
+
+        @keyframes sc-reader-pulse {
+            0% {
+                transform: scale(1);
+                opacity: 0.5
+            }
+
+            50% {
+                transform: scale(1.05);
+                opacity: 0.2
+            }
+
+            100% {
+                transform: scale(1.1);
+                opacity: 0
+            }
+        }
+
+        @keyframes sc-led-blink {
+
+            0%,
+            100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: 0.4
+            }
+        }
+
+        @keyframes pulse-ring {
+            0% {
+                transform: scale(0.95);
+                opacity: 0.6
+            }
+
+            50% {
+                transform: scale(1.03);
+                opacity: 1
+            }
+
+            100% {
+                transform: scale(0.95);
+                opacity: 0.6
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+
+    <div class="card" style="animation:slide-up 0.4s ease-out forwards" id="mainCard">
+        <!-- Success overlay -->
+        <div class="success-overlay" id="successOverlay">
+            <div class="success-check">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2"
+                    stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+                </svg>
+            </div>
+            <div class="success-title">Dokument potpisan!</div>
+            <div class="success-sub">Potpis uspješno primijenjen</div>
+            <div class="success-bar">
+                <div class="success-bar-fill"></div>
+            </div>
+        </div>
+
+        <!-- ═══ SCENE 1: Odabir metode ═══ -->
+        <div class="scene active" id="scene1">
+            <div class="header">
+                <div class="logo-wrap">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
+                        stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+                    </svg>
+                </div>
+                <h1>Potpis dokumenta</h1>
+                <p class="subtitle">Odaberite način potpisa</p>
+            </div>
+            <div class="method-buttons">
+                <!-- Certilia button (identical to login page) -->
+                <button class="method-btn method-btn-certilia" onclick="selectMethod('certilia')">
+                    <div class="btn-left">
+                        <div class="btn-icon">
+                            <!-- Smartphone icon -->
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2"
+                                stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" />
+                            </svg>
+                        </div>
+                        <div class="btn-label">Certilia mobile.id</div>
+                    </div>
+                    <div class="btn-arrow">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2"
+                            stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+                        </svg>
+                    </div>
+                </button>
+                <!-- Smart card button (identical to login page) -->
+                <button class="method-btn method-btn-smartcard" onclick="selectMethod('smartcard')">
+                    <div class="btn-left">
+                        <div class="btn-icon">
+                            <!-- Shield icon -->
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2"
+                                stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+                            </svg>
+                        </div>
+                        <div class="btn-label">Pametna kartica</div>
+                    </div>
+                    <div class="btn-arrow">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2"
+                            stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+                        </svg>
+                    </div>
+                </button>
+                <div class="method-btn-bottom">
+                    <button onclick="alert('Odustani')">Odustani</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ SCENE 2A: Pametna kartica ═══ -->
+        <div class="scene" id="scene2a">
+            <div class="header">
+                <div class="logo-wrap">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
+                        stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+                    </svg>
+                </div>
+                <h1>Potpis dokumenta</h1>
+                <p class="subtitle">Pametna kartica</p>
+            </div>
+
+            <!-- Progress bar -->
+            <div class="progress-bar-wrap" id="scProgressWrap">
+                <div class="progress-meta">
+                    <span class="label" id="scProgLabel">Korak 2/3</span>
+                    <span class="value" id="scProgValue">Autentifikacija</span>
+                </div>
+                <div class="progress-track">
+                    <div class="progress-fill" id="scProgFill" style="width:66%"></div>
+                </div>
+            </div>
+
+            <!-- SmartCardMock (card-reader image with pulse + LED) -->
+            <div class="sc-reader-wrap">
+                <div class="sc-reader-scene">
+                    <div class="sc-pulse"></div>
+                    <div class="sc-pulse"></div>
+                    <div class="sc-pulse"></div>
+                    <div class="sc-reader-img-wrap" id="scImgWrap">
+                        <img src="../client/public/card-reader.png" alt="Smart card reader" class="sc-reader-img"
+                            onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+                        <!-- CSS fallback if image not found -->
+                        <div class="css-reader" style="display:none">
+                            <div class="css-reader-slot"></div>
+                            <span class="css-reader-label">IDEN</span>
+                        </div>
+                        <div class="sc-led-overlay indigo" id="scLed"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4-step stepper (matching page.tsx exactly) -->
+            <div style="padding:0 24px 8px">
+                <div class="step-list">
+                    <div class="step-item done" id="scStep1">
+                        <div class="si-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                                stroke-width="2" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                            </svg></div>
+                        <div class="si-text"><span class="si-title">Povezivanje s CEZIH sustavom</span></div>
+                    </div>
+                    <div class="step-item active" id="scStep2">
+                        <div class="si-icon" id="scStep2Icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none"
+                                viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+                            </svg></div>
+                        <div class="si-text">
+                            <span class="si-title">Odabir certifikata</span>
+                            <span class="si-desc">Odaberite IDEN certifikat u Chrome prozoru</span>
+                        </div>
+                    </div>
+                    <div class="step-item pending" id="scStep3">
+                        <div class="si-icon" id="scStep3Icon"></div>
+                        <div class="si-text"><span class="si-title">Unos PIN-a</span></div>
+                    </div>
+                    <div class="step-item pending" id="scStep4">
+                        <div class="si-icon" id="scStep4Icon"></div>
+                        <div class="si-text"><span class="si-title">Potpis dokumenta</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer">
+                <button class="btn-back" onclick="goBack()">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2"
+                        stroke="currentColor" style="width:14px;height:14px">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
+                    </svg>
+                    Odustani
+                </button>
+            </div>
+        </div>
+
+        <!-- ═══ SCENE 2B: Certilia mobile.id ═══ -->
+        <div class="scene" id="scene2b">
+            <div class="header">
+                <div class="logo-wrap">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
+                        stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+                    </svg>
+                </div>
+                <h1>Potpis dokumenta</h1>
+                <p class="subtitle">Certilia mobile.id</p>
+            </div>
+
+            <!-- Progress bar -->
+            <div class="progress-bar-wrap" id="certProgressWrap">
+                <div class="progress-meta">
+                    <span class="label" id="certProgLabel">Korak 3/4</span>
+                    <span class="value" id="certProgValue">Odobrenje</span>
+                </div>
+                <div class="progress-track">
+                    <div class="progress-fill" id="certProgFill" style="width:75%"></div>
+                </div>
+            </div>
+
+            <!-- Certilia heading -->
+            <div style="text-align:center;padding:0 24px 8px">
+                <h3 style="font-size:17px;font-weight:800;color:#fff;margin:0 0 4px">Odobrenje na mobilnom uređaju</h3>
+                <p style="font-size:12px;color:rgba(255,255,255,0.4);max-width:300;margin:0 auto">
+                    Otvorite <strong style="color:rgba(255,255,255,0.65)">Certilia</strong> aplikaciju i pritisnite
+                    <strong style="color:#4ade80">ODOBRI</strong>
+                </p>
+            </div>
+
+            <!-- CertiliaPhoneMock -->
+            <div class="phone-wrap">
+                <div class="phone-pulse"></div>
+                <div class="phone-pulse"></div>
+                <div class="phone-pulse"></div>
+                <div class="phone-shell">
+                    <div class="phone-notch"></div>
+                    <div class="phone-statusbar">
+                        <span>9:41</span>
+                        <!-- Wifi icon -->
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2"
+                            stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M8.288 15.038a5.25 5.25 0 0 1 7.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 0 1 1.06 0Z" />
+                        </svg>
+                    </div>
+                    <div class="phone-header">
+                        <div class="phone-header-logo">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2"
+                                stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+                            </svg>
+                        </div>
+                        <span class="phone-header-name">Certilia</span>
+                        <div class="phone-badge"><span>1</span></div>
+                    </div>
+                    <div class="phone-content">
+                        <div class="phone-request-card">
+                            <div class="phone-request-label">ZAHTJEV ZA POTPIS</div>
+                            <div class="phone-request-source">WBS_FHIR portal</div>
+                            <div class="mini-timer">
+                                <svg width="80" height="80" viewBox="0 0 80 80">
+                                    <defs>
+                                        <linearGradient id="timerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                                            <stop offset="0%" stop-color="#14b8a6" />
+                                            <stop offset="100%" stop-color="#10d9a0" />
+                                        </linearGradient>
+                                    </defs>
+                                    <circle class="mini-timer-bg" cx="40" cy="40" r="34" />
+                                    <circle class="mini-timer-fg" id="certTimerCircle" cx="40" cy="40" r="34"
+                                        stroke-dasharray="213.63" stroke-dashoffset="0" />
+                                </svg>
+                                <div class="mini-timer-text">
+                                    <span class="num" id="certTimerNum">1:00</span>
+                                    <span class="lbl">preostalo</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="phone-actions">
+                            <div class="phone-btn-deny"><span>ODBIJ</span></div>
+                            <div class="phone-btn-approve"><span>ODOBRI</span></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="signal-dots">
+                    <div class="signal-dot"></div>
+                    <div class="signal-dot"></div>
+                    <div class="signal-dot"></div>
+                </div>
+            </div>
+
+            <!-- Step checklist (matching page.tsx certilia-waiting) -->
+            <div style="padding:16px 24px 8px">
+                <div class="step-list">
+                    <div class="step-item done" id="certStep1">
+                        <div class="si-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                                stroke-width="2" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                            </svg></div>
+                        <div class="si-text"><span class="si-title">Podaci provjereni</span></div>
+                    </div>
+                    <div class="step-item done" id="certStep2">
+                        <div class="si-icon" id="certStep2Icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none"
+                                viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                            </svg></div>
+                        <div class="si-text"><span class="si-title">Push obavijest poslana</span></div>
+                    </div>
+                    <div class="step-item active" id="certStep3">
+                        <div class="si-icon" id="certStep3Icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none"
+                                viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+                            </svg></div>
+                        <div class="si-text"><span class="si-title">Čeka se odobrenje...</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer">
+                <button class="btn-back" onclick="goBack()">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2"
+                        stroke="currentColor" style="width:14px;height:14px">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
+                    </svg>
+                    Odustani
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Demo controls -->
+    <div class="demo-controls">
+        <span class="demo-label">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2"
+                stroke="currentColor" style="width:12px;height:12px">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
+            </svg>
+            PROTOTYPE
+        </span>
+        <button class="demo-btn" onclick="fullReset()">⟲ Reset</button>
+        <button class="demo-btn primary" onclick="nextStep()">Sljedeći korak →</button>
+    </div>
+
+    <script>
+        const SVG_CHECK = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>';
+        const SVG_SPIN = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"/></svg>';
+        const CIRC = 213.63; // 2*PI*34
+        const TIME_LIMIT = 60;
+
+        let currentScene = 'scene1';
+        let scPhase = 0; // 0=waiting, 1=cert done, 2=pin done, 3=all done
+        let certPhase = 0; // 0=waiting, 1=approved, 2=done
+        let timePassed = 0;
+        let certInterval = null;
+
+        // Preferred method from localStorage
+        const pref = localStorage.getItem('preferredSignMethod');
+
+        function showScene(id) {
+            document.querySelectorAll('.scene').forEach(s => s.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+            currentScene = id;
+        }
+
+        function selectMethod(method) {
+            localStorage.setItem('preferredSignMethod', method);
+            if (method === 'smartcard') { showScene('scene2a'); }
+            else { showScene('scene2b'); startCertiliaTimer(); }
+        }
+
+        function goBack() {
+            stopTimer();
+            resetSC(); resetCert();
+            showScene('scene1');
+        }
+
+        function stopTimer() {
+            if (certInterval) { clearInterval(certInterval); certInterval = null; }
+        }
+
+        // ── Certilia timer ──
+        function formatTime(s) {
+            const m = Math.floor(s / 60);
+            const sec = s % 60;
+            return m + ':' + (sec < 10 ? '0' + sec : sec);
+        }
+
+        function startCertiliaTimer() {
+            timePassed = 0;
+            updateTimerDisplay();
+            certInterval = setInterval(() => {
+                timePassed++;
+                updateTimerDisplay();
+                if (timePassed >= TIME_LIMIT) { stopTimer(); }
+            }, 1000);
+        }
+
+        function updateTimerDisplay() {
+            const left = TIME_LIMIT - timePassed;
+            document.getElementById('certTimerNum').textContent = formatTime(left);
+            const offset = (timePassed / TIME_LIMIT) * CIRC;
+            document.getElementById('certTimerCircle').style.strokeDashoffset = offset.toFixed(1);
+        }
+
+        function resetCert() {
+            certPhase = 0; timePassed = 0;
+            stopTimer();
+            document.getElementById('certTimerNum').textContent = formatTime(TIME_LIMIT);
+            document.getElementById('certTimerCircle').style.strokeDashoffset = '0';
+            document.getElementById('certProgFill').style.width = '75%';
+            document.getElementById('certProgLabel').textContent = 'Korak 3/4';
+            document.getElementById('certProgValue').textContent = 'Odobrenje';
+            // Reset steps
+            setStep('certStep1', 'done');
+            setStep('certStep2', 'done');
+            setStep('certStep3', 'active', SVG_SPIN);
+        }
+
+        // ── Smart card ──
+        function resetSC() {
+            scPhase = 0;
+            document.getElementById('scLed').className = 'sc-led-overlay indigo';
+            document.getElementById('scImgWrap').classList.remove('done-glow');
+            document.getElementById('scProgFill').style.width = '66%';
+            document.getElementById('scProgLabel').textContent = 'Korak 2/3';
+            document.getElementById('scProgValue').textContent = 'Autentifikacija';
+            setStep('scStep1', 'done');
+            setStep('scStep2', 'active', SVG_SPIN, 'Odabir certifikata', 'Odaberite IDEN certifikat u Chrome prozoru');
+            setStep('scStep3', 'pending', '', 'Unos PIN-a');
+            setStep('scStep4', 'pending', '', 'Potpis dokumenta');
+        }
+
+        // Helper to set step state
+        function setStep(id, state, iconHtml, title, desc) {
+            const el = document.getElementById(id);
+            el.className = 'step-item ' + state;
+            const iconEl = el.querySelector('.si-icon');
+            if (state === 'done') {
+                iconEl.innerHTML = SVG_CHECK;
+                iconEl.style.cssText = '';
+            } else if (state === 'active') {
+                iconEl.innerHTML = iconHtml || SVG_SPIN;
+                iconEl.style.cssText = '';
+            } else { // pending
+                iconEl.innerHTML = '';
+                iconEl.style.cssText = 'width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,0.15);';
+            }
+            if (title) {
+                el.querySelector('.si-title').textContent = title;
+            }
+            const descEl = el.querySelector('.si-desc');
+            if (descEl && desc !== undefined) descEl.textContent = desc;
+        }
+
+        // ── Demo: next step ──
+        function nextStep() {
+            if (currentScene === 'scene1') return;
+
+            if (currentScene === 'scene2a') {
+                if (scPhase === 0) {
+                    // Cert selected → PIN entry
+                    setStep('scStep2', 'done');
+                    setStep('scStep3', 'active', SVG_SPIN, 'Unos PIN-a');
+                    document.getElementById('scProgFill').style.width = '75%';
+                    scPhase = 1;
+                } else if (scPhase === 1) {
+                    // PIN done → signing
+                    setStep('scStep3', 'done');
+                    setStep('scStep4', 'active', SVG_SPIN, 'Potpis dokumenta');
+                    document.getElementById('scProgFill').style.width = '90%';
+                    scPhase = 2;
+                } else if (scPhase === 2) {
+                    // All done
+                    setStep('scStep4', 'done');
+                    document.getElementById('scLed').className = 'sc-led-overlay green';
+                    document.getElementById('scImgWrap').classList.add('done-glow');
+                    document.getElementById('scProgFill').style.width = '100%';
+                    document.getElementById('scProgLabel').textContent = 'Korak 3/3';
+                    document.getElementById('scProgValue').textContent = 'Gotovo';
+                    scPhase = 3;
+                    setTimeout(() => document.getElementById('successOverlay').classList.add('show'), 600);
+                } else fullReset();
+
+            } else if (currentScene === 'scene2b') {
+                if (certPhase === 0) {
+                    // User approved on mobile
+                    stopTimer();
+                    setStep('certStep3', 'done');
+                    document.getElementById('certTimerNum').textContent = '✓';
+                    document.getElementById('certProgFill').style.width = '100%';
+                    document.getElementById('certProgLabel').textContent = 'Korak 4/4';
+                    document.getElementById('certProgValue').textContent = 'Gotovo';
+                    certPhase = 1;
+                    setTimeout(() => document.getElementById('successOverlay').classList.add('show'), 600);
+                } else fullReset();
+            }
+        }
+
+        function fullReset() {
+            stopTimer();
+            document.getElementById('successOverlay').classList.remove('show');
+            resetSC(); resetCert();
+            showScene('scene1');
+        }
+    </script>
+</body>
+
+</html>

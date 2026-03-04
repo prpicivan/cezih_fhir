@@ -165,50 +165,43 @@ class ClinicalDocumentService {
         // Note: visit closing (REALIZATION) is handled by G9 app's document/route.ts
         // Do NOT call closeVisit here to avoid duplicate REALIZATION in audit log
 
-        // Step 4: Handle Signing based on mode
-        // Read directly from env to avoid stale cache
-        const signingMode = process.env.SIGNING_MODE || 'certilia';
-        console.log(`[ClinicalDocumentService] Signing mode: ${signingMode}`);
-
-        if (signingMode === 'certilia') {
-            return this.initiateRemoteSigning(data, documentOid, documentBundle, userToken);
-        }
-
-        // --- Synchronous Signing Flow (Mock/SmartCard/Bridge) ---
-        let finalDocumentBundle = documentBundle;
+        // Step 4: Always defer signing to the frontend method selection modal.
+        // Save the bundle to DB so both Certilia and smart card flows can retrieve it later.
+        const bundleJson = JSON.stringify(documentBundle);
         try {
-            if (signatureService.isAvailable()) {
-                const { bundle: signedDoc } = await signatureService.signBundle(documentBundle, `Practitioner/${data.practitionerId}`, userToken);
-                finalDocumentBundle = signedDoc;
-                console.log('[ClinicalDocumentService] Document Bundle signed successfully (sync)');
-            } else {
-                console.warn('[ClinicalDocumentService] Signing unavailable — sending unsigned document');
-            }
-        } catch (signError: any) {
-            console.error('[ClinicalDocumentService] Signing failed:', signError.message);
+            db.prepare('UPDATE documents SET status = ?, bundleJson = ? WHERE id = ?')
+                .run('pending_signature', bundleJson, documentOid);
+        } catch (dbErr: any) {
+            console.error('[ClinicalDocumentService] Failed to save bundleJson:', dbErr.message);
         }
 
-        // Step 5: Submit to CEZIH (Synchronous)
-        const submissionResult = await this.submitToCezih(data, documentOid, bundleId, finalDocumentBundle, userToken);
+        console.log(`[ClinicalDocumentService] Document ${documentOid} saved. Awaiting user method selection.`);
 
-        return { ...submissionResult, documentOid };
+        return {
+            success: true,
+            pendingSignature: true,
+            transactionCode: documentOid, // Use documentOid as placeholder transaction code
+            documentOid,
+        };
     }
 
     /**
      * Initiates the remote signing flow (Certilia mobileID).
      * Returns a transactionCode for the frontend to poll.
      */
-    private async initiateRemoteSigning(
-        data: ClinicalDocumentData,
+    async initiateRemoteSigning(
         documentOid: string,
-        documentBundle: any,
         userToken: string
     ): Promise<any> {
         console.log('[ClinicalDocumentService] Initiating remote signing for document:', documentOid);
 
         try {
-            // Update local DB status to indicate we are waiting for signature
-            db.prepare('UPDATE documents SET status = ? WHERE id = ?').run('pending_signature', documentOid);
+            // Retrieve saved bundle from DB
+            const localDoc = this.getDocument(documentOid);
+            if (!localDoc) throw new Error('Dokument nije pronađen u lokalnoj bazi.');
+            if (!localDoc.bundleJson) throw new Error('Nema pohranjenog bundlea za potpis.');
+
+            const documentBundle = JSON.parse(localDoc.bundleJson);
 
             // Add required signature placeholder to Bundle before sending for signing
             const bundleToSign = {
@@ -306,6 +299,62 @@ class ClinicalDocumentService {
         } catch (error: any) {
             console.error('[ClinicalDocumentService] Completion failed:', error.message);
             // If it failed, it stays in pending_signature or we could move it back to draft
+            throw error;
+        }
+    }
+
+    /**
+     * Completes document signing using a local smart card (PKCS#11).
+     * Signs the pending bundle locally and submits to CEZIH.
+     */
+    async completeSmartCardSigning(
+        documentOid: string,
+        transactionCode: string,
+        userToken: string
+    ): Promise<any> {
+        console.log('[ClinicalDocumentService] Smart card signing for document:', documentOid);
+
+        try {
+            // 1. Fetch original document from DB
+            const localDoc = this.getDocument(documentOid);
+            if (!localDoc) throw new Error('Dokument nije pronađen u lokalnoj bazi.');
+
+            // 2. Retrieve the pending bundle (stored as JSON in DB)
+            let pendingBundle: any;
+            if (localDoc.bundleJson) {
+                pendingBundle = JSON.parse(localDoc.bundleJson);
+            } else {
+                throw new Error('Nema pohranjenog bundlea za potpis.');
+            }
+
+            // 3. Sign locally using PKCS#11 (smart card)
+            console.log('[ClinicalDocumentService] Signing bundle via PKCS#11...');
+            const signedResult = await signatureService.signBundle(pendingBundle, undefined, userToken);
+            const finalDocumentBundle = signedResult.bundle;
+
+            // 4. Reconstruct minimal data for submission
+            const data: ClinicalDocumentData = {
+                type: localDoc.type as ClinicalDocumentType,
+                patientMbo: localDoc.patientMbo,
+                practitionerId: config.practitioner.hzjzId,
+                organizationId: config.organization.hzzoCode,
+                visitId: localDoc.visitId,
+                title: 'Medicinski nalaz',
+                date: localDoc.createdAt
+            };
+
+            // 5. Submit to CEZIH MHD
+            const bundleId = uuidv4();
+            const submissionResult = await this.submitToCezih(data, documentOid, bundleId, finalDocumentBundle, userToken);
+
+            // 6. Update local DB status
+            db.prepare('UPDATE documents SET status = ?, sentAt = ? WHERE id = ?')
+                .run('signed and submitted', new Date().toISOString(), documentOid);
+
+            console.log('[ClinicalDocumentService] ✅ Smart card signing complete for:', documentOid);
+            return { ...submissionResult, documentOid };
+        } catch (error: any) {
+            console.error('[ClinicalDocumentService] Smart card signing failed:', error.message);
             throw error;
         }
     }
@@ -599,8 +648,15 @@ class ClinicalDocumentService {
                             system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/message-events',
                             code: 'document-cancel',
                         },
+                        sender: {
+                            type: 'Organization',
+                            identifier: {
+                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                                value: config.organization.hzzoCode,
+                            },
+                        },
                         source: {
-                            endpoint: config.cezih.baseUrl,
+                            endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
                             name: config.software.instance,
                             software: `${config.software.name}_${config.software.company}`,
                             version: config.software.version,
@@ -718,6 +774,28 @@ class ClinicalDocumentService {
         }
     }
 
+    /**
+     * TC21: Search CEZIH documents only (ITI-67) — no local merge.
+     * Used by the CEZIH tab in the document viewer.
+     */
+    async searchRemoteDocuments(params: { patientMbo?: string }, userToken: string): Promise<any[]> {
+        if (!params.patientMbo) return [];
+
+        try {
+            const headers = authService.getUserAuthHeaders(userToken);
+            let url = `${config.cezih.gatewayBase}${config.cezih.services.document}/DocumentReference?status=current`;
+            url += `&patient.identifier=${encodeURIComponent(`${CEZIH_IDENTIFIERS.MBO}|${params.patientMbo}`)}`;
+
+            console.log(`[ClinicalDocumentService] Searching CEZIH-only documents for MBO ${params.patientMbo}`);
+            const response = await axios.get(url, { headers });
+
+            return (response.data.entry || []).map((e: any) => this.mapRemoteDocument(e.resource));
+        } catch (error: any) {
+            console.warn('[ClinicalDocumentService] CEZIH remote search failed:', error.message);
+            throw error;
+        }
+    }
+
     private mapRemoteDocument(resource: any): any {
         // Map FHIR DocumentReference to internal Document schema
         const doc: any = {
@@ -794,6 +872,7 @@ class ClinicalDocumentService {
         const result: any = {
             anamnesis: '',
             finding: '',
+            therapy: '',
             recommendation: '',
             status: '',
             diagnosisCode: '',
@@ -810,6 +889,7 @@ class ClinicalDocumentService {
 
             if (title.includes('anamneza')) result.anamnesis = text;
             if (title.includes('status') || title.includes('nalaz')) result.finding = text;
+            if (title.includes('terapija')) result.therapy = text;
             if (title.includes('preporuka')) result.recommendation = text;
         });
 
@@ -861,21 +941,31 @@ class ClinicalDocumentService {
             date: data.date,
             author: [
                 {
-                    type: 'Practitioner',
-                    identifier: {
-                        system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
-                        value: data.practitionerId
-                    }
+                    reference: practitionerUuid,
+                    display: config.practitioner.name
                 },
                 {
-                    type: 'Organization',
-                    identifier: {
-                        system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
-                        value: data.organizationId
-                    }
+                    reference: organizationUuid,
+                    display: config.organization.name
                 }
             ],
             title: data.title,
+            attester: [
+                {
+                    mode: 'professional',
+                    party: {
+                        reference: practitionerUuid,
+                        display: config.practitioner.name
+                    }
+                },
+                {
+                    mode: 'official',
+                    party: {
+                        reference: organizationUuid,
+                        display: config.organization.name
+                    }
+                }
+            ],
             section: []
         };
 
@@ -1132,11 +1222,8 @@ class ClinicalDocumentService {
                 ],
                 when: new Date().toISOString(),
                 who: {
-                    type: 'Practitioner',
-                    identifier: {
-                        system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
-                        value: config.practitioner.hzjzId
-                    }
+                    reference: practitionerUuid,
+                    display: config.practitioner.name
                 },
                 data: '' // Will be replaced by signBundle()
             }

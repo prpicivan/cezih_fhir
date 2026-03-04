@@ -161,6 +161,7 @@ router.post('/auth/smartcard/gateway', async (_req: Request, res: Response) => {
 // User authenticates with smart card, cookie is auto-injected into backend.
 // Frontend should poll /api/auth/status until authenticated.
 let playwrightSession: { pid: number; startedAt: number } | null = null;
+let playwrightPhase: 'launching' | 'gateway-open' | 'waiting-cert' | 'cookie-found' | 'done' = 'launching';
 
 router.post('/auth/smartcard/playwright-start', (_req: Request, res: Response) => {
     try {
@@ -190,6 +191,7 @@ router.post('/auth/smartcard/playwright-start', (_req: Request, res: Response) =
         });
 
         playwrightSession = { pid: child.pid!, startedAt: Date.now() };
+        playwrightPhase = 'launching';
         console.log(`[SmartCard/Playwright] Started grab-gateway-cookie.js (PID: ${child.pid})`);
 
         child.stdout?.on('data', (data: Buffer) => {
@@ -200,10 +202,12 @@ router.post('/auth/smartcard/playwright-start', (_req: Request, res: Response) =
         });
         child.on('close', (code: number) => {
             console.log(`[SmartCard/Playwright] Process exited (code: ${code})`);
+            playwrightPhase = 'done';
             playwrightSession = null;
         });
         child.on('error', (err: Error) => {
             console.error('[SmartCard/Playwright] Process error:', err.message);
+            playwrightPhase = 'done';
             playwrightSession = null;
         });
 
@@ -225,7 +229,18 @@ router.get('/auth/smartcard/playwright-status', (_req: Request, res: Response) =
         running: !!playwrightSession,
         pid: playwrightSession?.pid,
         ageMs: playwrightSession ? Date.now() - playwrightSession.startedAt : null,
+        phase: playwrightPhase,
     });
+});
+
+// Receive phase updates from grab-gateway-cookie.js script
+router.post('/auth/smartcard/phase', (req: Request, res: Response) => {
+    const { phase } = req.body;
+    if (phase) {
+        console.log(`[SmartCard/Playwright] Phase update: ${playwrightPhase} -> ${phase}`);
+        playwrightPhase = phase;
+    }
+    res.json({ success: true });
 });
 
 // TC1 — Interactive smart card auth (no browser window)
@@ -735,6 +750,49 @@ router.post('/document/send/complete', async (req: Request, res: Response) => {
     }
 });
 
+// Smart card signing: sign using PKCS#11 (local smart card) instead of Certilia remote
+router.post('/document/smartcard-sign', async (req: Request, res: Response) => {
+    try {
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
+        const { transactionCode, documentOid } = req.body;
+
+        if (!transactionCode || !documentOid) {
+            return res.status(400).json({ error: 'Missing transactionCode or documentOid' });
+        }
+
+        console.log(`[SmartCard Sign] Starting PKCS#11 signing for doc=${documentOid}, txn=${transactionCode}`);
+
+        // Use the existing clinical document service to complete with local PKCS#11 signing
+        // The signatureService will use the 'pkcs11' or 'bridge' mode depending on config
+        const result = await clinicalDocumentService.completeSmartCardSigning(documentOid, transactionCode, userToken);
+
+        res.json({ success: true, result });
+    } catch (error: any) {
+        console.error('[SmartCard Sign] Error:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Certilia signing: initiate Certilia remote signing after user selects this method
+router.post('/document/certilia-sign', async (req: Request, res: Response) => {
+    try {
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
+        const { documentOid } = req.body;
+
+        if (!documentOid) {
+            return res.status(400).json({ error: 'Missing documentOid' });
+        }
+
+        console.log(`[Certilia Sign] Initiating remote signing for doc=${documentOid}`);
+
+        const result = await clinicalDocumentService.initiateRemoteSigning(documentOid, userToken);
+        res.json(result);
+    } catch (error: any) {
+        console.error('[Certilia Sign] Error:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 router.post('/document/replace', async (req: Request, res: Response) => {
     try {
         const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
@@ -755,6 +813,18 @@ router.post('/document/cancel', async (req: Request, res: Response) => {
         res.json({ success: true, result });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
+    }
+});
+
+router.get('/document/search-remote', async (req: Request, res: Response) => {
+    try {
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
+        const documents = await clinicalDocumentService.searchRemoteDocuments({
+            patientMbo: req.query.patientMbo as string,
+        }, userToken);
+        res.json({ success: true, count: documents.length, documents });
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message, documents: [] });
     }
 });
 

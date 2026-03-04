@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useToast, Toast } from '@/components/Toast';
 import {
     Settings,
     RefreshCw,
@@ -30,6 +31,7 @@ const iconMap: Record<string, any> = {
 };
 
 export default function SettingsPage() {
+    const { toast, showToast, hideToast } = useToast();
     const [settings, setSettings] = useState<any>({});
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
@@ -72,13 +74,13 @@ export default function SettingsPage() {
             const res = await fetch('/api/settings/sync', { method: 'POST' });
             const data = await res.json();
             if (data.success) {
-                alert('Sinkronizacija uspješna!');
+                showToast('success', 'Sinkronizacija uspješna!');
                 fetchSettings();
             } else {
-                alert('Greška pri sinkronizaciji.');
+                showToast('error', 'Greška pri sinkronizaciji.');
             }
         } catch (error) {
-            alert('Greška pri komunikaciji sa serverom.');
+            showToast('error', 'Greška pri komunikaciji sa serverom.');
         } finally {
             setSyncing(false);
         }
@@ -113,11 +115,11 @@ export default function SettingsPage() {
             });
             const data = await res.json();
             if (data.success) {
-                alert('Postavke izbornika spremljene! Osvježite stranicu za primjenu.');
+                showToast('success', 'Postavke izbornika spremljene! Stranica se osvježava...');
                 window.location.reload(); // Refresh to update layout
             }
         } catch (err) {
-            alert('Greška pri spremanju izbornika.');
+            showToast('error', 'Greška pri spremanju izbornika.');
         } finally {
             setSavingMenu(false);
         }
@@ -125,6 +127,7 @@ export default function SettingsPage() {
 
     return (
         <div className="space-y-6">
+            <Toast toast={toast} onClose={hideToast} />
             <div className="flex justify-between items-center">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
@@ -267,8 +270,8 @@ export default function SettingsPage() {
                                             <button
                                                 onClick={() => toggleVisibility(item.id)}
                                                 className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${item.isVisible
-                                                        ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                                                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                                    ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                                                     }`}
                                             >
                                                 {item.isVisible ? (

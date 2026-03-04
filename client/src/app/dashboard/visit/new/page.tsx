@@ -4,11 +4,12 @@ import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
     User, Activity, FileText, Send, Save, XCircle, CheckCircle,
-    AlertTriangle, Clock, Calendar, ArrowLeft, Info, Eye, Code,
-    ChevronRight, CheckCircle2, ShieldCheck, Database,
+    AlertTriangle, Clock, Calendar, ArrowLeft, ArrowRight, Info, Eye, Code,
+    ChevronRight, CheckCircle2, ShieldCheck, Shield, Database,
     ArrowUpRight, ArrowDownLeft, ClipboardList,
     Smartphone, Loader2, SmartphoneNfc, Bell, Wifi
 } from 'lucide-react';
+import { useToast, Toast } from '@/components/Toast';
 
 // ── Circular SVG countdown timer (same as login page) ─────────────────────────
 function CircleTimer({ seconds }: { seconds: number }) {
@@ -154,9 +155,61 @@ function CertiliaPhoneMock({ seconds, label }: { seconds: number; label?: string
     );
 }
 
+// ── Smart card reader image scene (same as login page) ──────────────────────
+function SmartCardMock({ phase }: { phase: number }) {
+    return (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '16px 0 8px', position: 'relative' }}>
+            <div style={{ width: 220, height: 160, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {/* Pulse rings */}
+                {[0, 1, 2].map(i => (
+                    <div key={i} style={{
+                        position: 'absolute',
+                        borderRadius: 16,
+                        border: '1px solid rgba(99,102,241,0.15)',
+                        width: 180 + i * 30,
+                        height: 130 + i * 20,
+                        animation: `sign-sc-reader-pulse 2.4s ease-out ${i * 0.6}s infinite`,
+                    }} />
+                ))}
+
+                {/* Card reader image */}
+                <div style={{
+                    position: 'relative', zIndex: 2,
+                    filter: phase >= 3 ? 'drop-shadow(0 0 20px rgba(74,222,128,0.5))' : 'drop-shadow(0 0 16px rgba(99,102,241,0.3))',
+                    transition: 'filter 0.8s',
+                }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                        src="/card-reader.png"
+                        alt="Smart card reader"
+                        style={{
+                            width: 140, height: 'auto',
+                            borderRadius: 8,
+                            opacity: 0.9,
+                        }}
+                    />
+                    {/* Active indicator LED overlay */}
+                    {phase >= 1 && (
+                        <div style={{
+                            position: 'absolute',
+                            bottom: 8, right: 12,
+                            width: 8, height: 8,
+                            borderRadius: '50%',
+                            background: phase >= 3 ? '#4ade80' : '#818cf8',
+                            boxShadow: phase >= 3 ? '0 0 12px rgba(74,222,128,0.8)' : '0 0 10px rgba(99,102,241,0.6)',
+                            animation: phase < 3 ? 'sign-sc-led-blink 1.2s ease-in-out infinite' : 'none',
+                        }} />
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function ClinicalWorkspace() {
     const searchParams = useSearchParams();
     const router = useRouter();
+    const { toast, showToast, hideToast } = useToast();
     const patientId = searchParams.get('patientId');
     const mbo = searchParams.get('mbo');
     const patientMbo = searchParams.get('patientMbo');
@@ -193,10 +246,14 @@ function ClinicalWorkspace() {
 
     // Signing Flow State
     const [isSigningModalOpen, setIsSigningModalOpen] = useState(false);
-    const [signingStatus, setSigningStatus] = useState<'waiting' | 'signed' | 'submitting' | 'success' | 'error'>('waiting');
+    const [signingStatus, setSigningStatus] = useState<'method-select' | 'waiting' | 'sc-waiting' | 'signed' | 'submitting' | 'success' | 'error'>('method-select');
+    const [signingMethod, setSigningMethod] = useState<'certilia' | 'smartcard' | null>(null);
     const [signingError, setSigningError] = useState<string | null>(null);
     const [transactionCode, setTransactionCode] = useState<string | null>(null);
     const [currentDocOid, setCurrentDocOid] = useState<string | null>(null);
+
+    // Smart card signing phase (0=waiting, 1=cert, 2=pin, 3=done)
+    const [scSignPhase, setScSignPhase] = useState(0);
 
     // Countdown for signing waiting screen (2 minutes = 120 seconds)
     const [signingCountdown, setSigningCountdown] = useState(120);
@@ -328,12 +385,12 @@ function ClinicalWorkspace() {
     // TC 18: Send Clinical Document (MHD)
     const sendDocument = async (type: 'ambulatory-report' | 'specialist-finding' | 'discharge-letter') => {
         if (!findingText) {
-            alert('Molimo unesite tekst nalaza u polje "3. Nalaz i Mišljenje".');
+            showToast('error', 'Molimo unesite tekst nalaza u polje "3. Nalaz i Mišljenje".');
             return;
         }
 
         if (!diagnosisCode) {
-            alert('Molimo odaberite primarnu dijagnozu (MKB-10).');
+            showToast('error', 'Molimo odaberite primarnu dijagnozu (MKB-10).');
             return;
         }
 
@@ -364,22 +421,22 @@ function ClinicalWorkspace() {
 
             if (data.success) {
                 if (data.result.pendingSignature) {
-                    // Start asynchronous remote signing flow
+                    // Show method selection first
                     setTransactionCode(data.result.transactionCode);
                     setCurrentDocOid(data.result.documentOid);
-                    setSigningStatus('waiting');
+                    setSigningMethod(null);
+                    setSigningStatus('method-select');
                     setIsSigningModalOpen(true);
-                    startPolling(data.result.transactionCode, data.result.documentOid);
                 } else {
                     const successMsg = `Dokument uspješno poslan! OID: ${data.result.documentOid}`;
                     addLog(successMsg);
                     addLog('Potpisano i arhivirano u CEZIH (MHD ITI-65).');
-                    alert(successMsg);
+                    showToast('success', successMsg);
                 }
             } else {
                 const errorMsg = `Greška slanja: ${data.error}`;
                 addLog(errorMsg);
-                alert(errorMsg);
+                showToast('error', errorMsg);
             }
         } catch (err: any) {
             addLog(`Greška komunikacije: ${err.message}`);
@@ -443,6 +500,68 @@ function ClinicalWorkspace() {
         }
     };
 
+    // Handler: user selects signing method
+    const selectSigningMethod = async (method: 'certilia' | 'smartcard') => {
+        setSigningMethod(method);
+        if (method === 'certilia') {
+            setSigningStatus('waiting');
+            // Initiate Certilia remote signing on the backend
+            if (currentDocOid) {
+                try {
+                    const res = await fetch('/api/document/certilia-sign', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ documentOid: currentDocOid }),
+                    });
+                    const data = await res.json();
+                    if (data.success && data.transactionCode) {
+                        setTransactionCode(data.transactionCode);
+                        startPolling(data.transactionCode, currentDocOid);
+                    } else {
+                        setSigningStatus('error');
+                        setSigningError(data.error || 'Greška pri pokretanju Certilia potpisa.');
+                    }
+                } catch (err: any) {
+                    setSigningStatus('error');
+                    setSigningError(err.message || 'Greška komunikacije s poslužiteljem.');
+                }
+            }
+        } else {
+            // Smart card flow
+            setScSignPhase(0);
+            setSigningStatus('sc-waiting');
+            setTimeout(() => setScSignPhase(1), 800);
+            // Start smart card signing on backend
+            startSmartCardSigning();
+        }
+    };
+
+    const startSmartCardSigning = async () => {
+        if (!transactionCode || !currentDocOid) return;
+        try {
+            const res = await fetch('/api/document/smartcard-sign', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    transactionCode,
+                    documentOid: currentDocOid,
+                }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                setScSignPhase(3);
+                setSigningStatus('signed');
+                completeSubmission(transactionCode, currentDocOid);
+            } else {
+                setSigningStatus('error');
+                setSigningError(data.error || 'Greška pri potpisu pametnom karticom.');
+            }
+        } catch (err: any) {
+            setSigningStatus('error');
+            setSigningError(err.message || 'Greška komunikacije s poslužiteljem.');
+        }
+    };
+
     // TC 14: Close Visit
     const closeVisit = async () => {
         if (!confirm('Jeste li sigurni da želite završiti posjet?')) return;
@@ -501,6 +620,7 @@ function ClinicalWorkspace() {
 
     return (
         <div className="space-y-6">
+            <Toast toast={toast} onClose={hideToast} />
             {/* Header */}
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
@@ -978,7 +1098,7 @@ function ClinicalWorkspace() {
             {/* Signing Modal */}
             {isSigningModalOpen && (
                 <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" style={{ background: 'rgba(10,15,30,0.85)', backdropFilter: 'blur(8px)' }}>
-                    {/* CSS keyframes for phone animations */}
+                    {/* CSS keyframes for phone & smart card animations */}
                     <style>{`
                         @keyframes sign-phone-pulse {
                             0%   { transform: scale(1);    opacity: 0.5; }
@@ -992,6 +1112,15 @@ function ClinicalWorkspace() {
                         @keyframes sign-dot-blink {
                             0%, 100% { opacity: 0.2; }
                             50%      { opacity: 1; }
+                        }
+                        @keyframes sign-sc-reader-pulse {
+                            0%   { transform: scale(1);    opacity: 0.5; }
+                            50%  { transform: scale(1.05); opacity: 0.2; }
+                            100% { transform: scale(1.1);  opacity: 0; }
+                        }
+                        @keyframes sign-sc-led-blink {
+                            0%, 100% { opacity: 1; }
+                            50%      { opacity: 0.4; }
                         }
                     `}</style>
                     <div style={{
@@ -1008,6 +1137,104 @@ function ClinicalWorkspace() {
                     }}>
                         <style>{`@keyframes sign-slide-up { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }`}</style>
                         <div style={{ padding: '28px 28px 24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                            {/* ── METHOD SELECT ── */}
+                            {signingStatus === 'method-select' && (
+                                <>
+                                    <h3 style={{ fontSize: 17, fontWeight: 800, color: '#fff', margin: '0 0 4px' }}>
+                                        Potpis dokumenta
+                                    </h3>
+                                    <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', textAlign: 'center', margin: '0 0 16px', maxWidth: 300 }}>
+                                        Odaberite način potpisa
+                                    </p>
+                                    <div style={{ width: '100%', maxWidth: 340, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                        {/* Certilia button */}
+                                        <button
+                                            onClick={() => selectSigningMethod('certilia')}
+                                            style={{
+                                                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                                padding: '14px 16px',
+                                                background: 'rgba(99,102,241,0.08)',
+                                                border: '1px solid rgba(99,102,241,0.25)',
+                                                borderRadius: 14, cursor: 'pointer', transition: 'all 0.2s',
+                                                fontFamily: 'inherit', color: '#fff',
+                                            }}
+                                            onMouseEnter={e => {
+                                                (e.currentTarget as HTMLElement).style.background = 'rgba(99,102,241,0.16)';
+                                                (e.currentTarget as HTMLElement).style.borderColor = 'rgba(99,102,241,0.5)';
+                                                (e.currentTarget as HTMLElement).style.boxShadow = '0 4px 20px rgba(99,102,241,0.15)';
+                                            }}
+                                            onMouseLeave={e => {
+                                                (e.currentTarget as HTMLElement).style.background = 'rgba(99,102,241,0.08)';
+                                                (e.currentTarget as HTMLElement).style.borderColor = 'rgba(99,102,241,0.25)';
+                                                (e.currentTarget as HTMLElement).style.boxShadow = 'none';
+                                            }}
+                                        >
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                                                <div style={{
+                                                    width: 44, height: 44, borderRadius: 12,
+                                                    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                    boxShadow: '0 4px 12px rgba(99,102,241,0.35)',
+                                                }}>
+                                                    <Smartphone style={{ width: 20, height: 20, color: '#fff' }} />
+                                                </div>
+                                                <div style={{ fontSize: 14, fontWeight: 700 }}>Certilia mobile.id</div>
+                                            </div>
+                                            <ArrowRight style={{ width: 18, height: 18, color: 'rgba(255,255,255,0.25)' }} />
+                                        </button>
+                                        {/* Smart card button */}
+                                        <button
+                                            onClick={() => selectSigningMethod('smartcard')}
+                                            style={{
+                                                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                                padding: '14px 16px',
+                                                background: 'rgba(20,184,166,0.08)',
+                                                border: '1px solid rgba(20,184,166,0.2)',
+                                                borderRadius: 14, cursor: 'pointer', transition: 'all 0.2s',
+                                                fontFamily: 'inherit', color: '#fff',
+                                            }}
+                                            onMouseEnter={e => {
+                                                (e.currentTarget as HTMLElement).style.background = 'rgba(20,184,166,0.14)';
+                                                (e.currentTarget as HTMLElement).style.borderColor = 'rgba(20,184,166,0.4)';
+                                                (e.currentTarget as HTMLElement).style.boxShadow = '0 4px 20px rgba(20,184,166,0.12)';
+                                            }}
+                                            onMouseLeave={e => {
+                                                (e.currentTarget as HTMLElement).style.background = 'rgba(20,184,166,0.08)';
+                                                (e.currentTarget as HTMLElement).style.borderColor = 'rgba(20,184,166,0.2)';
+                                                (e.currentTarget as HTMLElement).style.boxShadow = 'none';
+                                            }}
+                                        >
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                                                <div style={{
+                                                    width: 44, height: 44, borderRadius: 12,
+                                                    background: 'linear-gradient(135deg, #0ea5e9, #14b8a6)',
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                    boxShadow: '0 4px 12px rgba(20,184,166,0.3)',
+                                                }}>
+                                                    <Shield style={{ width: 20, height: 20, color: '#fff' }} />
+                                                </div>
+                                                <div style={{ fontSize: 14, fontWeight: 700 }}>Pametna kartica</div>
+                                            </div>
+                                            <ArrowRight style={{ width: 18, height: 18, color: 'rgba(255,255,255,0.25)' }} />
+                                        </button>
+                                    </div>
+                                    <button
+                                        onClick={() => setIsSigningModalOpen(false)}
+                                        style={{
+                                            marginTop: 16, background: 'none', border: 'none', cursor: 'pointer',
+                                            fontSize: 12, color: 'rgba(255,255,255,0.25)',
+                                            display: 'flex', alignItems: 'center', gap: 6, transition: 'color 0.2s',
+                                            fontFamily: 'inherit',
+                                        }}
+                                        onMouseEnter={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.5)')}
+                                        onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.25)')}
+                                    >
+                                        <ArrowLeft style={{ width: 14, height: 14 }} /> Odustani
+                                    </button>
+                                </>
+                            )}
+
+                            {/* ── CERTILIA WAITING ── */}
                             {signingStatus === 'waiting' && (
                                 <>
                                     <h3 style={{ fontSize: 17, fontWeight: 800, color: '#fff', margin: '0 0 4px' }}>
@@ -1049,6 +1276,72 @@ function ClinicalWorkspace() {
                                     <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'rgba(255,255,255,0.25)', fontFamily: 'monospace' }}>
                                         <ShieldCheck style={{ width: 12, height: 12 }} />
                                         TXN: {transactionCode}
+                                    </div>
+                                </>
+                            )}
+
+                            {/* ── SMART CARD WAITING ── */}
+                            {signingStatus === 'sc-waiting' && (
+                                <>
+                                    <h3 style={{ fontSize: 17, fontWeight: 800, color: '#fff', margin: '0 0 4px' }}>Potpis pametnom karticom</h3>
+                                    <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', textAlign: 'center', margin: '0 0 8px', maxWidth: 300 }}>
+                                        Odaberite <strong style={{ color: 'rgba(255,255,255,0.65)' }}>certifikat</strong> i unesite <strong style={{ color: 'rgba(255,255,255,0.65)' }}>PIN</strong>
+                                    </p>
+
+                                    <SmartCardMock phase={scSignPhase} />
+
+                                    {/* 4-step stepper */}
+                                    <div style={{ width: '100%', maxWidth: 300, display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                                        {/* Step 1: Connected */}
+                                        <div style={{
+                                            display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                                            background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.15)', borderRadius: 10,
+                                        }}>
+                                            <CheckCircle style={{ width: 16, height: 16, color: '#4ade80', flexShrink: 0 }} />
+                                            <span style={{ fontSize: 12, color: '#4ade80' }}>Povezivanje s CEZIH sustavom</span>
+                                        </div>
+                                        {/* Step 2: Select cert */}
+                                        <div style={{
+                                            display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                                            background: scSignPhase >= 3 ? 'rgba(74,222,128,0.08)' : 'rgba(99,102,241,0.1)',
+                                            border: `1px solid ${scSignPhase >= 3 ? 'rgba(74,222,128,0.15)' : 'rgba(99,102,241,0.25)'}`,
+                                            borderRadius: 10, transition: 'all 0.5s',
+                                        }}>
+                                            {scSignPhase >= 3
+                                                ? <CheckCircle style={{ width: 16, height: 16, color: '#4ade80', flexShrink: 0 }} />
+                                                : <Loader2 style={{ width: 16, height: 16, color: '#818cf8', flexShrink: 0, animation: 'spin 1s linear infinite' }} />
+                                            }
+                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                <span style={{ fontSize: 12, color: scSignPhase >= 3 ? '#4ade80' : '#a5b4fc', fontWeight: 600 }}>Odabir certifikata</span>
+                                                {scSignPhase < 3 && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 1 }}>Odaberite certifikat u Chrome prozoru</span>}
+                                            </div>
+                                        </div>
+                                        {/* Step 3: PIN */}
+                                        <div style={{
+                                            display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                                            background: scSignPhase >= 3 ? 'rgba(74,222,128,0.08)' : 'rgba(255,255,255,0.03)',
+                                            border: `1px solid ${scSignPhase >= 3 ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.08)'}`,
+                                            borderRadius: 10, transition: 'all 0.5s',
+                                        }}>
+                                            {scSignPhase >= 3
+                                                ? <CheckCircle style={{ width: 16, height: 16, color: '#4ade80', flexShrink: 0 }} />
+                                                : <div style={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.15)', flexShrink: 0 }} />
+                                            }
+                                            <span style={{ fontSize: 12, color: scSignPhase >= 3 ? '#4ade80' : 'rgba(255,255,255,0.25)' }}>Unos PIN-a</span>
+                                        </div>
+                                        {/* Step 4: Sign */}
+                                        <div style={{
+                                            display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                                            background: scSignPhase >= 3 ? 'rgba(74,222,128,0.08)' : 'rgba(255,255,255,0.03)',
+                                            border: `1px solid ${scSignPhase >= 3 ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.08)'}`,
+                                            borderRadius: 10, transition: 'all 0.5s',
+                                        }}>
+                                            {scSignPhase >= 3
+                                                ? <CheckCircle style={{ width: 16, height: 16, color: '#4ade80', flexShrink: 0 }} />
+                                                : <div style={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.15)', flexShrink: 0 }} />
+                                            }
+                                            <span style={{ fontSize: 12, color: scSignPhase >= 3 ? '#4ade80' : 'rgba(255,255,255,0.25)' }}>Potpis dokumenta</span>
+                                        </div>
                                     </div>
                                 </>
                             )}
