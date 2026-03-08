@@ -395,6 +395,16 @@ class ClinicalDocumentService {
             console.warn('[ClinicalDocumentService] PDQm fallback to MBO:', pdqErr.message);
         }
 
+        // Look up CEZIH visit ID for DocumentReference.context
+        let cezihVisitId = data.visitId;
+        if (data.visitId) {
+            const localVisit = visitService.getVisit(data.visitId);
+            if (localVisit?.cezihVisitId) {
+                cezihVisitId = localVisit.cezihVisitId;
+                console.log('[ClinicalDocumentService] CEZIH Visit ID:', cezihVisitId);
+            }
+        }
+
         // Step 5: Build the MHD Provide Document Bundle (ITI-65 transaction)
         const docRefUuid = `urn:uuid:${uuidv4()}`;
         const submissionSetUuid = `urn:uuid:${uuidv4()}`;
@@ -977,10 +987,9 @@ class ClinicalDocumentService {
         visit: any,
         patientCezihId?: string
     ): any {
-        // Direct server references for Patient and Practitioner (must match outer MHD exactly)
-        const patientRef = `Patient/${patientCezihId || data.patientMbo}`;
-        const practitionerRef = `Practitioner/${config.practitioner.hzjzId}`;
-        // UUIDs only for resources that don't exist on the server
+        // UUIDs for all fullUrl/references within the inner document Bundle
+        const patientUuid = `urn:uuid:${uuidv4()}`;
+        const practitionerUuid = `urn:uuid:${uuidv4()}`;
         const organizationUuid = `urn:uuid:${uuidv4()}`;
         const encounterUuid = `urn:uuid:${uuidv4()}`;
         const clinicalImpressionUuid = `urn:uuid:${uuidv4()}`;
@@ -993,15 +1002,28 @@ class ClinicalDocumentService {
             fullUrl: compositionUuid,
             resource: {
                 resourceType: 'Composition',
+                identifier: {
+                    system: 'urn:ietf:rfc:3986',
+                    value: `urn:oid:${documentOid}`
+                },
                 meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/izvjesce-nakon-pregleda-u-ambulanti-privatne-zdravstvene-ustanove'] },
                 status: 'final',
                 type: { coding: [this.getDocumentTypeCoding(data.type)] },
-                subject: { reference: patientRef },
+                subject: {
+                    reference: patientUuid,
+                    identifier: {
+                        system: CEZIH_IDENTIFIERS.MBO,
+                        value: data.patientMbo
+                    },
+                    display: patient.name?.given
+                        ? `${patient.name.given[0]} ${patient.name.family}`
+                        : undefined
+                },
                 encounter: { reference: encounterUuid },
                 date: data.date,
-                author: [{ reference: practitionerRef }],
+                author: [{ reference: practitionerUuid }],
                 title: data.title || 'Izvješće nakon pregleda - TC18',
-                attester: [{ mode: 'professional', party: { reference: practitionerRef } }],
+                attester: [{ mode: 'professional', party: { reference: practitionerUuid } }],
                 custodian: { reference: organizationUuid },
                 section: [{
                     title: 'Anamneza',
@@ -1011,9 +1033,9 @@ class ClinicalDocumentService {
             }
         });
 
-        // 2. Patient — fullUrl = direct server reference, with id + MBO identifier
+        // 2. Patient — fullUrl = urn:uuid, but id field = CEZIH logical ID for cross-check
         entries.push({
-            fullUrl: patientRef,
+            fullUrl: patientUuid,
             resource: {
                 resourceType: 'Patient',
                 id: patientCezihId || data.patientMbo,
@@ -1024,9 +1046,9 @@ class ClinicalDocumentService {
             }
         });
 
-        // 3. Practitioner — fullUrl = direct server reference, with id + HZJZ identifier
+        // 3. Practitioner — fullUrl = urn:uuid, but id field = HZJZ ID for cross-check
         entries.push({
-            fullUrl: practitionerRef,
+            fullUrl: practitionerUuid,
             resource: {
                 resourceType: 'Practitioner',
                 id: config.practitioner.hzjzId,
@@ -1034,15 +1056,16 @@ class ClinicalDocumentService {
             }
         });
 
-        // 4. Encounter
+        // 4. Encounter — use CEZIH visit ID if available (critical for Subject cross-check)
+        const encounterIdentifierValue = visit?.cezihVisitId || `urn:oid:${documentOid}`;
         entries.push({
             fullUrl: encounterUuid,
             resource: {
                 resourceType: 'Encounter',
-                identifier: [{ system: 'urn:ietf:rfc:3986', value: `urn:oid:${documentOid}` }],
+                identifier: [{ system: 'urn:ietf:rfc:3986', value: encounterIdentifierValue }],
                 status: 'finished',
                 class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'AMB' },
-                subject: { reference: patientRef }
+                subject: { reference: patientUuid }
             }
         });
 
@@ -1061,7 +1084,7 @@ class ClinicalDocumentService {
             resource: {
                 resourceType: 'ClinicalImpression',
                 status: 'completed',
-                subject: { reference: patientRef },
+                subject: { reference: patientUuid },
                 description: data.anamnesis || 'Pacijent je stabilno.'
             }
         });
@@ -1075,7 +1098,7 @@ class ClinicalDocumentService {
             signature: {
                 type: [{ system: 'urn:iso-astm:E1762-95:2013', code: '1.2.840.10065.1.12.1.1' }],
                 when: new Date().toISOString(),
-                who: { reference: practitionerRef },
+                who: { reference: practitionerUuid },
                 data: ''
             }
         };

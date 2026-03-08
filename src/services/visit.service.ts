@@ -35,6 +35,8 @@ export interface VisitData {
     orgIdentifierValue?: string;
     // Skip serviceProvider entirely
     skipServiceProvider?: boolean;
+    // Optional: CEZIH server-assigned patient ID — if set, uses REST reference instead of MBO identifier
+    patientFhirId?: string;
 }
 
 class VisitService {
@@ -135,6 +137,7 @@ class VisitService {
                                 system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
                                 value: data.organizationId || config.organization.hzzoCode,
                             },
+                            display: config.organization.name,
                         },
                         // DIGSIG-1: autor poruke mora biti jednak Bundle.signature.who
                         author: {
@@ -142,7 +145,8 @@ class VisitService {
                             identifier: {
                                 system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
                                 value: config.practitioner.hzjzId || config.practitioner.oib,
-                            }
+                            },
+                            display: config.practitioner.name,
                         },
                         source: {
                             endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
@@ -225,13 +229,23 @@ class VisitService {
                                 }
                             ]
                         },
-                        subject: {
-                            type: 'Patient',
-                            identifier: {
-                                system: CEZIH_IDENTIFIERS.MBO,
-                                value: data.patientMbo,
+                        subject: data.patientFhirId
+                            ? {
+                                reference: `Patient/${data.patientFhirId}`,
+                                type: 'Patient',
+                                identifier: {
+                                    system: CEZIH_IDENTIFIERS.MBO,
+                                    value: data.patientMbo,
+                                },
+                                display: (data as any).patientName || config.practitioner.name,
+                            }
+                            : {
+                                type: 'Patient',
+                                identifier: {
+                                    system: CEZIH_IDENTIFIERS.MBO,
+                                    value: data.patientMbo,
+                                },
                             },
-                        },
                         participant: [
                             {
                                 individual: {
@@ -240,6 +254,7 @@ class VisitService {
                                         system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
                                         value: data.practitionerId || config.practitioner.hzjzId,
                                     },
+                                    display: config.practitioner.name,
                                 },
                             },
                         ],
@@ -250,6 +265,7 @@ class VisitService {
                                     system: data.orgIdentifierSystem || CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
                                     value: data.orgIdentifierValue || data.organizationId || config.organization?.hzzoCode || '4981825',
                                 },
+                                display: config.organization.name,
                             },
                         }),
                         period: {
@@ -344,13 +360,15 @@ class VisitService {
                                 system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
                                 value: config.organization.hzzoCode,
                             },
+                            display: config.organization.name,
                         },
                         author: {
                             type: 'Practitioner',
                             identifier: {
                                 system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
                                 value: config.practitioner.hzjzId || config.practitioner.oib,
-                            }
+                            },
+                            display: config.practitioner.name,
                         },
                         source: {
                             endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
@@ -447,6 +465,7 @@ class VisitService {
                                 system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
                                 value: data.organizationId || config.organization.hzzoCode,
                             },
+                            display: config.organization.name,
                         },
                         // DIGSIG-1: autor poruke mora biti jednak Bundle.signature.who
                         author: {
@@ -454,7 +473,8 @@ class VisitService {
                             identifier: {
                                 system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
                                 value: config.practitioner.hzjzId || config.practitioner.oib,
-                            }
+                            },
+                            display: config.practitioner.name,
                         },
                         source: {
                             endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
@@ -498,6 +518,7 @@ class VisitService {
                                         system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
                                         value: data.practitionerId || config.practitioner.hzjzId,
                                     },
+                                    display: config.practitioner.name,
                                 },
                             },
                         ],
@@ -507,6 +528,7 @@ class VisitService {
                                 system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
                                 value: data.organizationId || config.organization?.hzzoCode || '4981825',
                             },
+                            display: config.organization.name,
                         },
                         period: {
                             start: data.startDate || this.getVisit(visitId)?.startDateTime || new Date().toISOString(),
@@ -586,6 +608,7 @@ class VisitService {
                                 system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
                                 value: config.organization.hzzoCode,
                             },
+                            display: config.organization.name,
                         },
                         // DIGSIG-1: autor poruke = Bundle.signature.who
                         author: {
@@ -593,7 +616,8 @@ class VisitService {
                             identifier: {
                                 system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
                                 value: config.practitioner.hzjzId || config.practitioner.oib,
-                            }
+                            },
+                            display: config.practitioner.name,
                         },
                         source: {
                             endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
@@ -637,6 +661,7 @@ class VisitService {
                                         system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
                                         value: config.practitioner.hzjzId,
                                     },
+                                    display: config.practitioner.name,
                                 },
                             },
                         ],
@@ -646,6 +671,7 @@ class VisitService {
                                 system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
                                 value: config.organization?.hzzoCode || '4981825',
                             },
+                            display: config.organization.name,
                         },
                         period: {
                             end: endDate,

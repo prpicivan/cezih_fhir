@@ -26,6 +26,8 @@ export interface CaseData {
     status: 'planned' | 'active' | 'onhold' | 'finished' | 'cancelled';
     startDate: string;
     endDate?: string;
+    // Optional: CEZIH server-assigned patient ID — if set, uses REST reference instead of MBO identifier
+    patientFhirId?: string;
 }
 
 class CaseService {
@@ -196,6 +198,7 @@ class CaseService {
                                 system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
                                 value: data.organizationId || config.organization.hzzoCode,
                             },
+                            display: config.organization.name,
                         },
                         // DIGSIG-1: autor poruke mora biti jednak Bundle.signature.who
                         author: {
@@ -203,7 +206,8 @@ class CaseService {
                             identifier: {
                                 system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
                                 value: config.practitioner.hzjzId || config.practitioner.oib,
-                            }
+                            },
+                            display: config.practitioner.name,
                         },
                         source: {
                             endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
@@ -244,13 +248,22 @@ class CaseService {
                                 text: data.diagnosisDisplay,
                             },
                         } : {}),
-                        subject: {
-                            type: 'Patient',
-                            identifier: {
-                                system: CEZIH_IDENTIFIERS.MBO,
-                                value: data.patientMbo,
+                        subject: data.patientFhirId
+                            ? {
+                                reference: `Patient/${data.patientFhirId}`,
+                                type: 'Patient',
+                                identifier: {
+                                    system: CEZIH_IDENTIFIERS.MBO,
+                                    value: data.patientMbo,
+                                },
+                            }
+                            : {
+                                type: 'Patient',
+                                identifier: {
+                                    system: CEZIH_IDENTIFIERS.MBO,
+                                    value: data.patientMbo,
+                                },
                             },
-                        },
                         onsetDateTime: data.startDate || new Date().toISOString(),
                         // recorder je max:0 u TC16 profilu — NE ŠALJEMO!
                         // recordedDate je max:0 u TC16 profilu — NE ŠALJEMO!
@@ -260,6 +273,7 @@ class CaseService {
                                 system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
                                 value: data.practitionerId || config.practitioner.hzjzId,
                             },
+                            display: config.practitioner.name,
                         },
                     },
                 },
@@ -341,6 +355,7 @@ class CaseService {
                                 system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
                                 value: data.organizationId || config.organization.hzzoCode,
                             },
+                            display: config.organization.name,
                         },
                         // DIGSIG-1: autor poruke = Bundle.signature.who
                         author: {
@@ -348,7 +363,8 @@ class CaseService {
                             identifier: {
                                 system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
                                 value: config.practitioner.hzjzId || config.practitioner.oib,
-                            }
+                            },
+                            display: config.practitioner.name,
                         },
                         source: {
                             endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
@@ -411,6 +427,7 @@ class CaseService {
                                 system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
                                 value: data.practitionerId || config.practitioner.hzjzId,
                             },
+                            display: config.practitioner.name,
                         },
                     },
                 },
@@ -601,13 +618,15 @@ class CaseService {
                                 system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
                                 value: data?.organizationId || config.organization.hzzoCode,
                             },
+                            display: config.organization.name,
                         },
                         author: {
                             type: 'Practitioner',
                             identifier: {
                                 system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
                                 value: config.practitioner.hzjzId || config.practitioner.oib,
-                            }
+                            },
+                            display: config.practitioner.name,
                         },
                         source: {
                             endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
@@ -704,6 +723,7 @@ class CaseService {
                     system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
                     value: data.practitionerId || config.practitioner.hzjzId,
                 },
+                display: config.practitioner.name,
             },
             // Reference to previous case (CEZIH extension for recurrent cases)
             extension: [{
@@ -744,13 +764,15 @@ class CaseService {
                                 system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
                                 value: data.organizationId || config.organization.hzzoCode,
                             },
+                            display: config.organization.name,
                         },
                         author: {
                             type: 'Practitioner',
                             identifier: {
                                 system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
                                 value: config.practitioner.hzjzId || config.practitioner.oib,
-                            }
+                            },
+                            display: config.practitioner.name,
                         },
                         source: {
                             endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,

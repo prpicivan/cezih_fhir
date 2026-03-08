@@ -178,6 +178,7 @@ router.post('/run/:tcId', async (req: Request, res: Response) => {
                 const { config: cfg } = await import('../config');
                 result = await visitService.createVisit({
                     patientMbo: '999999423', // Pravi testni pacijent s CEZIH slučajevima
+                    patientFhirId: '1118065', // REST reference Patient/1118065
                     practitionerId: cfg.practitioner.hzjzId,
                     organizationId: cfg.organization.hzzoCode,
                     startDate: new Date().toISOString(),

@@ -18,6 +18,7 @@ import {
     settingsService,
     auditService,
     smartCardGatewayAuthService,
+    signatureService,
 } from '../services';
 import db from '../db/index';
 import { ENCOUNTER_CODES } from '../types';
@@ -59,6 +60,36 @@ router.post('/auth/system-token', async (_req: Request, res: Response) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+// ============================================================
+// Registry Routes (mCSD ITI-90 lookup — uses system token)
+// ============================================================
+router.get('/registry/Organization', async (req: Request, res: Response) => {
+    try {
+        const params: any = {};
+        if (req.query.identifier) params.identifier = req.query.identifier as string;
+        if (req.query.name) params['name:contains'] = req.query.name as string;
+        if (req.query._id) params._id = req.query._id as string;
+        const resources = await registryService.searchOrganizations(params);
+        res.json({ total: resources.length, entry: resources });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.get('/registry/Practitioner', async (req: Request, res: Response) => {
+    try {
+        const params: any = {};
+        if (req.query.identifier) params.identifier = req.query.identifier as string;
+        if (req.query.name) params['name:contains'] = req.query.name as string;
+        if (req.query._id) params._id = req.query._id as string;
+        const resources = await registryService.searchPractitioners(params);
+        res.json({ total: resources.length, entry: resources });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 
 // Test Cases 1 & 2: Initiate gateway-based user authentication
 // method=smartcard → TLS client cert auth (browser handles smart card PIN)
@@ -576,7 +607,7 @@ router.get('/registry/organizations', async (req: Request, res: Response) => {
         const organizations = await registryService.searchOrganizations({
             active: req.query.active === 'true',
             name: req.query.name as string,
-        }, userToken);
+        });
         res.json({ success: true, count: organizations.length, organizations });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -589,7 +620,7 @@ router.get('/registry/practitioners', async (req: Request, res: Response) => {
         const practitioners = await registryService.searchPractitioners({
             name: req.query.name as string,
             identifier: req.query.identifier as string,
-        }, userToken);
+        });
         res.json({ success: true, count: practitioners.length, practitioners });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -602,7 +633,7 @@ router.get('/registry/healthcare-services', async (req: Request, res: Response) 
         const services = await registryService.searchHealthcareServices({
             active: req.query.active !== undefined ? req.query.active === 'true' : undefined,
             organization: req.query.organization as string,
-        }, userToken);
+        });
         res.json({ success: true, count: services.length, services });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -866,6 +897,28 @@ router.post('/document/smartcard-sign', async (req: Request, res: Response) => {
     }
 });
 
+// Sign-only: sign bundle locally and return Base64 WITHOUT submitting to CEZIH
+// Used for TC18 to get a signed B64 for a custom outer MHD wrapper
+router.post('/document/sign-bundle-only', async (req: Request, res: Response) => {
+    try {
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
+        const { documentOid } = req.body;
+        if (!documentOid) return res.status(400).json({ error: 'Missing documentOid' });
+
+        const localDoc = clinicalDocumentService.getDocument(documentOid);
+        if (!localDoc || !localDoc.bundleJson) return res.status(404).json({ error: 'Document not found' });
+
+        const pendingBundle = JSON.parse(localDoc.bundleJson);
+        const signedResult = await signatureService.signBundle(pendingBundle, undefined, userToken);
+        const signedB64 = Buffer.from(JSON.stringify(signedResult.bundle)).toString('base64');
+
+        res.json({ success: true, signedB64, documentOid });
+    } catch (error: any) {
+        console.error('[Sign-Only] Error:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Certilia signing: initiate Certilia remote signing after user selects this method
 router.post('/document/certilia-sign', async (req: Request, res: Response) => {
     try {
@@ -949,4 +1002,27 @@ router.get('/document/retrieve', async (req: Request, res: Response) => {
     }
 });
 
+// ============================================================
+// RAW MHD Send (TC18 bypass) — prihvaća gotov bundle, šalje direktno na CEZIH
+// bez ikakve lokalne validacije. Korisno za certification testing.
+// ============================================================
+router.post('/document/mhd-raw', async (req: Request, res: Response) => {
+    try {
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
+        const { mhdBundle, documentOid } = req.body;
+
+        if (!mhdBundle || mhdBundle.resourceType !== 'Bundle') {
+            return res.status(400).json({ error: 'Missing or invalid mhdBundle in request body' });
+        }
+
+        // Use clinicalDocumentService to send directly to CEZIH (bypasses validation)
+        const result = await clinicalDocumentService.submitMhdBundleRaw(mhdBundle, documentOid || 'raw-test', userToken);
+        res.json({ success: true, result });
+    } catch (error: any) {
+        console.error('[mhd-raw] Error:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 export default router;
+

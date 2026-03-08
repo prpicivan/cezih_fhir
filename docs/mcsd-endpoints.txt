@@ -1,0 +1,48 @@
+# CEZIH MCSD Endpoints (port 9443)
+# Auth: OAuth2 client credentials (system token) - NE cookie!
+# Base: https://certws2.cezih.hr:9443/services-router/gateway/mcsd/api/
+
+## Organization
+GET    /Organization
+POST   /Organization
+GET    /Organization/{id}
+GET    /Organization/_history
+GET    /Organization/{id}/_history
+
+## Location
+GET    /Location
+POST   /Location
+GET    /Location/{id}
+GET    /Location/_history
+GET    /Location/{id}/_history
+
+## Practitioner
+GET    /Practitioner
+POST   /Practitioner
+GET    /Practitioner/{id}
+GET    /Practitioner/_history
+GET    /Practitioner/{id}/_history
+
+## PractitionerRole
+GET    /PractitionerRole
+POST   /PractitionerRole
+GET    /PractitionerRole/{id}
+GET    /PractitionerRole/_history
+GET    /PractitionerRole/{id}/_history
+
+## HealthcareService
+GET    /HealthcareService
+POST   /HealthcareService
+GET    /HealthcareService/{id}
+GET    /HealthcareService/_history
+GET    /HealthcareService/{id}/_history
+
+## OrganizationAffiliation
+GET    /OrganizationAffiliation
+POST   /OrganizationAffiliation
+GET    /OrganizationAffiliation/{id}
+
+## Endpoint
+GET    /Endpoint
+POST   /Endpoint
+GET    /Endpoint/{id}

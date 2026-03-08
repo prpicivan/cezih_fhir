@@ -7,6 +7,10 @@ const nextConfig: NextConfig = {
       destination: 'http://127.0.0.1:3010/api/:path*',
     },
   ],
+  turbopack: {
+    root: import.meta.dirname,
+  },
 };
 
 export default nextConfig;
+
