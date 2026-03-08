@@ -11,6 +11,7 @@ import {
     History, ChevronRight, ChevronDown, ChevronUp, Edit2, Trash2, Plus,
     Globe, FolderOpen, Printer, X
 } from 'lucide-react';
+import { getDocumentTypeShortLabel } from '@/lib/documentTypeLabels';
 import ChangeDocumentModal from './ChangeDocumentModal';
 import CaseModal from './CaseModal';
 
@@ -36,6 +37,11 @@ export default function PatientChartPage() {
     const [cezihLoading, setCezihLoading] = useState(false);
     const [cezihLoaded, setCezihLoaded] = useState(false);
     const [casesCollapsed, setCasesCollapsed] = useState(false);
+    const [caseTab, setCaseTab] = useState<'local' | 'cezih'>('local');
+    const [cezihCases, setCezihCases] = useState<any[]>([]);
+    const [cezihCasesLoading, setCezihCasesLoading] = useState(false);
+    const [cezihCasesLoaded, setCezihCasesLoaded] = useState(false);
+    const [actionInProgress, setActionInProgress] = useState<string | null>(null);
 
     const fetchChartData = async (refresh: boolean = false) => {
         setLoading(!refresh); // Only show full loading if not a background refresh
@@ -88,21 +94,61 @@ export default function PatientChartPage() {
         router.push(`/dashboard/visit/new?${query.toString()}`);
     };
 
-    const handleCloseCase = async (caseId: string) => {
-        if (!confirm('Jeste li sigurni da želite zatvoriti ovaj slučaj?')) return;
+    const handleCaseAction = async (caseId: string, action: string, label: string) => {
+        // CEZIH rule himgmt-1: close/delete require a reason
+        let reason: string | undefined;
+        if (action === '2.7' || action === '2.2') {
+            const input = prompt(`${label}\n\nUnesite razlog:`);
+            if (input === null) return; // user cancelled
+            reason = input || label; // fallback to label if empty
+        } else {
+            if (!confirm(`Jeste li sigurni da želite izvršiti akciju: ${label}?`)) return;
+        }
+        setActionInProgress(caseId);
         try {
-            await fetch(`/api/case/${caseId}`, {
-                method: 'PUT',
+            const res = await fetch(`/api/case/${caseId}/action`, {
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    status: 'finished',
-                    endDate: new Date().toISOString(),
-                    patientMbo: mbo,
-                }),
+                body: JSON.stringify({ action, patientMbo: mbo, ...(reason && { reason }) }),
             });
-            fetchChartData(); // Refresh to reflect the change
+            const data = await res.json();
+            if (data.success) {
+                showToast('success', `${label} — uspješno!`);
+                fetchChartData();
+            } else {
+                showToast('error', data.error || 'Greška pri izvršavanju akcije.');
+            }
         } catch (err) {
-            console.error('Failed to close case', err);
+            showToast('error', 'Greška u komunikaciji s poslužiteljem.');
+        } finally {
+            setActionInProgress(null);
+        }
+    };
+
+    const handleCloseCase = async (caseId: string) => {
+        await handleCaseAction(caseId, '2.7', 'Zatvaranje slučaja');
+    };
+
+    const fetchCezihCases = async () => {
+        setCezihCasesLoading(true);
+        try {
+            const res = await fetch(`/api/case/patient/${mbo}?refresh=true`);
+            const data = await res.json();
+            if (data.success) {
+                setCezihCases(data.cases || []);
+            }
+        } catch (err) {
+            console.error('Failed to fetch CEZIH cases', err);
+        } finally {
+            setCezihCasesLoading(false);
+            setCezihCasesLoaded(true);
+        }
+    };
+
+    const handleSwitchCaseTab = (tab: 'local' | 'cezih') => {
+        setCaseTab(tab);
+        if (tab === 'cezih' && !cezihCasesLoaded) {
+            fetchCezihCases();
         }
     };
 
@@ -275,7 +321,7 @@ export default function PatientChartPage() {
                                 <div className="space-y-1">
                                     <div className="flex items-center gap-2">
                                         <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Vrsta</p>
-                                        <p className="font-bold text-slate-900 text-sm">{viewingDocument.type || viewingDocument.title || 'Nalaz'}</p>
+                                        <p className="font-bold text-slate-900 text-sm">{getDocumentTypeShortLabel(viewingDocument.type) || viewingDocument.title || 'Nalaz'}</p>
                                     </div>
                                     {viewingDocument.id && (
                                         <p className="text-[10px] font-mono text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-100 inline-block">
@@ -498,7 +544,7 @@ export default function PatientChartPage() {
                                                                 <div className="min-w-0 flex-1">
                                                                     <div className="flex items-center gap-1.5 flex-wrap">
                                                                         <p className={`font-bold text-xs truncate ${isViewing ? 'text-blue-900' : isDeprecated ? 'text-slate-400' : 'text-slate-700'}`}>
-                                                                            {doc.type || 'Nalaz'}
+                                                                            {getDocumentTypeShortLabel(doc.type) || 'Nalaz'}
                                                                         </p>
                                                                         {isDeprecated && (
                                                                             <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${doc.status === 'cancelled' ? 'bg-rose-50 text-rose-400' : 'bg-slate-100 text-slate-400'
@@ -556,7 +602,7 @@ export default function PatientChartPage() {
                                                                 </div>
                                                                 <div className="min-w-0 flex-1">
                                                                     <p className={`font-bold text-xs truncate ${isViewing ? 'text-blue-900' : 'text-slate-700'}`}>
-                                                                        {doc.type || doc.title || 'Dokument'}
+                                                                        {getDocumentTypeShortLabel(doc.type) || doc.title || 'Dokument'}
                                                                     </p>
                                                                     <p className="text-[10px] font-bold uppercase text-slate-400">
                                                                         {doc.createdAt ? new Date(doc.createdAt).toLocaleDateString('hr-HR') : ''}
@@ -609,85 +655,197 @@ export default function PatientChartPage() {
                                 </span>
                             </div>
                         </div>
+
+                        {/* Lokalno / CEZIH tabs */}
                         {!casesCollapsed && (
-                            <div className="p-3 space-y-2">
-                                {allCases.length > 0 ? (
-                                    allCases.map((c: any) => {
-                                        const isActive = c.status === 'active';
-                                        const isFinished = c.status === 'finished';
-                                        return (
-                                            <div
-                                                key={c.id}
-                                                className={`p-4 rounded-2xl border transition-all group ${isActive
-                                                    ? 'border-emerald-100 bg-emerald-50/30 hover:border-emerald-300 hover:shadow-sm'
-                                                    : 'border-slate-100 bg-slate-50/30 hover:border-slate-200'
-                                                    }`}
-                                            >
-                                                <div className="flex justify-between items-start gap-2">
-                                                    <div className="min-w-0">
-                                                        <div className="flex items-center gap-2 mb-1">
-                                                            {c.diagnosisCode && (
-                                                                <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
-                                                                    }`}>
-                                                                    {c.diagnosisCode}
-                                                                </span>
+                            <>
+                                <div className="flex border-b border-slate-100">
+                                    <button
+                                        onClick={() => handleSwitchCaseTab('local')}
+                                        className={`flex-1 py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 border-b-2 transition-all ${caseTab === 'local'
+                                            ? 'text-amber-700 border-amber-600 bg-amber-50/50'
+                                            : 'text-slate-400 border-transparent hover:text-slate-600 hover:bg-slate-50'
+                                            }`}
+                                    >
+                                        <FolderOpen className="w-3.5 h-3.5" />
+                                        Lokalni
+                                        <span className={`text-[10px] font-black px-1.5 py-0 rounded-full ${caseTab === 'local' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'
+                                            }`}>
+                                            {allCases?.length || 0}
+                                        </span>
+                                    </button>
+                                    <button
+                                        onClick={() => handleSwitchCaseTab('cezih')}
+                                        className={`flex-1 py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 border-b-2 transition-all ${caseTab === 'cezih'
+                                            ? 'text-amber-700 border-amber-600 bg-amber-50/50'
+                                            : 'text-slate-400 border-transparent hover:text-slate-600 hover:bg-slate-50'
+                                            }`}
+                                    >
+                                        <Globe className="w-3.5 h-3.5" />
+                                        CEZIH
+                                        <span className={`text-[10px] font-black px-1.5 py-0 rounded-full ${caseTab === 'cezih' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'
+                                            }`}>
+                                            {cezihCasesLoaded ? cezihCases.length : '—'}
+                                        </span>
+                                    </button>
+                                </div>
+
+                                {caseTab === 'local' ? (
+                                    <div className="p-3 space-y-2">
+                                        {allCases.length > 0 ? (
+                                            allCases.map((c: any) => {
+                                                const isActive = c.status === 'active';
+                                                const isFinished = c.status === 'finished';
+                                                const isRemission = c.clinicalStatus === 'remission';
+                                                const isRecurrence = c.clinicalStatus === 'recurrence';
+                                                const isDeleted = c.status === 'entered-in-error';
+
+                                                if (isDeleted) return null;
+
+                                                // Status badge
+                                                let statusLabel = c.status;
+                                                let statusBadgeClass = 'bg-slate-300 text-white';
+                                                if (isActive && isRemission) {
+                                                    statusLabel = 'remisija';
+                                                    statusBadgeClass = 'bg-blue-500 text-white';
+                                                } else if (isActive && isRecurrence) {
+                                                    statusLabel = 'recidiv';
+                                                    statusBadgeClass = 'bg-orange-500 text-white';
+                                                } else if (isActive) {
+                                                    statusLabel = 'aktivan';
+                                                    statusBadgeClass = 'bg-emerald-500 text-white';
+                                                } else if (isFinished) {
+                                                    statusLabel = 'završen';
+                                                    statusBadgeClass = 'bg-slate-300 text-white';
+                                                }
+
+                                                const cardBorder = isActive
+                                                    ? (isRemission ? 'border-blue-100 bg-blue-50/30 hover:border-blue-300' : isRecurrence ? 'border-orange-100 bg-orange-50/30 hover:border-orange-300' : 'border-emerald-100 bg-emerald-50/30 hover:border-emerald-300')
+                                                    : 'border-slate-100 bg-slate-50/30 hover:border-slate-200';
+
+                                                return (
+                                                    <div
+                                                        key={c.id}
+                                                        className={`p-4 rounded-2xl border transition-all group ${cardBorder} ${isFinished ? 'opacity-75' : ''}`}
+                                                    >
+                                                        <div className="flex justify-between items-start gap-2">
+                                                            <div className="min-w-0">
+                                                                <div className="flex items-center gap-2 mb-1">
+                                                                    {c.diagnosisCode && (
+                                                                        <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
+                                                                            {c.diagnosisCode}
+                                                                        </span>
+                                                                    )}
+                                                                    <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${statusBadgeClass}`}>
+                                                                        {statusLabel}
+                                                                    </span>
+                                                                </div>
+                                                                <p className={`font-bold text-sm tracking-tight ${isActive ? 'text-slate-900' : 'text-slate-500'}`}>
+                                                                    {c.title || c.diagnosisDisplay || 'Neimenovan slučaj'}
+                                                                </p>
+                                                                <div className="flex items-center gap-3 mt-1.5">
+                                                                    <p className="text-[10px] font-bold text-slate-400 uppercase">
+                                                                        Od: {new Date(c.start).toLocaleDateString('hr-HR')}
+                                                                        {c.end && ` — Do: ${new Date(c.end).toLocaleDateString('hr-HR')}`}
+                                                                    </p>
+                                                                </div>
+                                                                {c.practitionerName && (
+                                                                    <p className="text-[10px] font-medium text-slate-400 mt-0.5">
+                                                                        {c.practitionerName}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                            {isActive && !isRemission && (
+                                                                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse flex-shrink-0 mt-2"></div>
                                                             )}
-                                                            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${isActive
-                                                                ? 'bg-emerald-500 text-white'
-                                                                : 'bg-slate-300 text-white'
-                                                                }`}>
-                                                                {isActive ? 'aktivan' : isFinished ? 'završen' : c.status}
-                                                            </span>
                                                         </div>
-                                                        <p className={`font-bold text-sm tracking-tight ${isActive ? 'text-slate-900' : 'text-slate-500'}`}>
-                                                            {c.title || c.diagnosisDisplay || 'Neimenovan slučaj'}
-                                                        </p>
-                                                        <div className="flex items-center gap-3 mt-1.5">
-                                                            <p className="text-[10px] font-bold text-slate-400 uppercase">
-                                                                Od: {new Date(c.start).toLocaleDateString('hr-HR')}
-                                                                {c.end && ` — Do: ${new Date(c.end).toLocaleDateString('hr-HR')}`}
-                                                            </p>
-                                                        </div>
-                                                        {c.practitionerName && (
-                                                            <p className="text-[10px] font-medium text-slate-400 mt-0.5">
-                                                                {c.practitionerName}
-                                                            </p>
+
+                                                        {/* Action buttons — Active / Remission cases */}
+                                                        {isActive && (
+                                                            <div className="mt-3 flex gap-2">
+                                                                <button
+                                                                    onClick={(e) => { e.preventDefault(); handleStartVisit(c.id); }}
+                                                                    className="flex-1 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all"
+                                                                >
+                                                                    📅 Nova posjeta
+                                                                </button>
+                                                                <button
+                                                                    onClick={(e) => { e.preventDefault(); setCaseModal(c); }}
+                                                                    className="py-1.5 px-3 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-600 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all"
+                                                                >
+                                                                    <Edit2 className="w-3 h-3 inline mr-1" />
+                                                                    Uredi
+                                                                </button>
+                                                                <button
+                                                                    onClick={(e) => { e.preventDefault(); handleCloseCase(c.id); }}
+                                                                    disabled={actionInProgress === c.id}
+                                                                    className="py-1.5 px-3 bg-white border border-rose-200 rounded-lg text-xs font-black text-rose-500 hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all disabled:opacity-50"
+                                                                >
+                                                                    Zatvori
+                                                                </button>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Action buttons — Finished cases */}
+                                                        {isFinished && (
+                                                            <div className="mt-3 flex gap-2">
+                                                                <button
+                                                                    onClick={(e) => { e.preventDefault(); handleCaseAction(c.id, '2.8', 'Ponovno otvaranje'); }}
+                                                                    disabled={actionInProgress === c.id}
+                                                                    className="flex-1 py-1.5 bg-white border border-emerald-200 rounded-lg text-xs font-black text-emerald-600 hover:bg-emerald-500 hover:text-white hover:border-emerald-500 transition-all disabled:opacity-50"
+                                                                >
+                                                                    ♻️ Ponovno otvori
+                                                                </button>
+                                                                <button
+                                                                    onClick={(e) => { e.preventDefault(); handleCaseAction(c.id, '2.3', 'Ponovljeni slučaj'); }}
+                                                                    disabled={actionInProgress === c.id}
+                                                                    className="flex-1 py-1.5 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-600 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all disabled:opacity-50"
+                                                                >
+                                                                    🔄 Ponovljeni
+                                                                </button>
+                                                            </div>
                                                         )}
                                                     </div>
-                                                    {isActive && (
-                                                        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse flex-shrink-0 mt-2"></div>
-                                                    )}
-                                                </div>
-                                                {isActive && (
-                                                    <div className="mt-3 flex gap-2">
-                                                        <button
-                                                            onClick={(e) => { e.preventDefault(); handleStartVisit(c.id); }}
-                                                            className="flex-1 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all"
-                                                        >
-                                                            Nastavi liječenje
-                                                        </button>
-                                                        <button
-                                                            onClick={(e) => { e.preventDefault(); setCaseModal(c); }}
-                                                            className="py-1.5 px-3 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-600 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all"
-                                                        >
-                                                            <Edit2 className="w-3 h-3 inline mr-1" />
-                                                            Uredi
-                                                        </button>
-                                                        <button
-                                                            onClick={(e) => { e.preventDefault(); handleCloseCase(c.id); }}
-                                                            className="py-1.5 px-3 bg-white border border-rose-200 rounded-lg text-xs font-black text-rose-500 hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all"
-                                                        >
-                                                            Zatvori
-                                                        </button>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })
+                                                );
+                                            })
+                                        ) : (
+                                            <p className="text-center py-4 text-xs text-slate-400 italic">Nema zdravstvenih slučajeva.</p>
+                                        )}
+                                    </div>
                                 ) : (
-                                    <p className="text-center py-4 text-xs text-slate-400 italic">Nema zdravstvenih slučajeva.</p>
+                                    /* CEZIH tab */
+                                    <div className="p-3">
+                                        {cezihCasesLoading ? (
+                                            <div className="flex items-center justify-center py-6 gap-2">
+                                                <div className="animate-spin rounded-full h-4 w-4 border-2 border-amber-500 border-t-transparent"></div>
+                                                <span className="text-xs text-slate-400">Dohvaćam s CEZIH-a...</span>
+                                            </div>
+                                        ) : cezihCases.length > 0 ? (
+                                            <div className="space-y-2">
+                                                {cezihCases.map((c: any) => (
+                                                    <div key={c.id} className="p-3 rounded-xl border border-slate-100 bg-slate-50/50">
+                                                        <div className="flex items-center gap-2 mb-1">
+                                                            {c.diagnosisCode && (
+                                                                <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-slate-200 text-slate-500">{c.diagnosisCode}</span>
+                                                            )}
+                                                            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${c.status === 'active' ? 'bg-emerald-500 text-white' : 'bg-slate-300 text-white'}`}>
+                                                                {c.status === 'active' ? 'aktivan' : c.status === 'finished' ? 'završen' : c.status}
+                                                            </span>
+                                                        </div>
+                                                        <p className="font-bold text-xs text-slate-700">{c.title || c.diagnosisDisplay || 'Slučaj'}</p>
+                                                        <p className="text-[10px] text-slate-400 mt-1">
+                                                            {c.start && new Date(c.start).toLocaleDateString('hr-HR')}
+                                                            {c.end && ` — ${new Date(c.end).toLocaleDateString('hr-HR')}`}
+                                                        </p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <p className="text-center py-4 text-xs text-slate-400 italic">Nema slučajeva na CEZIH-u.</p>
+                                        )}
+                                    </div>
                                 )}
-                            </div>
+                            </>
                         )}
                     </section>
 
@@ -743,6 +901,7 @@ export default function PatientChartPage() {
                         setCaseModal(null);
                         fetchChartData();
                     }}
+                    onCaseAction={handleCaseAction}
                 />
             )}
         </div>

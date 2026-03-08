@@ -5,7 +5,7 @@ import {
     CheckCircle, XCircle, Clock, Play, AlertTriangle,
     Shield, Terminal, Users, Layout, FileText,
     ChevronDown, ChevronRight, Printer, RefreshCw,
-    Wifi, WifiOff, Info
+    Wifi, WifiOff, Info, KeyRound, CreditCard, Server
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ interface TCGroup {
 // ─────────────────────────────────────────────────────────────────
 const PATIENT_MBO = '999999423';
 const PRACTITIONER_OIB = '4981825';
-const ORGANIZATION_ID = '174900715';
+const ORGANIZATION_ID = '999001425';
 
 function buildGroups(): TCGroup[] {
     return [
@@ -257,7 +257,7 @@ async function runTC(id: string, groups: TCGroup[]): Promise<TCResult> {
                 visitId: visitId || undefined,
                 practitionerId: PRACTITIONER_OIB,
                 organizationId: ORGANIZATION_ID,
-                type: 'discharge-summary',
+                type: '011',
                 title: 'Otpusno pismo — test',
                 diagnosisCode: 'M17.1',
                 diagnosisDisplay: 'Gonartroza',
@@ -281,7 +281,7 @@ async function runTC(id: string, groups: TCGroup[]): Promise<TCResult> {
                 visitId: sentDoc.visitId || undefined,
                 practitionerId: PRACTITIONER_OIB,
                 organizationId: ORGANIZATION_ID,
-                type: sentDoc.type || 'discharge-summary',
+                type: sentDoc.type || '011',
                 title: 'Zamjenski nalaz — test',
                 diagnosisCode: sentDoc.diagnosisCode || 'M17.1',
                 diagnosisDisplay: sentDoc.diagnosisDisplay || 'Gonartroza',
@@ -417,17 +417,33 @@ export default function CertificationPage() {
     const [expandedTCs, setExpandedTCs] = useState<Set<string>>(new Set());
     const [runningAll, setRunningAll] = useState(false);
     const [authStatus, setAuthStatus] = useState<{ authenticated: boolean; checked: boolean }>({ authenticated: false, checked: false });
+    const [authDetails, setAuthDetails] = useState<any>(null);
+    const [showAuthDropdown, setShowAuthDropdown] = useState(false);
     const [printDate, setPrintDate] = useState('');
     const groupsRef = useRef(groups);
     groupsRef.current = groups;
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+                setShowAuthDropdown(false);
+            }
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, []);
 
     const checkAuth = useCallback(async () => {
         try {
-            const r = await fetch('/api/auth/status');
+            const r = await fetch('/api/auth/health-check');
             const d = await r.json();
-            setAuthStatus({ authenticated: d.authenticated, checked: true });
+            setAuthStatus({ authenticated: d.gateway?.active ?? false, checked: true });
+            setAuthDetails(d);
         } catch {
             setAuthStatus({ authenticated: false, checked: true });
+            setAuthDetails(null);
         }
     }, []);
 
@@ -509,23 +525,91 @@ export default function CertificationPage() {
                         <p className="text-slate-500 text-sm mt-0.5">22 testna scenarija — CEZIH certifikacija privatnika</p>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
-                        {/* Auth Status */}
-                        <button
-                            onClick={checkAuth}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${authStatus.checked
-                                ? authStatus.authenticated
-                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                    : 'border-amber-200 bg-amber-50 text-amber-700'
-                                : 'border-slate-200 bg-slate-50 text-slate-500'
-                                }`}
-                            title="Provjeri status gateway sesije"
-                        >
-                            {authStatus.authenticated ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-                            {authStatus.checked
-                                ? authStatus.authenticated ? 'Gateway sesija aktivna' : 'Gateway sesija neaktivna'
-                                : 'Provjeri sesiju'}
-                            <RefreshCw className="w-3 h-3 opacity-50" />
-                        </button>
+                        {/* Auth Status Dropdown */}
+                        <div className="relative" ref={dropdownRef}>
+                            <button
+                                onClick={() => { if (!authDetails) checkAuth(); setShowAuthDropdown(p => !p); }}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${authStatus.checked
+                                    ? authStatus.authenticated
+                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                        : 'border-amber-200 bg-amber-50 text-amber-700'
+                                    : 'border-slate-200 bg-slate-50 text-slate-500'
+                                    }`}
+                                title="Provjeri status autorizacija"
+                            >
+                                {authStatus.authenticated ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+                                {authStatus.checked
+                                    ? authStatus.authenticated ? 'Gateway sesija aktivna' : 'Gateway sesija neaktivna'
+                                    : 'Provjeri sesiju'}
+                                <ChevronDown className={`w-3 h-3 opacity-50 transition-transform ${showAuthDropdown ? 'rotate-180' : ''}`} />
+                            </button>
+
+                            {/* Dropdown Panel */}
+                            {showAuthDropdown && (
+                                <div className="absolute right-0 top-full mt-2 w-80 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden">
+                                    <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                                        <span className="text-xs font-bold text-slate-600 uppercase tracking-wide">Status autorizacija</span>
+                                        <button onClick={checkAuth} className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 transition-colors">
+                                            <RefreshCw className="w-3 h-3" /> Osvježi
+                                        </button>
+                                    </div>
+
+                                    {!authDetails ? (
+                                        <div className="px-4 py-6 text-center text-xs text-slate-400"><Clock className="w-4 h-4 animate-spin mx-auto mb-2" />Učitavam...</div>
+                                    ) : (
+                                        <div className="divide-y divide-slate-100">
+                                            {/* Gateway Session */}
+                                            <div className="px-4 py-3 flex items-center gap-3">
+                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${authDetails.gateway?.active ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-500'}`}>
+                                                    <Wifi className="w-4 h-4" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-xs font-semibold text-slate-700">Gateway sesija</div>
+                                                    <div className="text-[10px] text-slate-400">
+                                                        {authDetails.gateway?.active
+                                                            ? `Aktivna ${authDetails.gateway.ageMinutes} min (max ${authDetails.gateway.maxAgeMinutes})`
+                                                            : 'Neaktivna — prijavite se pametnom karticom'}
+                                                    </div>
+                                                </div>
+                                                <div className={`w-2.5 h-2.5 rounded-full ${authDetails.gateway?.active ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                                            </div>
+
+                                            {/* System Token (M2M) */}
+                                            <div className="px-4 py-3 flex items-center gap-3">
+                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${authDetails.systemToken?.active ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                                                    <Server className="w-4 h-4" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-xs font-semibold text-slate-700">System Token (M2M)</div>
+                                                    <div className="text-[10px] text-slate-400">
+                                                        {authDetails.systemToken?.active
+                                                            ? `Aktivan — istječe za ${authDetails.systemToken.expiresInMinutes} min`
+                                                            : 'Neaktivan — dohvaća se automatski pri potrebi'}
+                                                    </div>
+                                                </div>
+                                                <div className={`w-2.5 h-2.5 rounded-full ${authDetails.systemToken?.active ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                                            </div>
+
+                                            {/* Smart Card */}
+                                            <div className="px-4 py-3 flex items-center gap-3">
+                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${authDetails.smartCard?.initialized ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-500'}`}>
+                                                    <CreditCard className="w-4 h-4" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-xs font-semibold text-slate-700">Pametna kartica (PKCS#11)</div>
+                                                    <div className="text-[10px] text-slate-400">
+                                                        {authDetails.smartCard?.initialized
+                                                            ? `${authDetails.smartCard.subject} — ${authDetails.smartCard.algorithm} (${authDetails.smartCard.tokenLabel})`
+                                                            : 'Nije inicijalizirana — provjerite čitač kartice'}
+                                                    </div>
+                                                </div>
+                                                <div className={`w-2.5 h-2.5 rounded-full ${authDetails.smartCard?.initialized ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
 
                         {/* Summary badges */}
                         {passed > 0 && <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold">✅ {passed} Prošlo</span>}

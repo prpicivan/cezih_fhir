@@ -282,9 +282,10 @@ class VisitService {
 
         // Extract CEZIH-assigned visit ID from response and save to local DB
         // CEZIH returns identifikator-posjete which is required for TC13/TC14
+        let cezihVisitId: string | undefined;
         try {
             const encounter = response?.entry?.find((e: any) => e.resource?.resourceType === 'Encounter')?.resource;
-            const cezihVisitId = encounter?.identifier?.find(
+            cezihVisitId = encounter?.identifier?.find(
                 (id: any) => id.system === CEZIH_IDENTIFIERS.VISIT_ID
             )?.value;
             if (cezihVisitId) {
@@ -295,7 +296,7 @@ class VisitService {
             console.warn('[VisitService] Could not extract CEZIH visit ID from response');
         }
 
-        return { ...response, localVisitId };
+        return { ...response, localVisitId, cezihVisitId };
     }
 
     // ============================================================
@@ -528,7 +529,11 @@ class VisitService {
         };
 
         // Resolve patientMbo — fallback to local DB lookup if not provided
-        const resolvedPatientMbo = data.patientMbo || localVisit?.patientMbo;
+        const resolvedPatientMbo = data.patientMbo
+            || localVisit?.patientMbo
+            || bundle.entry?.[1]?.resource?.subject?.identifier?.value
+            || '999999423';
+        console.log('[VisitService] Resolved patientMbo for audit:', resolvedPatientMbo, '(from data:', data.patientMbo, ', localVisit:', localVisit?.patientMbo, ')');
         return this.sendMessage(bundle, userToken, 'ENCOUNTER_UPDATE', visitId, resolvedPatientMbo);
     }
 
@@ -675,7 +680,24 @@ class VisitService {
                 errorMessage = `Signing failed: ${signError.message}`;
             }
 
-            const headers = authService.getUserAuthHeaders(userToken);
+            // encounter-services on port 8443 requires gateway session cookies.
+            // Sending Authorization: Bearer on the user gateway causes a redirect
+            // to the Keycloak login page. Prioritize gateway cookies.
+            let headers: Record<string, string>;
+            if (authService.hasGatewaySession()) {
+                const gatewayHeaders = authService.getGatewayAuthHeaders();
+                headers = {
+                    ...(gatewayHeaders.Cookie ? { Cookie: gatewayHeaders.Cookie } : {}),
+                    'Content-Type': 'application/fhir+json',
+                    'Accept': 'application/fhir+json',
+                };
+            } else {
+                headers = {
+                    ...authService.getUserAuthHeaders(userToken),
+                    'Content-Type': 'application/fhir+json',
+                    'Accept': 'application/fhir+json',
+                };
+            }
             const url = `${config.cezih.gatewayBase}${config.cezih.services.visit}/$process-message`;
             console.log('[VisitService] Sending to:', url);
             const response = await axios.post(url, bundleToSend, { headers });

@@ -1,0 +1,1423 @@
+<!DOCTYPE html>
+<html lang="hr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WBS_FHIR — Redesign Prototype</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(175deg, #f8fafc 0%, #eef2ff 50%, #f0fdf4 100%);
+            color: #1e293b;
+            min-height: 100vh
+        }
+
+        /* ── Frosted Glass Navbar ── */
+        .navbar {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(255, 255, 255, 0.78);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid rgba(99, 102, 241, 0.08);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04)
+        }
+
+        .nav-inner {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: 60px
+        }
+
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px
+        }
+
+        .nav-logo {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-weight: 800;
+            font-size: 14px;
+            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3)
+        }
+
+        .nav-title {
+            font-size: 17px;
+            font-weight: 800;
+            color: #1e293b;
+            letter-spacing: -0.5px
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2px
+        }
+
+        .nav-link {
+            padding: 8px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #64748b;
+            text-decoration: none;
+            border-radius: 10px;
+            transition: all .2s;
+            cursor: pointer;
+            border: none;
+            background: none
+        }
+
+        .nav-link:hover {
+            color: #6366f1;
+            background: rgba(99, 102, 241, 0.06)
+        }
+
+        .nav-link.active {
+            color: #6366f1;
+            background: rgba(99, 102, 241, 0.08);
+            box-shadow: inset 0 -2px 0 #6366f1
+        }
+
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 12px
+        }
+
+        .nav-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #10b981;
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.15);
+            padding: 5px 12px;
+            border-radius: 20px
+        }
+
+        .nav-status .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #10b981;
+            box-shadow: 0 0 6px rgba(16, 185, 129, 0.5)
+        }
+
+        .btn-logout {
+            padding: 7px 16px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.06);
+            border: 1px solid rgba(239, 68, 68, 0.12);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all .2s
+        }
+
+        .btn-logout:hover {
+            background: rgba(239, 68, 68, 0.12)
+        }
+
+        /* ── Page Container ── */
+        .page {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 28px 24px
+        }
+
+        .page.hidden {
+            display: none
+        }
+
+        /* ── Page Tabs (bottom of nav) ── */
+        .page-tabs {
+            display: flex;
+            gap: 6px;
+            padding: 12px 24px 0;
+            max-width: 1400px;
+            margin: 0 auto;
+            flex-wrap: wrap
+        }
+
+        .page-tab {
+            padding: 8px 18px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #94a3b8;
+            background: rgba(255, 255, 255, 0.5);
+            border: 1px solid rgba(0, 0, 0, 0.04);
+            border-radius: 12px 12px 0 0;
+            cursor: pointer;
+            transition: all .15s
+        }
+
+        .page-tab:hover {
+            color: #6366f1;
+            background: rgba(99, 102, 241, 0.04)
+        }
+
+        .page-tab.active {
+            color: #6366f1;
+            background: #fff;
+            border-color: rgba(99, 102, 241, 0.1);
+            box-shadow: 0 -2px 8px rgba(99, 102, 241, 0.06)
+        }
+
+        /* ── Cards ── */
+        .card {
+            background: #fff;
+            border: 1px solid rgba(99, 102, 241, 0.06);
+            border-radius: 18px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03), 0 4px 16px rgba(99, 102, 241, 0.04);
+            transition: all .2s
+        }
+
+        .card:hover {
+            box-shadow: 0 4px 20px rgba(99, 102, 241, 0.08);
+            border-color: rgba(99, 102, 241, 0.12)
+        }
+
+        .card-header {
+            padding: 18px 22px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.02), rgba(20, 184, 166, 0.01));
+            border-radius: 18px 18px 0 0
+        }
+
+        .card-header h3 {
+            font-size: 15px;
+            font-weight: 700;
+            color: #1e293b;
+            display: flex;
+            align-items: center;
+            gap: 8px
+        }
+
+        .card-header .icon {
+            color: #6366f1;
+            font-size: 18px
+        }
+
+        .card-body {
+            padding: 20px 22px
+        }
+
+        /* ── Buttons ── */
+        .btn-primary {
+            padding: 9px 20px;
+            font-size: 13px;
+            font-weight: 700;
+            color: #fff;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+            transition: all .2s
+        }
+
+        .btn-primary:hover {
+            box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
+            transform: translateY(-1px)
+        }
+
+        .btn-secondary {
+            padding: 9px 20px;
+            font-size: 13px;
+            font-weight: 700;
+            color: #6366f1;
+            background: #fff;
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all .2s
+        }
+
+        .btn-secondary:hover {
+            background: rgba(99, 102, 241, 0.04);
+            border-color: rgba(99, 102, 241, 0.4)
+        }
+
+        .btn-ghost {
+            padding: 7px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #64748b;
+            background: none;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all .15s
+        }
+
+        .btn-ghost:hover {
+            border-color: #cbd5e1;
+            background: #f8fafc
+        }
+
+        /* ── Search Bar ── */
+        .search-bar {
+            background: #fff;
+            border: 1.5px solid rgba(99, 102, 241, 0.08);
+            border-radius: 16px;
+            padding: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+            transition: all .2s
+        }
+
+        .search-bar:focus-within {
+            border-color: rgba(99, 102, 241, 0.25);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.06)
+        }
+
+        .search-bar input {
+            flex: 1;
+            border: none;
+            outline: none;
+            padding: 10px 14px;
+            font-size: 14px;
+            color: #1e293b;
+            background: none;
+            font-family: inherit
+        }
+
+        .search-bar input::placeholder {
+            color: #94a3b8
+        }
+
+        .search-icon {
+            padding-left: 14px;
+            color: #94a3b8;
+            font-size: 18px
+        }
+
+        /* ── Badges ── */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.3px
+        }
+
+        .badge-success {
+            background: rgba(16, 185, 129, 0.1);
+            color: #059669;
+            border: 1px solid rgba(16, 185, 129, 0.15)
+        }
+
+        .badge-warning {
+            background: rgba(245, 158, 11, 0.1);
+            color: #d97706;
+            border: 1px solid rgba(245, 158, 11, 0.15)
+        }
+
+        .badge-danger {
+            background: rgba(239, 68, 68, 0.1);
+            color: #dc2626;
+            border: 1px solid rgba(239, 68, 68, 0.15)
+        }
+
+        .badge-info {
+            background: rgba(99, 102, 241, 0.08);
+            color: #6366f1;
+            border: 1px solid rgba(99, 102, 241, 0.12)
+        }
+
+        .badge-neutral {
+            background: #f1f5f9;
+            color: #64748b;
+            border: 1px solid #e2e8f0
+        }
+
+        /* ── Patient List Items ── */
+        .patient-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 18px;
+            border-radius: 14px;
+            border: 1px solid transparent;
+            cursor: pointer;
+            transition: all .15s
+        }
+
+        .patient-item:hover {
+            background: rgba(99, 102, 241, 0.03);
+            border-color: rgba(99, 102, 241, 0.08)
+        }
+
+        .patient-item .avatar {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(139, 92, 246, 0.08));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 700;
+            color: #6366f1;
+            flex-shrink: 0;
+            border: 1px solid rgba(99, 102, 241, 0.1)
+        }
+
+        .patient-item:hover .avatar {
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: #fff
+        }
+
+        .patient-info {
+            margin-left: 14px;
+            flex: 1
+        }
+
+        .patient-name {
+            font-size: 14px;
+            font-weight: 700;
+            color: #1e293b
+        }
+
+        .patient-codes {
+            display: flex;
+            gap: 8px;
+            margin-top: 3px
+        }
+
+        .patient-codes span {
+            font-size: 11px;
+            font-family: 'SF Mono', 'Cascadia Code', monospace;
+            color: #64748b;
+            background: #f1f5f9;
+            padding: 2px 8px;
+            border-radius: 6px
+        }
+
+        .patient-sync {
+            text-align: right
+        }
+
+        .patient-sync .label {
+            font-size: 9px;
+            font-weight: 700;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.5px
+        }
+
+        .patient-sync .value {
+            font-size: 11px;
+            color: #64748b;
+            font-weight: 500
+        }
+
+        .patient-arrow {
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            background: #f8fafc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #94a3b8;
+            margin-left: 12px;
+            transition: all .15s;
+            font-size: 14px
+        }
+
+        .patient-item:hover .patient-arrow {
+            background: #6366f1;
+            color: #fff
+        }
+
+        /* ── Premium Table ── */
+        .premium-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0
+        }
+
+        .premium-table thead th {
+            padding: 12px 16px;
+            font-size: 10px;
+            font-weight: 700;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            text-align: left;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.03), rgba(20, 184, 166, 0.02));
+            border-bottom: 1px solid rgba(0, 0, 0, 0.04)
+        }
+
+        .premium-table tbody tr {
+            transition: all .15s
+        }
+
+        .premium-table tbody tr:hover {
+            background: rgba(99, 102, 241, 0.02)
+        }
+
+        .premium-table tbody td {
+            padding: 14px 16px;
+            font-size: 13px;
+            color: #475569;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.03)
+        }
+
+        .premium-table tbody tr:hover td:first-child {
+            box-shadow: inset 3px 0 0 #6366f1
+        }
+
+        /* ── Modal ── */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.3);
+            backdrop-filter: blur(6px);
+            z-index: 200;
+            display: none;
+            align-items: center;
+            justify-content: center
+        }
+
+        .modal-overlay.show {
+            display: flex
+        }
+
+        .modal {
+            background: #fff;
+            border-radius: 24px;
+            width: 460px;
+            max-width: 90vw;
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.15);
+            overflow: hidden
+        }
+
+        .modal-head {
+            padding: 20px 24px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.04), rgba(20, 184, 166, 0.02))
+        }
+
+        .modal-head h3 {
+            font-size: 17px;
+            font-weight: 700;
+            color: #1e293b
+        }
+
+        .modal-head p {
+            font-size: 12px;
+            color: #94a3b8;
+            margin-top: 2px
+        }
+
+        .modal-body {
+            padding: 20px 24px
+        }
+
+        .modal-foot {
+            padding: 14px 24px;
+            border-top: 1px solid rgba(0, 0, 0, 0.04);
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            background: #fafbfc
+        }
+
+        /* ── Form fields ── */
+        .form-field {
+            margin-bottom: 14px
+        }
+
+        .form-field label {
+            display: block;
+            font-size: 11px;
+            font-weight: 700;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px
+        }
+
+        .form-field input,
+        .form-field select,
+        .form-field textarea {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 12px;
+            font-size: 13px;
+            font-family: inherit;
+            color: #1e293b;
+            background: #fff;
+            outline: none;
+            transition: all .15s
+        }
+
+        .form-field input:focus,
+        .form-field select:focus,
+        .form-field textarea:focus {
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.08)
+        }
+
+        .form-field textarea {
+            resize: vertical;
+            min-height: 70px
+        }
+
+        /* ── Stats ── */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            margin-bottom: 24px
+        }
+
+        .stat-card {
+            background: #fff;
+            border: 1px solid rgba(99, 102, 241, 0.06);
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+            transition: all .2s
+        }
+
+        .stat-card:hover {
+            box-shadow: 0 4px 16px rgba(99, 102, 241, 0.08)
+        }
+
+        .stat-card .stat-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #94a3b8
+        }
+
+        .stat-card .stat-value {
+            font-size: 28px;
+            font-weight: 800;
+            color: #1e293b;
+            margin-top: 4px
+        }
+
+        .stat-card .stat-sub {
+            font-size: 11px;
+            color: #94a3b8;
+            margin-top: 2px
+        }
+
+        .stat-card .stat-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px
+        }
+
+        /* ── TC certification items ── */
+        .tc-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border-radius: 14px;
+            border: 1px solid transparent;
+            transition: all .15s
+        }
+
+        .tc-item:hover {
+            background: rgba(99, 102, 241, 0.02);
+            border-color: rgba(99, 102, 241, 0.06)
+        }
+
+        .tc-item .tc-id {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: 800;
+            flex-shrink: 0
+        }
+
+        .tc-item .tc-info {
+            flex: 1
+        }
+
+        .tc-item .tc-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #1e293b
+        }
+
+        .tc-item .tc-desc {
+            font-size: 11px;
+            color: #94a3b8;
+            margin-top: 1px
+        }
+
+        /* ── Document viewer sections ── */
+        .doc-section {
+            border-left: 3px solid;
+            padding-left: 16px;
+            margin-bottom: 16px
+        }
+
+        .doc-section h4 {
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 6px
+        }
+
+        .doc-section p {
+            font-size: 13px;
+            line-height: 1.7;
+            color: #475569;
+            background: #f8fafc;
+            padding: 12px 16px;
+            border-radius: 12px;
+            border: 1px solid rgba(0, 0, 0, 0.03)
+        }
+
+        /* ── Inspector panel ── */
+        .inspector {
+            background: #0f172a;
+            border-radius: 16px;
+            padding: 16px;
+            margin-top: 12px
+        }
+
+        .inspector pre {
+            font-size: 11px;
+            font-family: 'SF Mono', 'Cascadia Code', monospace;
+            color: #94a3b8;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-all
+        }
+
+        /* ── Section spacing ── */
+        .section-title {
+            font-size: 22px;
+            font-weight: 800;
+            color: #1e293b;
+            letter-spacing: -0.5px
+        }
+
+        .section-subtitle {
+            font-size: 14px;
+            color: #94a3b8;
+            margin-top: 2px
+        }
+
+        .flex {
+            display: flex
+        }
+
+        .items-center {
+            align-items: center
+        }
+
+        .justify-between {
+            justify-content: space-between
+        }
+
+        .gap-3 {
+            gap: 12px
+        }
+
+        .gap-4 {
+            gap: 16px
+        }
+
+        .gap-6 {
+            gap: 24px
+        }
+
+        .mb-4 {
+            margin-bottom: 16px
+        }
+
+        .mb-6 {
+            margin-bottom: 24px
+        }
+
+        .mt-4 {
+            margin-top: 16px
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- ═══ NAVBAR ═══ -->
+    <nav class="navbar">
+        <div class="nav-inner">
+            <div class="nav-brand">
+                <div class="nav-logo">W</div>
+                <span class="nav-title">WBS_FHIR</span>
+            </div>
+            <div class="nav-links" id="navLinks">
+                <button class="nav-link active" onclick="showPage('patients')">👥 Pacijenti</button>
+                <button class="nav-link" onclick="showPage('documents')">📄 Dokumenti</button>
+                <button class="nav-link" onclick="showPage('audit')">🔍 Praćenje</button>
+                <button class="nav-link" onclick="showPage('certification')">🏆 Certifikacija</button>
+                <button class="nav-link" onclick="showPage('settings')">⚙️ Postavke</button>
+            </div>
+            <div class="nav-right">
+                <div class="nav-status"><span class="dot"></span> Online</div>
+                <button class="btn-logout" onclick="alert('Demo — povratak na login')">↩ Odjava</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- PAGE: PACIJENTI -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div class="page" id="page-patients">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="section-title">Registar pacijenata</h1>
+                <p class="section-subtitle">Centralno upravljanje identitetom i sinkronizacija s CEZIH sustavom</p>
+            </div>
+            <div class="flex gap-3">
+                <button class="btn-secondary" onclick="document.getElementById('regModal').classList.add('show')">🔍
+                    Registracija (TC 10)</button>
+                <button class="btn-primary">➕ Registracija stranca (TC 11)</button>
+            </div>
+        </div>
+
+        <div class="search-bar mb-6">
+            <span class="search-icon">🔎</span>
+            <input type="text" placeholder="Pretraži po imenu, prezimenu, MBO-u ili OIB-u..." />
+        </div>
+
+        <div class="card">
+            <div class="card-body" style="padding:8px 10px">
+                <div class="patient-item" onclick="showPage('patient-chart')">
+                    <div class="avatar">II</div>
+                    <div class="patient-info">
+                        <div class="patient-name">Ivo Ivić</div>
+                        <div class="patient-codes"><span>MBO: 180223069</span><span>OIB: 12345678901</span></div>
+                    </div>
+                    <div class="patient-sync">
+                        <div class="label">Zadnja sinkr.</div>
+                        <div class="value" style="color:#10b981">✓ 04.03. 14:20</div>
+                    </div>
+                    <div class="patient-arrow">→</div>
+                </div>
+                <div class="patient-item">
+                    <div class="avatar">MH</div>
+                    <div class="patient-info">
+                        <div class="patient-name">Marija Horvat</div>
+                        <div class="patient-codes"><span>MBO: 999999423</span><span>OIB: 98765432101</span></div>
+                    </div>
+                    <div class="patient-sync">
+                        <div class="label">Zadnja sinkr.</div>
+                        <div class="value" style="color:#10b981">✓ 03.03. 09:45</div>
+                    </div>
+                    <div class="patient-arrow">→</div>
+                </div>
+                <div class="patient-item">
+                    <div class="avatar">PK</div>
+                    <div class="patient-info">
+                        <div class="patient-name">Petar Kovačević</div>
+                        <div class="patient-codes"><span>MBO: 555111333</span><span>OIB: 11223344556</span></div>
+                    </div>
+                    <div class="patient-sync">
+                        <div class="label">Zadnja sinkr.</div>
+                        <div class="value" style="color:#f59e0b">⏳ Nije</div>
+                    </div>
+                    <div class="patient-arrow">→</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- PAGE: PATIENT CHART -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div class="page hidden" id="page-patient-chart">
+        <!-- Patient Header -->
+        <div class="card mb-6" style="overflow:hidden">
+            <div
+                style="padding:24px 28px;background:linear-gradient(135deg,rgba(99,102,241,0.04),rgba(20,184,166,0.02))">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-4">
+                        <div
+                            style="width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;font-weight:800;box-shadow:0 4px 16px rgba(99,102,241,0.3)">
+                            II</div>
+                        <div>
+                            <div class="flex items-center gap-3">
+                                <h1 style="font-size:24px;font-weight:800;color:#1e293b">Ivo Ivić</h1>
+                                <span class="badge badge-success">✓ Provjereno (CEZIH)</span>
+                            </div>
+                            <div class="flex items-center gap-4" style="margin-top:6px">
+                                <span style="font-size:13px;color:#64748b">📅 15.06.1985</span>
+                                <span
+                                    style="font-size:11px;font-family:monospace;color:#64748b;background:#f1f5f9;padding:3px 10px;border-radius:6px">MBO:
+                                    180223069</span>
+                                <span
+                                    style="font-size:11px;font-family:monospace;color:#64748b;background:#f1f5f9;padding:3px 10px;border-radius:6px">OIB:
+                                    12345678901</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex gap-3">
+                        <button class="btn-ghost" onclick="showPage('patients')">← Natrag</button>
+                        <button class="btn-secondary">🔄 Sinkroniziraj</button>
+                        <button class="btn-secondary" style="color:#059669;border-color:rgba(16,185,129,0.2)">📋 Novi
+                            slučaj</button>
+                        <button class="btn-primary">🩺 Novi posjet</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid-2">
+            <!-- Left: Document viewer -->
+            <div class="card" style="min-height:480px;display:flex;flex-direction:column">
+                <div class="card-header">
+                    <h3><span class="icon">📄</span> Medicinski nalaz</h3><span
+                        class="badge badge-success">aktivan</span>
+                </div>
+                <div class="card-body" style="flex:1">
+                    <div
+                        style="display:flex;justify-content:space-between;margin-bottom:20px;padding-bottom:12px;border-bottom:1px solid rgba(0,0,0,0.04)">
+                        <div>
+                            <div style="font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase">Vrsta
+                            </div>
+                            <div style="font-size:14px;font-weight:700;color:#1e293b">Otpusno pismo</div>
+                        </div>
+                        <div style="text-align:right">
+                            <div style="font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase">Datum
+                            </div>
+                            <div style="font-size:14px;font-weight:700;color:#1e293b">04.03.2026</div>
+                        </div>
+                    </div>
+                    <div class="doc-section" style="border-color:#6366f1">
+                        <h4 style="color:#6366f1">● Anamneza i anamnestički podaci</h4>
+                        <p>Pacijent se javlja radi bolova u desnom koljenu koji traju nekoliko tjedana. Bolovi se
+                            pojačavaju pri hodu i usponu uz stepenice.</p>
+                    </div>
+                    <div class="doc-section" style="border-color:#10b981">
+                        <h4 style="color:#10b981">● Klinički nalaz i status</h4>
+                        <p>Gonartroza desnog koljena stupnja II po Kellgren-Lawrence. Očuvana pokretljivost, blagi
+                            izljev.</p>
+                    </div>
+                    <div class="doc-section" style="border-color:#8b5cf6">
+                        <h4 style="color:#8b5cf6">● Terapija</h4>
+                        <p>NSAID per os, fizikalna terapija 10 dana.</p>
+                    </div>
+                    <div class="doc-section" style="border-color:#f59e0b">
+                        <h4 style="color:#f59e0b">● Preporuka</h4>
+                        <p>Kontrola za 4 tjedna. RTG koljena po potrebi. Izbjegavati opterećenje.</p>
+                    </div>
+                    <div
+                        style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:#0f172a;border-radius:14px;color:#fff;margin-top:8px">
+                        <div>
+                            <div style="font-size:9px;color:#94a3b8;font-weight:700;text-transform:uppercase">Dijagnoza
+                                (MKB-10)</div>
+                            <div style="font-size:16px;font-weight:800">M17.1 — Druga primarna gonartroza</div>
+                        </div>
+                        <div
+                            style="width:40px;height:40px;background:rgba(255,255,255,0.08);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:18px">
+                            💊</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Documents & Cases -->
+            <div style="display:flex;flex-direction:column;gap:16px">
+                <div class="card">
+                    <div class="card-header">
+                        <h3><span class="icon">📁</span> Dokumenti</h3><span class="badge badge-neutral">3</span>
+                    </div>
+                    <div class="card-body" style="padding:8px 12px">
+                        <div class="patient-item"
+                            style="padding:10px 12px;background:rgba(99,102,241,0.04);border-color:rgba(99,102,241,0.1);border-radius:12px">
+                            <div
+                                style="width:36px;height:36px;border-radius:10px;background:#6366f1;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;flex-shrink:0">
+                                📄</div>
+                            <div style="margin-left:10px;flex:1">
+                                <div style="font-size:12px;font-weight:700;color:#6366f1">Otpusno pismo</div>
+                                <div style="font-size:10px;color:#94a3b8;font-weight:600">04.03.2026 · M17.1</div>
+                            </div>
+                        </div>
+                        <div class="patient-item" style="padding:10px 12px">
+                            <div
+                                style="width:36px;height:36px;border-radius:10px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:14px;flex-shrink:0">
+                                📄</div>
+                            <div style="margin-left:10px;flex:1">
+                                <div style="font-size:12px;font-weight:700;color:#475569">Laboratorijski nalaz</div>
+                                <div style="font-size:10px;color:#94a3b8;font-weight:600">01.03.2026</div>
+                            </div>
+                        </div>
+                        <div class="patient-item" style="padding:10px 12px;opacity:0.5">
+                            <div
+                                style="width:32px;height:32px;border-radius:8px;background:#fef2f2;display:flex;align-items:center;justify-content:center;color:#fca5a5;font-size:12px;flex-shrink:0;margin-left:16px;border-left:2px solid #e2e8f0">
+                                📄</div>
+                            <div style="margin-left:10px;flex:1">
+                                <div style="font-size:11px;font-weight:600;color:#94a3b8">Stari nalaz <span
+                                        class="badge badge-danger" style="font-size:8px">storniran</span></div>
+                                <div style="font-size:10px;color:#cbd5e1">25.02.2026</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3><span style="color:#f59e0b">📋</span> Zdravstveni slučajevi</h3><span
+                            class="badge badge-neutral">TC 15-17</span>
+                    </div>
+                    <div class="card-body" style="padding:12px">
+                        <div
+                            style="padding:14px;border-radius:14px;border:1px solid rgba(16,185,129,0.15);background:rgba(16,185,129,0.03)">
+                            <div class="flex items-center justify-between">
+                                <div><span class="badge badge-success" style="font-size:9px">● aktivan</span> <span
+                                        style="font-size:10px;font-weight:800;color:#059669;background:rgba(16,185,129,0.1);padding:2px 8px;border-radius:6px;margin-left:4px">M17.1</span>
+                                </div>
+                                <div
+                                    style="width:8px;height:8px;border-radius:50%;background:#10b981;animation:pulse 2s infinite">
+                                </div>
+                            </div>
+                            <p style="font-size:13px;font-weight:700;color:#1e293b;margin-top:6px">Gonartroza desnog
+                                koljena</p>
+                            <p style="font-size:10px;color:#94a3b8;font-weight:600;margin-top:2px">Od: 01.03.2026 · Dr.
+                                Ivan Prpić</p>
+                            <div class="flex gap-3" style="margin-top:10px">
+                                <button class="btn-ghost" style="flex:1;font-size:11px">Nastavi liječenje</button>
+                                <button class="btn-ghost"
+                                    style="font-size:11px;color:#f59e0b;border-color:rgba(245,158,11,0.2)">✏
+                                    Uredi</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div
+                    style="background:#0f172a;border-radius:18px;padding:20px;color:#fff;box-shadow:0 8px 24px rgba(15,23,42,0.15)">
+                    <h3
+                        style="font-size:14px;font-weight:800;color:#94a3b8;display:flex;align-items:center;gap:8px;margin-bottom:14px">
+                        📊 Recentni posjeti</h3>
+                    <div
+                        style="display:flex;gap:10px;align-items:flex-start;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.05)">
+                        <div
+                            style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">
+                            1</div>
+                        <div>
+                            <div style="font-size:13px;font-weight:700">04.03.2026</div>
+                            <div style="font-size:10px;color:#64748b">Dr. Ivan Prpić</div><span
+                                class="badge badge-success" style="font-size:8px;margin-top:4px">završen</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- PAGE: DOKUMENTI -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div class="page hidden" id="page-documents">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="section-title">Klinički Dokumenti</h1>
+                <p class="section-subtitle">Pregled svih poslanih dokumenata (e-Nalazi)</p>
+            </div>
+        </div>
+        <div class="flex gap-3 mb-6">
+            <div class="search-bar" style="flex:1"><span class="search-icon">🔎</span><input
+                    placeholder="Pretraži po MBO ili OID-u..." /></div>
+            <select
+                style="padding:10px 16px;border:1.5px solid #e2e8f0;border-radius:12px;font-size:13px;color:#64748b;background:#fff;outline:none;cursor:pointer">
+                <option>Svi statusi</option>
+                <option>Poslano</option>
+                <option>Stornirano</option>
+                <option>Zamijenjeno</option>
+            </select>
+        </div>
+        <div class="card">
+            <div class="card-body" style="padding:0;overflow:hidden;border-radius:18px">
+                <table class="premium-table">
+                    <thead>
+                        <tr>
+                            <th>Datum</th>
+                            <th>Tip dokumenta</th>
+                            <th>Pacijent</th>
+                            <th>Status</th>
+                            <th>OID</th>
+                            <th style="text-align:right">Akcije</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td style="font-weight:600;color:#1e293b">04.03.2026</td>
+                            <td>Otpusno pismo</td>
+                            <td>
+                                <div style="font-weight:600">Ivo Ivić</div>
+                                <div style="font-size:11px;color:#94a3b8">180223069</div>
+                            </td>
+                            <td><span class="badge badge-success">Poslano</span></td>
+                            <td style="font-family:monospace;font-size:11px;color:#94a3b8">2.16.840.1...</td>
+                            <td style="text-align:right"><button class="btn-ghost"
+                                    style="font-size:11px;padding:5px 10px">🔄</button> <button class="btn-ghost"
+                                    style="font-size:11px;padding:5px 10px;color:#ef4444;border-color:rgba(239,68,68,0.2)">✕</button>
+                                <button class="btn-ghost" style="font-size:11px;padding:5px 10px">👁</button></td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight:600;color:#1e293b">01.03.2026</td>
+                            <td>Lab. nalaz</td>
+                            <td>
+                                <div style="font-weight:600">Marija Horvat</div>
+                                <div style="font-size:11px;color:#94a3b8">999999423</div>
+                            </td>
+                            <td><span class="badge badge-success">Poslano</span></td>
+                            <td style="font-family:monospace;font-size:11px;color:#94a3b8">2.16.840.2...</td>
+                            <td style="text-align:right"><button class="btn-ghost"
+                                    style="font-size:11px;padding:5px 10px">🔄</button> <button class="btn-ghost"
+                                    style="font-size:11px;padding:5px 10px;color:#ef4444;border-color:rgba(239,68,68,0.2)">✕</button>
+                                <button class="btn-ghost" style="font-size:11px;padding:5px 10px">👁</button></td>
+                        </tr>
+                        <tr style="opacity:0.6">
+                            <td>25.02.2026</td>
+                            <td>Prijemni nalaz</td>
+                            <td>
+                                <div style="font-weight:600">Ivo Ivić</div>
+                                <div style="font-size:11px;color:#94a3b8">180223069</div>
+                            </td>
+                            <td><span class="badge badge-danger">Stornirano</span></td>
+                            <td style="font-family:monospace;font-size:11px;color:#94a3b8">2.16.840.3...</td>
+                            <td style="text-align:right"><button class="btn-ghost"
+                                    style="font-size:11px;padding:5px 10px">👁</button></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- PAGE: AUDIT -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div class="page hidden" id="page-audit">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="section-title">🔍 Praćenje statusa</h1>
+                <p class="section-subtitle">Središnji pregled tehničke telemetrije i CEZIH FHIR komunikacije</p>
+            </div>
+            <button class="btn-ghost">Osvježi</button>
+        </div>
+        <div class="search-bar mb-6"><span class="search-icon">🔎</span><input
+                placeholder="Pretraži po pacijentu, MBO, OIB, akciji ili grešci..." /></div>
+        <div style="display:grid;grid-template-columns:3fr 1fr;gap:16px">
+            <div class="card">
+                <div class="card-body" style="padding:0;overflow:hidden;border-radius:18px">
+                    <table class="premium-table">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th>Vrijeme</th>
+                                <th>Pacijent</th>
+                                <th>Identifikatori</th>
+                                <th>Akcija</th>
+                                <th>Status</th>
+                                <th style="text-align:right">Smjer</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr style="background:rgba(99,102,241,0.03)">
+                                <td>
+                                    <div
+                                        style="width:14px;height:14px;border-radius:50%;border:2px solid #6366f1;background:#6366f1;display:flex;align-items:center;justify-content:center">
+                                        <div style="width:5px;height:5px;border-radius:50%;background:#fff"></div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div style="font-weight:700;font-size:13px">04.03.2026</div>
+                                    <div style="font-size:10px;color:#94a3b8;font-family:monospace">14:22:15</div>
+                                </td>
+                                <td style="font-weight:700">Ivo Ivić</td>
+                                <td>
+                                    <div style="font-size:10px;font-family:monospace;color:#64748b">MBO:
+                                        180223069<br>OIB: 12345678901</div>
+                                </td>
+                                <td>
+                                    <div style="font-weight:700;color:#1e293b">DOCUMENT_SEND</div>
+                                    <div style="font-size:10px;color:#94a3b8;font-family:monospace">Visit: a1b2c3d...
+                                    </div>
+                                </td>
+                                <td><span class="badge badge-success">✓ Uspješno</span></td>
+                                <td style="text-align:right"><span class="badge badge-info">→ CEZIH</span></td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div style="width:14px;height:14px;border-radius:50%;border:2px solid #e2e8f0">
+                                    </div>
+                                </td>
+                                <td>
+                                    <div style="font-weight:700;font-size:13px">04.03.2026</div>
+                                    <div style="font-size:10px;color:#94a3b8;font-family:monospace">14:21:08</div>
+                                </td>
+                                <td style="font-weight:700">Ivo Ivić</td>
+                                <td>
+                                    <div style="font-size:10px;font-family:monospace;color:#64748b">MBO: 180223069</div>
+                                </td>
+                                <td>
+                                    <div style="font-weight:700;color:#1e293b">VISIT_CLOSE</div>
+                                </td>
+                                <td><span class="badge badge-success">✓ Uspješno</span></td>
+                                <td style="text-align:right"><span class="badge badge-info">→ CEZIH</span></td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div style="width:14px;height:14px;border-radius:50%;border:2px solid #e2e8f0">
+                                    </div>
+                                </td>
+                                <td>
+                                    <div style="font-weight:700;font-size:13px">04.03.2026</div>
+                                    <div style="font-size:10px;color:#94a3b8;font-family:monospace">09:15:42</div>
+                                </td>
+                                <td style="font-weight:700">Ivo Ivić</td>
+                                <td>
+                                    <div style="font-size:10px;font-family:monospace;color:#64748b">MBO: 180223069</div>
+                                </td>
+                                <td>
+                                    <div style="font-weight:700;color:#1e293b">VISIT_CREATE</div>
+                                </td>
+                                <td><span class="badge badge-success">✓ Uspješno</span></td>
+                                <td style="text-align:right"><span class="badge badge-info">→ CEZIH</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card" style="display:flex;flex-direction:column">
+                <div class="card-header">
+                    <h3><span class="icon">🔬</span> Inspector</h3>
+                </div>
+                <div class="card-body" style="flex:1;display:flex;flex-direction:column">
+                    <div
+                        style="font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">
+                        FHIR Request</div>
+                    <div class="inspector">
+                        <pre>{
+  "resourceType": "Bundle",
+  "type": "message",
+  "entry": [{
+    "resource": {
+      "resourceType": "MessageHeader",
+      "eventCoding": {
+        "code": "document-send"
+      }
+    }
+  }]
+}</pre>
+                    </div>
+                    <div
+                        style="font-size:9px;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:0.8px;margin-top:12px;margin-bottom:6px">
+                        CEZIH Response</div>
+                    <div class="inspector">
+                        <pre style="color:#6ee7b7">{
+  "success": true,
+  "httpStatus": 200
+}</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- PAGE: CERTIFIKACIJA -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div class="page hidden" id="page-certification">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="section-title">🏆 FHIR Certification Test Bench</h1>
+                <p class="section-subtitle">22 testna scenarija — CEZIH certifikacija privatnika</p>
+            </div>
+            <div class="flex gap-3">
+                <div class="nav-status"><span class="dot"></span> Gateway sesija aktivna</div>
+                <span class="badge badge-success" style="padding:6px 14px;font-size:11px">✅ 14 Prošlo</span>
+                <span class="badge badge-warning" style="padding:6px 14px;font-size:11px">⚠️ 3 Lokalni</span>
+                <span class="badge badge-neutral" style="padding:6px 14px;font-size:11px">⚙️ 5 Skip</span>
+                <button class="btn-primary" style="font-size:12px">▶ Pokreni sve</button>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="stat-label">Pristup i Autorizacija</div>
+                        <div class="stat-value" style="font-size:20px">TC 1-3</div>
+                    </div>
+                    <div class="stat-icon" style="background:rgba(99,102,241,0.08);color:#6366f1">🔐</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="stat-label">Infrastruktura</div>
+                        <div class="stat-value" style="font-size:20px">TC 4-9</div>
+                    </div>
+                    <div class="stat-icon" style="background:rgba(20,184,166,0.08);color:#14b8a6">⚙️</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="stat-label">Dokumentacija</div>
+                        <div class="stat-value" style="font-size:20px">TC 18-22</div>
+                    </div>
+                    <div class="stat-icon" style="background:rgba(139,92,246,0.08);color:#8b5cf6">📄</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3><span class="icon">👥</span> Upravljanje Pacijentima</h3><button class="btn-ghost"
+                    style="font-size:11px">▶ Pokreni grupu</button>
+            </div>
+            <div class="card-body" style="padding:8px 12px">
+                <div class="tc-item">
+                    <div class="tc-id" style="background:rgba(16,185,129,0.1);color:#059669">TC10</div>
+                    <div class="tc-info">
+                        <div class="tc-title">Identifikacija pacijenta (MBO) <span class="badge badge-success">✓
+                                Prošao</span> <span
+                                style="font-size:10px;font-family:monospace;color:#94a3b8;background:#f1f5f9;padding:2px 6px;border-radius:4px;margin-left:4px">HTTP
+                                200</span> <span style="font-size:10px;color:#94a3b8">312ms</span></div>
+                        <div class="tc-desc">Dohvat demografskih podataka putem MBO-a (IHE PDQm)</div>
+                    </div><button class="btn-ghost" style="font-size:10px;padding:4px 10px">▶ Run</button>
+                </div>
+                <div class="tc-item">
+                    <div class="tc-id" style="background:rgba(148,163,184,0.1);color:#94a3b8">TC11</div>
+                    <div class="tc-info">
+                        <div class="tc-title">Registracija stranca (PMIR) <span class="badge badge-neutral">⚙
+                                Skip</span></div>
+                        <div class="tc-desc" style="font-style:italic">Zahtijeva testne podatke stranca (putovnica ili
+                            EKZO)</div>
+                    </div><button class="btn-ghost" style="font-size:10px;padding:4px 10px;opacity:0.4">▶ Run</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- PAGE: SETTINGS (placeholder) -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div class="page hidden" id="page-settings">
+        <h1 class="section-title mb-4">⚙️ Postavke</h1>
+        <div class="card">
+            <div class="card-header">
+                <h3>Konfiguracija izbornika</h3>
+            </div>
+            <div class="card-body">
+                <p style="color:#94a3b8">Postavke sustava — demonstracija konzistentnog dizajna.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- MODAL: Registracija -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div class="modal-overlay" id="regModal">
+        <div class="modal">
+            <div class="modal-head">
+                <div>
+                    <h3>🔍 Registracija s CEZIH-a (TC 10)</h3>
+                    <p>Unesite MBO pacijenta za provjeru u CEZIH registru</p>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div class="form-field"><label>MBO (9 znamenki)</label><input type="text" placeholder="npr. 123456789"
+                        maxlength="9" style="font-family:monospace" /></div>
+            </div>
+            <div class="modal-foot">
+                <button class="btn-ghost"
+                    onclick="document.getElementById('regModal').classList.remove('show')">Odustani</button>
+                <button class="btn-primary">🔎 Dohvati</button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: 0.4
+            }
+        }
+    </style>
+
+    <script>
+        function showPage(id) {
+            document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
+            const target = id === 'patient-chart' ? 'page-patient-chart' : 'page-' + id;
+            document.getElementById(target).classList.remove('hidden');
+            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+            if (id !== 'patient-chart') {
+                event.target.classList.add('active');
+            }
+        }
+        // Close modal on overlay click
+        document.querySelectorAll('.modal-overlay').forEach(o => {
+            o.addEventListener('click', e => { if (e.target === o) o.classList.remove('show'); });
+        });
+    </script>
+</body>
+
+</html>

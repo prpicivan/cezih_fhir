@@ -14,9 +14,10 @@ interface CaseModalProps {
     patientMbo: string;
     onClose: () => void;
     onSuccess: () => void;
+    onCaseAction?: (caseId: string, action: string, label: string) => Promise<void>;
 }
 
-export default function CaseModal({ existingCase, patientMbo, onClose, onSuccess }: CaseModalProps) {
+export default function CaseModal({ existingCase, patientMbo, onClose, onSuccess, onCaseAction }: CaseModalProps) {
     const isEditMode = !!existingCase;
 
     const [form, setForm] = useState({
@@ -199,8 +200,8 @@ export default function CaseModal({ existingCase, patientMbo, onClose, onSuccess
                                 onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
                                 placeholder="Pretraži po šifri ili nazivu (npr. M17, koljeno...)"
                                 className={`w-full border rounded-xl pl-10 pr-10 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 transition-all ${diagnosisSelected
-                                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800 focus:border-emerald-400 focus:ring-emerald-100'
-                                        : 'border-slate-200 text-slate-800 focus:border-blue-400 focus:ring-blue-100'
+                                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800 focus:border-emerald-400 focus:ring-emerald-100'
+                                    : 'border-slate-200 text-slate-800 focus:border-blue-400 focus:ring-blue-100'
                                     }`}
                             />
                         </div>
@@ -240,6 +241,58 @@ export default function CaseModal({ existingCase, patientMbo, onClose, onSuccess
                             <p className="text-sm font-medium text-rose-700">{error}</p>
                         </div>
                     )}
+
+                    {/* Case Actions — only in edit mode */}
+                    {isEditMode && onCaseAction && (
+                        <>
+                            <hr className="border-t border-dashed border-slate-200 my-2" />
+                            <div>
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                                    ⚡ Akcije nad slučajem
+                                </p>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {/* Recidiv — visible for active or remission */}
+                                    {(existingCase.status === 'active') && existingCase.clinicalStatus !== 'recurrence' && (
+                                        <button
+                                            type="button"
+                                            onClick={async () => { await onCaseAction(existingCase.id, '2.4', 'Recidiv'); onClose(); }}
+                                            className="py-2 px-3 bg-white border border-orange-200 rounded-xl text-xs font-bold text-orange-600 hover:bg-orange-50 transition-all flex items-center justify-center gap-1.5"
+                                        >
+                                            ⚠️ Recidiv
+                                        </button>
+                                    )}
+                                    {/* Remisija — visible for active (not already in remission) */}
+                                    {existingCase.status === 'active' && existingCase.clinicalStatus !== 'remission' && (
+                                        <button
+                                            type="button"
+                                            onClick={async () => { await onCaseAction(existingCase.id, '2.5', 'Remisija'); onClose(); }}
+                                            className="py-2 px-3 bg-white border border-blue-200 rounded-xl text-xs font-bold text-blue-600 hover:bg-blue-50 transition-all flex items-center justify-center gap-1.5"
+                                        >
+                                            💚 Remisija
+                                        </button>
+                                    )}
+                                    {/* Zatvori — visible for active */}
+                                    {existingCase.status === 'active' && (
+                                        <button
+                                            type="button"
+                                            onClick={async () => { await onCaseAction(existingCase.id, '2.7', 'Zatvaranje slučaja'); onClose(); }}
+                                            className="py-2 px-3 bg-white border border-emerald-200 rounded-xl text-xs font-bold text-emerald-600 hover:bg-emerald-50 transition-all flex items-center justify-center gap-1.5"
+                                        >
+                                            ✅ Zatvori slučaj
+                                        </button>
+                                    )}
+                                    {/* Obriši — always visible in edit mode */}
+                                    <button
+                                        type="button"
+                                        onClick={async () => { await onCaseAction(existingCase.id, '2.2', 'Brisanje slučaja'); onClose(); }}
+                                        className="py-2 px-3 bg-white border border-rose-200 rounded-xl text-xs font-bold text-rose-500 hover:bg-rose-50 transition-all flex items-center justify-center gap-1.5"
+                                    >
+                                        🗑️ Obriši
+                                    </button>
+                                </div>
+                            </div>
+                        </>
+                    )}
                 </form>
 
                 {/* Footer */}
@@ -255,10 +308,10 @@ export default function CaseModal({ existingCase, patientMbo, onClose, onSuccess
                         onClick={handleSubmit}
                         disabled={submitting || !diagnosisSelected}
                         className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-black text-sm transition-all ${submitting || !diagnosisSelected
-                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                : isEditMode
-                                    ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-200'
-                                    : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-200'
+                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                            : isEditMode
+                                ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-200'
+                                : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-200'
                             }`}
                     >
                         {submitting && <Loader2 className="w-4 h-4 animate-spin" />}

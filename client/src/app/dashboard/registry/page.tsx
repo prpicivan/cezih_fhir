@@ -330,7 +330,15 @@ function RegistrySearchTab({ type }: { type: 'organization' | 'practitioner' }) 
                         <tbody className="divide-y divide-slate-100">
                             {results.map((item, i) => (
                                 <tr key={i} className="hover:bg-slate-50 transition-colors">
-                                    <td className="px-5 py-3 font-medium text-slate-900">{item.name}</td>
+                                    <td className="px-5 py-3 font-medium text-slate-900">
+                                        {typeof item.name === 'string'
+                                            ? item.name
+                                            : Array.isArray(item.name)
+                                                ? item.name.map((n: any) => [n.given?.join(' '), n.family].filter(Boolean).join(' ')).join(', ')
+                                                : item.name?.family
+                                                    ? [item.name.given?.join(' '), item.name.family].filter(Boolean).join(' ')
+                                                    : '—'}
+                                    </td>
                                     <td className="px-5 py-3 font-mono text-xs text-slate-600">{item.identifier?.[0]?.value || '—'}</td>
                                     <td className="px-5 py-3">
                                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${item.active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>
@@ -385,8 +393,8 @@ export default function RegistryPage() {
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id)}
                             className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-all whitespace-nowrap -mb-px ${isActive
-                                    ? 'border-blue-500 text-blue-700'
-                                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                                ? 'border-blue-500 text-blue-700'
+                                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
                                 }`}
                         >
                             <Icon className="w-4 h-4" />

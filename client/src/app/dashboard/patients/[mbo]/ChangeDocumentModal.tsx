@@ -16,18 +16,14 @@ interface ChangeDocumentModalProps {
 }
 
 const DOCUMENT_TYPES = [
-    { value: 'AMBULATORY_REPORT', label: 'Ambulantni nalaz' },
-    { value: 'SPECIALIST_REPORT', label: 'Specijalistički nalaz' },
-    { value: 'LAB_RESULT', label: 'Laboratorijski nalaz' },
-    { value: 'RADIOLOGY_REPORT', label: 'Radiološki nalaz' },
-    { value: 'DISCHARGE_SUMMARY', label: 'Otpusno pismo' },
-    { value: 'REFERRAL', label: 'Uputa' },
-    { value: 'PRESCRIPTION', label: 'e-Recept' },
+    { value: '011', label: 'Izvješće nakon pregleda u ambulanti privatne zdravstvene ustanove' },
+    { value: '012', label: 'Nalazi iz specijalističke ordinacije privatne zdravstvene ustanove' },
+    { value: '013', label: 'Otpusno pismo iz privatne zdravstvene ustanove' },
 ];
 
 export default function ChangeDocumentModal({ doc, patientMbo, onClose, onSuccess }: ChangeDocumentModalProps) {
     const [form, setForm] = useState({
-        type: doc.type || 'AMBULATORY_REPORT',
+        type: doc.type || '011',
         anamnesis: doc.anamnesis || '',
         finding: doc.finding || '',
         status_text: doc.status_text || '',
@@ -196,8 +192,8 @@ export default function ChangeDocumentModal({ doc, patientMbo, onClose, onSucces
                                 onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
                                 placeholder="Pretraži po šifri ili nazivu (npr. J00, grip...)"
                                 className={`w-full border rounded-xl pl-10 pr-10 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 transition-all ${diagnosisSelected
-                                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800 focus:border-emerald-400 focus:ring-emerald-100'
-                                        : 'border-slate-200 text-slate-800 focus:border-blue-400 focus:ring-blue-100'
+                                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800 focus:border-emerald-400 focus:ring-emerald-100'
+                                    : 'border-slate-200 text-slate-800 focus:border-blue-400 focus:ring-blue-100'
                                     }`}
                             />
                         </div>
@@ -293,8 +289,8 @@ export default function ChangeDocumentModal({ doc, patientMbo, onClose, onSucces
                         onClick={handleSubmit}
                         disabled={submitting || !diagnosisSelected}
                         className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-black text-sm transition-all ${submitting || !diagnosisSelected
-                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                : 'bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-200'
+                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                            : 'bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-200'
                             }`}
                     >
                         {submitting && <Loader2 className="w-4 h-4 animate-spin" />}

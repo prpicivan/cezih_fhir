@@ -48,6 +48,7 @@ export const CEZIH_EXTENSIONS = {
     EPISODE_OF_CARE_PROFILE: 'http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-episode-of-care',
     COST_PARTICIPATION: 'http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-troskovi-sudjelovanje',
     RELATED_CASE: 'http://fhir.cezih.hr/specifikacije/StructureDefinition/vezani-slucaj',
+    PREVIOUS_HEALTH_ISSUE: 'http://fhir.cezih.hr/specifikacije/StructureDefinition/prethodni-zdravstveni-problem',
     ANNOTATION_TYPE: 'http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-annotation-type',
 } as const;
 
@@ -112,9 +113,9 @@ export const ENCOUNTER_CLASSES = {
  * Clinical Document Types for Private Clinics
  */
 export enum ClinicalDocumentType {
-    AMBULATORY_REPORT = 'ambulatory-report',       // Izvješće nakon pregleda u ambulanti
-    SPECIALIST_FINDING = 'specialist-finding',       // Nalaz iz specijalističke ordinacije
-    DISCHARGE_LETTER = 'discharge-letter',           // Otpusno pismo iz privatne zdravstvene ustanove
+    AMBULATORY_REPORT = '011',       // Izvješće nakon pregleda u ambulanti privatne zdravstvene ustanove
+    SPECIALIST_FINDING = '012',       // Nalazi iz specijalističke ordinacije privatne zdravstvene ustanove
+    DISCHARGE_LETTER = '013',         // Otpusno pismo iz privatne zdravstvene ustanove
 }
 
 /**

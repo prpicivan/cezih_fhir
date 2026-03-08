@@ -268,6 +268,19 @@ class AuthService {
     }
 
     /**
+     * Get system token (M2M) status without triggering a refresh.
+     */
+    getSystemTokenStatus(): { active: boolean; expiresInMinutes?: number } {
+        if (!this.systemToken || Date.now() >= this.systemTokenExpiry - 30000) {
+            return { active: false };
+        }
+        return {
+            active: true,
+            expiresInMinutes: Math.round((this.systemTokenExpiry - Date.now()) / 60000),
+        };
+    }
+
+    /**
      * Clear the current gateway session (used before re-authentication).
      */
     clearGatewaySession(): void {

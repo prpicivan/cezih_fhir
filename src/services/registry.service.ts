@@ -14,8 +14,8 @@
  *   - Practitioner: hr-practitioner
  *   - HealthcareService: hr-healthcare-service
  *
- * NOTE: mCSD endpoint path is configurable via CEZIH_MCSD_SERVICE_PATH env var.
- * Default: /R4/fhir. Endpoint not yet deployed in CEZIH test environment (as of 2026-03-02).
+ * NOTE: mCSD runs exclusively on port 9443 (system auth / OAuth2 client credentials).
+ * Path: /mcsd/api/{ResourceType} — confirmed by CEZIH endpoint list 2026-03-05.
  */
 import axios from 'axios';
 import { config } from '../config';
@@ -123,25 +123,16 @@ export interface OrgAffiliationSearchParams extends CommonSearchParams {
 class RegistryService {
     /**
      * Build the base URL for mCSD queries.
-     * Tries system auth (port 9443) first, falls back to gateway auth (port 8443).
+     * mCSD is exclusively on port 9443 (system auth).
      */
-    private getMcsdBaseUrl(useSystemAuth: boolean): string {
-        const base = useSystemAuth ? config.cezih.gatewaySystem : config.cezih.gatewayBase;
-        return `${base}${config.cezih.services.mcsd}`;
+    private getMcsdBaseUrl(): string {
+        return `${config.cezih.gatewaySystem}${config.cezih.services.mcsd}`;
     }
 
     /**
-     * Get auth headers — system token for M2M or gateway cookie for user context.
+     * Get auth headers — mCSD uses system token (OAuth2 client credentials) on port 9443.
      */
-    private async getAuthHeaders(userToken?: string): Promise<Record<string, string>> {
-        if (userToken) {
-            return authService.getUserAuthHeaders(userToken);
-        }
-        // Prefer gateway auth (cookie-based) — mCSD endpoints require it
-        if (authService.hasGatewaySession()) {
-            return authService.getUserAuthHeaders('');
-        }
-        // Fallback: system token
+    private async getAuthHeaders(): Promise<Record<string, string>> {
         try {
             const systemToken = await authService.getSystemToken();
             if (systemToken) {
@@ -151,21 +142,23 @@ class RegistryService {
                 };
             }
         } catch (e) {
-            console.log('[RegistryService] System token not available');
+            console.log('[RegistryService] System token failed:', (e as Error).message);
         }
-        return authService.getUserAuthHeaders('');
+        // Fallback: try gateway cookies
+        if (authService.hasGatewaySession()) {
+            return authService.getUserAuthHeaders('');
+        }
+        throw new Error('Nema dostupne autentifikacije za mCSD. Potreban je system token (OAuth2 client credentials) ili gateway sesija.');
     }
 
     /**
-     * Generic FHIR resource search with dual-port fallback.
-     * Handles both system auth (9443) and gateway auth (8443).
+     * Generic FHIR resource search on mCSD (port 9443 only).
      */
     private async searchResource(
         resourceType: string,
         params: Record<string, any>,
-        userToken?: string,
     ): Promise<{ total: number; resources: any[]; bundle: any }> {
-        const headers = await this.getAuthHeaders(userToken);
+        const headers = await this.getAuthHeaders();
         const searchParams = new URLSearchParams();
 
         for (const [key, value] of Object.entries(params)) {
@@ -178,41 +171,22 @@ class RegistryService {
         }
 
         const queryString = searchParams.toString();
+        const baseUrl = this.getMcsdBaseUrl();
+        const url = queryString
+            ? `${baseUrl}/${resourceType}?${queryString}`
+            : `${baseUrl}/${resourceType}`;
+        console.log(`[RegistryService] ${resourceType}: ${url}`);
 
-        // When we have gateway cookies, try gateway (8443) first, then system (9443)
-        // Gateway cookies only work on port 8443
-        const hasGateway = authService.hasGatewaySession();
-        const authOrder = hasGateway ? [false, true] : [true, false];
-        for (const useSystem of authOrder) {
-            const baseUrl = this.getMcsdBaseUrl(useSystem);
-            const url = queryString
-                ? `${baseUrl}/${resourceType}?${queryString}`
-                : `${baseUrl}/${resourceType}`;
-            console.log(`[RegistryService] ${resourceType} (${useSystem ? 'sys' : 'gw'}): ${url}`);
+        const response = await axios.get(url, {
+            headers,
+            httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false }),
+            timeout: 15000,
+        });
 
-            try {
-                const response = await axios.get(url, {
-                    headers,
-                    httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false }),
-                    timeout: 10000,
-                });
-
-                const resources = response.data.entry?.map((e: any) => e.resource) || [];
-                const total = response.data.total ?? resources.length;
-                console.log(`[RegistryService] Found ${resources.length} ${resourceType} (total: ${total})`);
-                return { total, resources, bundle: response.data };
-            } catch (innerError: any) {
-                if (innerError.response?.status !== 404) {
-                    throw innerError;
-                }
-                console.log(`[RegistryService] ${useSystem ? 'System' : 'Gateway'} path not found, trying next...`);
-            }
-        }
-
-        throw new Error(
-            `Pretraga ${resourceType} nije dostupna u testnom okruženju CEZIH-a. ` +
-            `mCSD endpoint nije pronađen. Kontaktirajte administratora za ispravnu putanju.`
-        );
+        const resources = response.data.entry?.map((e: any) => e.resource) || [];
+        const total = response.data.total ?? resources.length;
+        console.log(`[RegistryService] Found ${resources.length} ${resourceType} (total: ${total})`);
+        return { total, resources, bundle: response.data };
     }
 
     /**
@@ -221,23 +195,15 @@ class RegistryService {
     private async executeSearch(
         resourceType: string,
         params: Record<string, any>,
-        userToken?: string,
     ): Promise<any[]> {
         try {
-            const result = await this.searchResource(resourceType, params, userToken);
+            const result = await this.searchResource(resourceType, params);
             return result.resources;
         } catch (error: any) {
-            if (error.response?.status === 400 &&
-                typeof error.response?.data === 'string' &&
-                error.response.data.includes('Cookie not found')) {
-                throw new Error(
-                    'Potrebna je prijava u CEZIH sustav (gateway sesija nije aktivna). ' +
-                    'Prijavite se putem Certilia ili pametne kartice.'
-                );
-            }
             if (error.response) {
+                console.error(`[RegistryService] ${resourceType}: HTTP ${error.response.status}`, JSON.stringify(error.response.data).substring(0, 300));
                 throw new Error(
-                    `CEZIH server: ${error.response.status}: ` +
+                    `CEZIH mCSD ${resourceType}: ${error.response.status} — ` +
                     `${JSON.stringify(error.response.data).substring(0, 200)}`
                 );
             }
@@ -251,38 +217,38 @@ class RegistryService {
     // ============================================================
 
     /** Search Organization (§2:3.90.4.1.2.2) */
-    async searchOrganizations(params?: OrganizationSearchParams, userToken?: string): Promise<any[]> {
-        return this.executeSearch('Organization', params || {}, userToken);
+    async searchOrganizations(params?: OrganizationSearchParams): Promise<any[]> {
+        return this.executeSearch('Organization', params || {});
     }
 
     /** Search Location (§2:3.90.4.1.2.3) */
-    async searchLocations(params?: LocationSearchParams, userToken?: string): Promise<any[]> {
-        return this.executeSearch('Location', params || {}, userToken);
+    async searchLocations(params?: LocationSearchParams): Promise<any[]> {
+        return this.executeSearch('Location', params || {});
     }
 
     /** Search Practitioner (§2:3.90.4.1.2.4) */
-    async searchPractitioners(params?: PractitionerSearchParams, userToken?: string): Promise<any[]> {
-        return this.executeSearch('Practitioner', params || {}, userToken);
+    async searchPractitioners(params?: PractitionerSearchParams): Promise<any[]> {
+        return this.executeSearch('Practitioner', params || {});
     }
 
     /** Search PractitionerRole (§2:3.90.4.1.2.5) */
-    async searchPractitionerRoles(params?: PractitionerRoleSearchParams, userToken?: string): Promise<any[]> {
-        return this.executeSearch('PractitionerRole', params || {}, userToken);
+    async searchPractitionerRoles(params?: PractitionerRoleSearchParams): Promise<any[]> {
+        return this.executeSearch('PractitionerRole', params || {});
     }
 
     /** Search HealthcareService (§2:3.90.4.1.2.6) */
-    async searchHealthcareServices(params?: HealthcareServiceSearchParams, userToken?: string): Promise<any[]> {
-        return this.executeSearch('HealthcareService', params || {}, userToken);
+    async searchHealthcareServices(params?: HealthcareServiceSearchParams): Promise<any[]> {
+        return this.executeSearch('HealthcareService', params || {});
     }
 
     /** Search Endpoint (§2:3.90.4.1.2.8) */
-    async searchEndpoints(params?: EndpointSearchParams, userToken?: string): Promise<any[]> {
-        return this.executeSearch('Endpoint', params || {}, userToken);
+    async searchEndpoints(params?: EndpointSearchParams): Promise<any[]> {
+        return this.executeSearch('Endpoint', params || {});
     }
 
     /** Search OrganizationAffiliation (§2:3.90.4.1.2.9) */
-    async searchOrgAffiliations(params?: OrgAffiliationSearchParams, userToken?: string): Promise<any[]> {
-        return this.executeSearch('OrganizationAffiliation', params || {}, userToken);
+    async searchOrgAffiliations(params?: OrgAffiliationSearchParams): Promise<any[]> {
+        return this.executeSearch('OrganizationAffiliation', params || {});
     }
 }
 

@@ -1,0 +1,1497 @@
+<!DOCTYPE html>
+<html lang="hr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pacijent — CEZIH Middleware</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0f1117;
+            color: #e1e4ea;
+            min-height: 100vh;
+        }
+
+        /* ── Top bar ── */
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 24px;
+            background: #161822;
+            border-bottom: 1px solid #23263a;
+        }
+
+        .topbar .logo {
+            font-size: 15px;
+            font-weight: 700;
+            color: #7c6ef0;
+        }
+
+        .topbar .nav {
+            display: flex;
+            gap: 18px;
+        }
+
+        .topbar .nav a {
+            color: #8b8fa7;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            transition: color .15s;
+        }
+
+        .topbar .nav a:hover,
+        .topbar .nav a.active {
+            color: #e1e4ea;
+        }
+
+        .topbar .user {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .topbar .user .avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #7c6ef0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .topbar .user span {
+            font-size: 13px;
+            color: #8b8fa7;
+        }
+
+        /* ── Patient header ── */
+        .patient-header {
+            padding: 16px 24px;
+            background: linear-gradient(135deg, #1a1d2e 0%, #161822 100%);
+            border-bottom: 1px solid #23263a;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .patient-avatar {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #7c6ef0, #5b8cf0);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: 700;
+            color: #fff;
+            flex-shrink: 0;
+        }
+
+        .patient-info h2 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #e1e4ea;
+        }
+
+        .patient-meta {
+            display: flex;
+            gap: 16px;
+            margin-top: 3px;
+        }
+
+        .patient-meta span {
+            font-size: 12px;
+            color: #6b7084;
+        }
+
+        .patient-meta span b {
+            color: #8b8fa7;
+            font-weight: 500;
+        }
+
+        /* ── 3-column layout ── */
+        .columns {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 1px;
+            background: #23263a;
+            flex: 1;
+            min-height: calc(100vh - 120px);
+        }
+
+        .column {
+            background: #0f1117;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ── Column header ── */
+        .col-header {
+            padding: 12px 16px;
+            background: #161822;
+            border-bottom: 1px solid #23263a;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+
+        .col-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #e1e4ea;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .col-title .icon {
+            font-size: 15px;
+        }
+
+        .col-title .count {
+            background: #23263a;
+            color: #8b8fa7;
+            font-size: 11px;
+            font-weight: 500;
+            padding: 1px 7px;
+            border-radius: 8px;
+            margin-left: 4px;
+        }
+
+        .col-actions {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        /* Filter toggle */
+        .filter-toggle {
+            display: flex;
+            background: #1a1d2e;
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid #23263a;
+        }
+
+        .filter-btn {
+            padding: 4px 10px;
+            font-size: 11px;
+            font-weight: 500;
+            color: #6b7084;
+            border: none;
+            background: none;
+            cursor: pointer;
+            transition: all .15s;
+        }
+
+        .filter-btn.active {
+            background: #7c6ef0;
+            color: #fff;
+        }
+
+        .filter-btn:hover:not(.active) {
+            color: #e1e4ea;
+        }
+
+        /* Tabs (documents) */
+        .tab-bar {
+            display: flex;
+            background: #1a1d2e;
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid #23263a;
+        }
+
+        .tab-btn {
+            padding: 4px 10px;
+            font-size: 11px;
+            font-weight: 500;
+            color: #6b7084;
+            border: none;
+            background: none;
+            cursor: pointer;
+            transition: all .15s;
+        }
+
+        .tab-btn.active {
+            background: #7c6ef0;
+            color: #fff;
+        }
+
+        .tab-btn:hover:not(.active) {
+            color: #e1e4ea;
+        }
+
+        /* Add button */
+        .btn-add {
+            width: 26px;
+            height: 26px;
+            border-radius: 6px;
+            background: #7c6ef0;
+            border: none;
+            color: #fff;
+            font-size: 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background .15s;
+            flex-shrink: 0;
+        }
+
+        .btn-add:hover {
+            background: #6b5dd3;
+        }
+
+        /* ── Card list ── */
+        .card-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .card-list::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .card-list::-webkit-scrollbar-thumb {
+            background: #23263a;
+            border-radius: 2px;
+        }
+
+        /* ── Card ── */
+        .card {
+            background: #161822;
+            border: 1px solid #23263a;
+            border-radius: 10px;
+            padding: 10px 12px;
+            cursor: pointer;
+            transition: all .15s;
+            position: relative;
+        }
+
+        .card:hover {
+            border-color: #333658;
+            background: #1a1d2e;
+        }
+
+        .card.expanded {
+            border-color: #7c6ef0;
+            background: #1a1d2e;
+        }
+
+        .card-top {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .card-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: #e1e4ea;
+            line-height: 1.3;
+        }
+
+        .card-subtitle {
+            font-size: 11px;
+            color: #6b7084;
+            margin-top: 2px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .3px;
+        }
+
+        .badge.active,
+        .badge.in-progress {
+            background: rgba(52, 211, 153, .12);
+            color: #34d399;
+        }
+
+        .badge.finished,
+        .badge.resolved {
+            background: rgba(96, 165, 250, .12);
+            color: #60a5fa;
+        }
+
+        .badge.remission {
+            background: rgba(251, 191, 36, .12);
+            color: #fbbf24;
+        }
+
+        .badge.recurrence,
+        .badge.relapse {
+            background: rgba(251, 146, 60, .12);
+            color: #fb923c;
+        }
+
+        .badge.deleted,
+        .badge.entered-in-error {
+            background: rgba(248, 113, 113, .12);
+            color: #f87171;
+        }
+
+        .badge.draft {
+            background: rgba(148, 163, 184, .12);
+            color: #94a3b8;
+        }
+
+        .badge.sent {
+            background: rgba(52, 211, 153, .12);
+            color: #34d399;
+        }
+
+        .card-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 6px;
+            font-size: 11px;
+            color: #6b7084;
+        }
+
+        .card-row .label {
+            color: #555872;
+        }
+
+        /* ── Dropdown ── */
+        .dropdown-wrap {
+            position: relative;
+        }
+
+        .btn-dots {
+            width: 24px;
+            height: 24px;
+            border: none;
+            background: none;
+            color: #6b7084;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all .15s;
+            flex-shrink: 0;
+        }
+
+        .btn-dots:hover {
+            background: #23263a;
+            color: #e1e4ea;
+        }
+
+        .dropdown {
+            position: absolute;
+            right: 0;
+            top: 100%;
+            margin-top: 4px;
+            background: #1e2030;
+            border: 1px solid #2d3154;
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, .4);
+            min-width: 180px;
+            z-index: 100;
+            overflow: hidden;
+            display: none;
+        }
+
+        .dropdown.show {
+            display: block;
+        }
+
+        .dropdown-item {
+            padding: 8px 12px;
+            font-size: 12px;
+            color: #c0c4d4;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: background .1s;
+        }
+
+        .dropdown-item:hover {
+            background: #23263a;
+        }
+
+        .dropdown-item .di-icon {
+            font-size: 14px;
+            width: 18px;
+            text-align: center;
+        }
+
+        .dropdown-sep {
+            height: 1px;
+            background: #2d3154;
+            margin: 4px 0;
+        }
+
+        .dropdown-item.danger {
+            color: #f87171;
+        }
+
+        .dropdown-item.danger:hover {
+            background: rgba(248, 113, 113, .08);
+        }
+
+        /* ── Expanded card detail ── */
+        .card-detail {
+            display: none;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #23263a;
+        }
+
+        .card.expanded .card-detail {
+            display: block;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px 12px;
+        }
+
+        .detail-item {
+            font-size: 11px;
+        }
+
+        .detail-item .label {
+            color: #555872;
+        }
+
+        .detail-item .value {
+            color: #8b8fa7;
+        }
+
+        /* ── Modal ── */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, .6);
+            backdrop-filter: blur(4px);
+            z-index: 200;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.show {
+            display: flex;
+        }
+
+        .modal {
+            background: #161822;
+            border: 1px solid #23263a;
+            border-radius: 14px;
+            width: 420px;
+            max-width: 90vw;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+        }
+
+        .modal-head {
+            padding: 16px 20px;
+            border-bottom: 1px solid #23263a;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .modal-head h3 {
+            font-size: 15px;
+            font-weight: 600;
+            color: #e1e4ea;
+        }
+
+        .modal-close {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            border: none;
+            background: none;
+            color: #6b7084;
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-close:hover {
+            background: #23263a;
+            color: #e1e4ea;
+        }
+
+        .modal-body {
+            padding: 16px 20px;
+        }
+
+        .modal-body p {
+            font-size: 13px;
+            color: #8b8fa7;
+            line-height: 1.5;
+            margin-bottom: 12px;
+        }
+
+        .form-group {
+            margin-bottom: 12px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 11px;
+            font-weight: 500;
+            color: #6b7084;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 8px 10px;
+            background: #1a1d2e;
+            border: 1px solid #23263a;
+            border-radius: 6px;
+            color: #e1e4ea;
+            font-size: 13px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color .15s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            border-color: #7c6ef0;
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        .modal-foot {
+            padding: 12px 20px;
+            border-top: 1px solid #23263a;
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        .btn {
+            padding: 7px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: all .15s;
+        }
+
+        .btn-secondary {
+            background: #23263a;
+            color: #8b8fa7;
+        }
+
+        .btn-secondary:hover {
+            background: #2d3054;
+            color: #e1e4ea;
+        }
+
+        .btn-primary {
+            background: #7c6ef0;
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: #6b5dd3;
+        }
+
+        .btn-danger {
+            background: #dc2626;
+            color: #fff;
+        }
+
+        .btn-danger:hover {
+            background: #b91c1c;
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: #1e2030;
+            border: 1px solid #2d3154;
+            border-radius: 10px;
+            padding: 12px 18px;
+            font-size: 13px;
+            color: #e1e4ea;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, .4);
+            z-index: 300;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            animation: slideUp .3s ease;
+        }
+
+        .toast.show {
+            display: flex;
+        }
+
+        .toast .t-icon {
+            font-size: 16px;
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        /* ── Responsiveness ── */
+        @media (max-width:900px) {
+            .columns {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- ═══ Top Bar ═══ -->
+    <div class="topbar">
+        <div class="logo">⚕ CEZIH Middleware</div>
+        <div class="nav">
+            <a href="#">Dashboard</a>
+            <a href="#" class="active">Pacijenti</a>
+            <a href="#">Termini</a>
+            <a href="#">Postavke</a>
+        </div>
+        <div class="user">
+            <span>Dr. Ivan Prpić</span>
+            <div class="avatar">IP</div>
+        </div>
+    </div>
+
+    <!-- ═══ Patient Header ═══ -->
+    <div class="patient-header">
+        <div class="patient-avatar">II</div>
+        <div class="patient-info">
+            <h2>Ivo Ivić</h2>
+            <div class="patient-meta">
+                <span><b>MBO:</b> 180223069</span>
+                <span><b>OIB:</b> 12345678901</span>
+                <span><b>Dob:</b> 15.06.1985 (40 g.)</span>
+                <span><b>Spol:</b> M</span>
+                <span><b>Zadnji kontakt:</b> 04.03.2026</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ 3 Columns ═══ -->
+    <div class="columns">
+
+        <!-- ──── COLUMN 1: Posjete ──── -->
+        <div class="column">
+            <div class="col-header">
+                <div class="col-title">
+                    <span class="icon">🏥</span> Posjete <span class="count">4</span>
+                </div>
+                <div class="col-actions">
+                    <div class="filter-toggle">
+                        <button class="filter-btn active" onclick="setFilter(this,'visits')">Moje</button>
+                        <button class="filter-btn" onclick="setFilter(this,'visits')">Sve</button>
+                    </div>
+                    <button class="btn-add" onclick="openModal('newVisit')" title="Nova posjeta">+</button>
+                </div>
+            </div>
+            <div class="card-list" id="visitList">
+
+                <!-- Visit 1: Active -->
+                <div class="card" onclick="toggleCard(this, event)">
+                    <div class="card-top">
+                        <div>
+                            <div class="card-title">Kontrolni pregled</div>
+                            <div class="card-subtitle">Ambulantni (SKZZ)</div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span class="badge in-progress">Aktivna</span>
+                            <div class="dropdown-wrap">
+                                <button class="btn-dots" onclick="toggleDropdown(this,event)">⋮</button>
+                                <div class="dropdown">
+                                    <div class="dropdown-item" onclick="openModal('editVisit')"><span
+                                            class="di-icon">✏️</span> Izmijeni podatke</div>
+                                    <div class="dropdown-item" onclick="openModal('closeVisit')"><span
+                                            class="di-icon">✅</span> Zatvori posjetu</div>
+                                    <div class="dropdown-sep"></div>
+                                    <div class="dropdown-item danger" onclick="openModal('deleteVisit')"><span
+                                            class="di-icon">🗑</span> Obriši posjetu</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Početak:</span> 04.03.2026 09:15
+                        <span style="margin-left:auto;" class="label">ID:</span> VIS-2026-0412
+                    </div>
+                    <div class="card-detail">
+                        <div class="detail-grid">
+                            <div class="detail-item"><span class="label">Vrsta:</span> <span class="value">Pacijent
+                                    prisutan</span></div>
+                            <div class="detail-item"><span class="label">Prioritet:</span> <span
+                                    class="value">Redovni</span></div>
+                            <div class="detail-item"><span class="label">Organizacija:</span> <span
+                                    class="value">Bolnica 1</span></div>
+                            <div class="detail-item"><span class="label">Liječnik:</span> <span class="value">Dr. Ivan
+                                    Prpić</span></div>
+                            <div class="detail-item"><span class="label">Slučaj:</span> <span class="value">Hipertenzija
+                                    (I10)</span></div>
+                            <div class="detail-item"><span class="label">CEZIH ID:</span> <span
+                                    class="value">123456789</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Visit 2: Finished -->
+                <div class="card" onclick="toggleCard(this, event)">
+                    <div class="card-top">
+                        <div>
+                            <div class="card-title">Specijalistički pregled</div>
+                            <div class="card-subtitle">Ambulantni (LOM)</div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span class="badge finished">Završena</span>
+                            <div class="dropdown-wrap">
+                                <button class="btn-dots" onclick="toggleDropdown(this,event)">⋮</button>
+                                <div class="dropdown">
+                                    <div class="dropdown-item" onclick="openModal('reopenVisit')"><span
+                                            class="di-icon">🔄</span> Ponovno otvori</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Period:</span> 28.02.2026 — 28.02.2026
+                    </div>
+                    <div class="card-detail">
+                        <div class="detail-grid">
+                            <div class="detail-item"><span class="label">Vrsta:</span> <span class="value">Pacijent
+                                    prisutan</span></div>
+                            <div class="detail-item"><span class="label">Prioritet:</span> <span
+                                    class="value">Redovni</span></div>
+                            <div class="detail-item"><span class="label">Organizacija:</span> <span
+                                    class="value">Bolnica 1</span></div>
+                            <div class="detail-item"><span class="label">Liječnik:</span> <span class="value">Dr. Ivan
+                                    Prpić</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Visit 3: Deleted -->
+                <div class="card" onclick="toggleCard(this, event)">
+                    <div class="card-top">
+                        <div>
+                            <div class="card-title">Hitni prijem</div>
+                            <div class="card-subtitle">Hitni</div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span class="badge entered-in-error">Obrisana</span>
+                            <div class="dropdown-wrap">
+                                <button class="btn-dots" onclick="toggleDropdown(this,event)">⋮</button>
+                                <div class="dropdown">
+                                    <div class="dropdown-item" onclick="openModal('reopenVisit')"><span
+                                            class="di-icon">🔄</span> Ponovno otvori</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Početak:</span> 15.01.2026 22:30
+                    </div>
+                </div>
+
+                <!-- Visit 4: Planned -->
+                <div class="card" onclick="toggleCard(this, event)">
+                    <div class="card-top">
+                        <div>
+                            <div class="card-title">Kontrola nalaza</div>
+                            <div class="card-subtitle">Ambulantni (SKZZ)</div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span class="badge draft">Planirana</span>
+                            <div class="dropdown-wrap">
+                                <button class="btn-dots" onclick="toggleDropdown(this,event)">⋮</button>
+                                <div class="dropdown">
+                                    <div class="dropdown-item" onclick="openModal('editVisit')"><span
+                                            class="di-icon">✏️</span> Izmijeni podatke</div>
+                                    <div class="dropdown-item" onclick="openModal('closeVisit')"><span
+                                            class="di-icon">✅</span> Zatvori posjetu</div>
+                                    <div class="dropdown-sep"></div>
+                                    <div class="dropdown-item danger" onclick="openModal('deleteVisit')"><span
+                                            class="di-icon">🗑</span> Obriši posjetu</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Zakazano:</span> 10.03.2026 10:00
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ──── COLUMN 2: Slučajevi ──── -->
+        <div class="column">
+            <div class="col-header">
+                <div class="col-title">
+                    <span class="icon">📋</span> Slučajevi <span class="count">5</span>
+                </div>
+                <div class="col-actions">
+                    <div class="filter-toggle">
+                        <button class="filter-btn active" onclick="setFilter(this,'cases')">Moje</button>
+                        <button class="filter-btn" onclick="setFilter(this,'cases')">Sve</button>
+                    </div>
+                    <button class="btn-add" onclick="openModal('newCase')" title="Novi slučaj">+</button>
+                </div>
+            </div>
+            <div class="card-list" id="caseList">
+
+                <!-- Case 1: Active -->
+                <div class="card" onclick="toggleCard(this, event)">
+                    <div class="card-top">
+                        <div>
+                            <div class="card-title">Esencijalna hipertenzija</div>
+                            <div class="card-subtitle">I10 — MKB-10</div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span class="badge active">Aktivan</span>
+                            <div class="dropdown-wrap">
+                                <button class="btn-dots" onclick="toggleDropdown(this,event)">⋮</button>
+                                <div class="dropdown">
+                                    <div class="dropdown-item" onclick="openModal('editCase')"><span
+                                            class="di-icon">✏️</span> Izmijeni podatke</div>
+                                    <div class="dropdown-item" onclick="openModal('remissionCase')"><span
+                                            class="di-icon">💤</span> Remisija</div>
+                                    <div class="dropdown-item" onclick="openModal('closeCase')"><span
+                                            class="di-icon">✅</span> Zatvori slučaj</div>
+                                    <div class="dropdown-sep"></div>
+                                    <div class="dropdown-item danger" onclick="openModal('deleteCase')"><span
+                                            class="di-icon">🗑</span> Obriši slučaj</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Od:</span> 01.06.2024
+                        <span style="margin-left:auto" class="label">Verifikacija:</span> Potvrđen
+                    </div>
+                    <div class="card-detail">
+                        <div class="detail-grid">
+                            <div class="detail-item"><span class="label">CEZIH ID:</span> <span
+                                    class="value">HI-20240601-001</span></div>
+                            <div class="detail-item"><span class="label">Liječnik:</span> <span class="value">Dr. Ivan
+                                    Prpić</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Case 2: Remission -->
+                <div class="card" onclick="toggleCard(this, event)">
+                    <div class="card-top">
+                        <div>
+                            <div class="card-title">Dijabetes mellitus tip 2</div>
+                            <div class="card-subtitle">E11 — MKB-10</div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span class="badge remission">Remisija</span>
+                            <div class="dropdown-wrap">
+                                <button class="btn-dots" onclick="toggleDropdown(this,event)">⋮</button>
+                                <div class="dropdown">
+                                    <div class="dropdown-item" onclick="openModal('editCase')"><span
+                                            class="di-icon">✏️</span> Izmijeni podatke</div>
+                                    <div class="dropdown-item" onclick="openModal('relapseCase')"><span
+                                            class="di-icon">🔁</span> Recidiv</div>
+                                    <div class="dropdown-item" onclick="openModal('closeCase')"><span
+                                            class="di-icon">✅</span> Zatvori slučaj</div>
+                                    <div class="dropdown-sep"></div>
+                                    <div class="dropdown-item danger" onclick="openModal('deleteCase')"><span
+                                            class="di-icon">🗑</span> Obriši slučaj</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Od:</span> 15.03.2023 <span class="label" style="margin-left:auto">Remisija
+                            od:</span> 01.12.2025
+                    </div>
+                </div>
+
+                <!-- Case 3: Recurrence -->
+                <div class="card" onclick="toggleCard(this, event)">
+                    <div class="card-top">
+                        <div>
+                            <div class="card-title">Lumbalni sindrom</div>
+                            <div class="card-subtitle">M54.5 — MKB-10</div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span class="badge recurrence">Recidiv</span>
+                            <div class="dropdown-wrap">
+                                <button class="btn-dots" onclick="toggleDropdown(this,event)">⋮</button>
+                                <div class="dropdown">
+                                    <div class="dropdown-item" onclick="openModal('editCase')"><span
+                                            class="di-icon">✏️</span> Izmijeni podatke</div>
+                                    <div class="dropdown-item" onclick="openModal('remissionCase')"><span
+                                            class="di-icon">💤</span> Remisija</div>
+                                    <div class="dropdown-item" onclick="openModal('closeCase')"><span
+                                            class="di-icon">✅</span> Zatvori slučaj</div>
+                                    <div class="dropdown-sep"></div>
+                                    <div class="dropdown-item danger" onclick="openModal('deleteCase')"><span
+                                            class="di-icon">🗑</span> Obriši slučaj</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Od:</span> 20.01.2026
+                    </div>
+                </div>
+
+                <!-- Case 4: Resolved -->
+                <div class="card" onclick="toggleCard(this, event)">
+                    <div class="card-top">
+                        <div>
+                            <div class="card-title">Akutni bronhitis</div>
+                            <div class="card-subtitle">J20 — MKB-10</div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span class="badge resolved">Zatvoren</span>
+                            <div class="dropdown-wrap">
+                                <button class="btn-dots" onclick="toggleDropdown(this,event)">⋮</button>
+                                <div class="dropdown">
+                                    <div class="dropdown-item" onclick="openModal('reopenCase')"><span
+                                            class="di-icon">🔄</span> Ponovno otvori</div>
+                                    <div class="dropdown-item" onclick="openModal('recurringCase')"><span
+                                            class="di-icon">🔁</span> Ponovljeni slučaj</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Period:</span> 10.11.2025 — 25.11.2025
+                    </div>
+                </div>
+
+                <!-- Case 5: Deleted -->
+                <div class="card" onclick="toggleCard(this, event)">
+                    <div class="card-top">
+                        <div>
+                            <div class="card-title">Gastritis</div>
+                            <div class="card-subtitle">K29 — MKB-10</div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span class="badge deleted">Obrisan</span>
+                            <div class="dropdown-wrap">
+                                <button class="btn-dots" onclick="toggleDropdown(this,event)">⋮</button>
+                                <div class="dropdown">
+                                    <div class="dropdown-item" onclick="openModal('reopenCase')"><span
+                                            class="di-icon">🔄</span> Ponovno otvori</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Od:</span> 05.02.2026
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ──── COLUMN 3: Dokumenti ──── -->
+        <div class="column">
+            <div class="col-header">
+                <div class="col-title">
+                    <span class="icon">📄</span> Dokumenti <span class="count" id="docCount">3</span>
+                </div>
+                <div class="col-actions">
+                    <div class="tab-bar">
+                        <button class="tab-btn active" onclick="setDocTab(this,'local')">Lokalno</button>
+                        <button class="tab-btn" onclick="setDocTab(this,'cezih')">CEZIH</button>
+                    </div>
+                    <button class="btn-add" onclick="openModal('newDoc')" title="Novi dokument">+</button>
+                </div>
+            </div>
+            <div class="card-list" id="docListLocal">
+                <!-- Doc 1: Draft -->
+                <div class="card" onclick="toggleCard(this, event)">
+                    <div class="card-top">
+                        <div>
+                            <div class="card-title">Izvješće nakon pregleda u ambulanti</div>
+                            <div class="card-subtitle">Tip 011</div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span class="badge draft">Draft</span>
+                            <div class="dropdown-wrap">
+                                <button class="btn-dots" onclick="toggleDropdown(this,event)">⋮</button>
+                                <div class="dropdown">
+                                    <div class="dropdown-item"><span class="di-icon">👁</span> Pregledaj</div>
+                                    <div class="dropdown-item"><span class="di-icon">✏️</span> Uredi</div>
+                                    <div class="dropdown-item"><span class="di-icon">📤</span> Pošalji na CEZIH</div>
+                                    <div class="dropdown-sep"></div>
+                                    <div class="dropdown-item danger"><span class="di-icon">🗑</span> Obriši</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Kreiran:</span> 04.03.2026
+                        <span style="margin-left:auto" class="label">Posjeta:</span> VIS-2026-0412
+                    </div>
+                </div>
+
+                <!-- Doc 2: Sent -->
+                <div class="card" onclick="toggleCard(this, event)">
+                    <div class="card-top">
+                        <div>
+                            <div class="card-title">Nalaz specijalističke ordinacije</div>
+                            <div class="card-subtitle">Tip 012</div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span class="badge sent">Poslano</span>
+                            <div class="dropdown-wrap">
+                                <button class="btn-dots" onclick="toggleDropdown(this,event)">⋮</button>
+                                <div class="dropdown">
+                                    <div class="dropdown-item"><span class="di-icon">👁</span> Pregledaj</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Poslano:</span> 28.02.2026
+                    </div>
+                </div>
+
+                <!-- Doc 3: Sent -->
+                <div class="card" onclick="toggleCard(this, event)">
+                    <div class="card-top">
+                        <div>
+                            <div class="card-title">Otpusno pismo</div>
+                            <div class="card-subtitle">Tip 013</div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span class="badge sent">Poslano</span>
+                            <div class="dropdown-wrap">
+                                <button class="btn-dots" onclick="toggleDropdown(this,event)">⋮</button>
+                                <div class="dropdown">
+                                    <div class="dropdown-item"><span class="di-icon">👁</span> Pregledaj</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Poslano:</span> 15.01.2026
+                    </div>
+                </div>
+            </div>
+
+            <!-- CEZIH documents (hidden by default) -->
+            <div class="card-list" id="docListCezih" style="display:none;">
+                <div class="card" onclick="toggleCard(this, event)">
+                    <div class="card-top">
+                        <div>
+                            <div class="card-title">Laboratorijski nalaz — KBC Zagreb</div>
+                            <div class="card-subtitle">Vanjski laboratorij</div>
+                        </div>
+                        <span class="badge sent">CEZIH</span>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Datum:</span> 20.02.2026
+                        <span style="margin-left:auto" class="label">Org:</span> KBC Zagreb
+                    </div>
+                </div>
+                <div class="card" onclick="toggleCard(this, event)">
+                    <div class="card-top">
+                        <div>
+                            <div class="card-title">RTG nalaz pluća — OB Dubrovnik</div>
+                            <div class="card-subtitle">Radiologija</div>
+                        </div>
+                        <span class="badge sent">CEZIH</span>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Datum:</span> 10.01.2026
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ MODALS ═══ -->
+
+    <!-- New Visit -->
+    <div class="modal-overlay" id="modal-newVisit">
+        <div class="modal">
+            <div class="modal-head">
+                <h3>🏥 Nova posjeta</h3><button class="modal-close" onclick="closeModal('newVisit')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group"><label>Tip prijema</label><select>
+                        <option>Ambulantni (Redovni)</option>
+                        <option>Hitni</option>
+                        <option>Stacionarni</option>
+                    </select></div>
+                <div class="form-group"><label>Vrsta posjete</label><select>
+                        <option>Posjeta SKZZ</option>
+                        <option>Posjeta LOM</option>
+                        <option>Hospitalizacija</option>
+                    </select></div>
+                <div class="form-group"><label>Datum i vrijeme</label><input type="datetime-local"
+                        value="2026-03-04T09:15"></div>
+                <div class="form-group"><label>Povezani slučaj (opcionalno)</label><select>
+                        <option value="">— Bez slučaja —</option>
+                        <option>I10 — Esencijalna hipertenzija</option>
+                        <option>E11 — Dijabetes mellitus tip 2</option>
+                    </select></div>
+            </div>
+            <div class="modal-foot"><button class="btn btn-secondary"
+                    onclick="closeModal('newVisit')">Odustani</button><button class="btn btn-primary"
+                    onclick="doAction('Posjeta kreirana')">Kreiraj</button></div>
+        </div>
+    </div>
+
+    <!-- Edit Visit -->
+    <div class="modal-overlay" id="modal-editVisit">
+        <div class="modal">
+            <div class="modal-head">
+                <h3>✏️ Izmjena posjete</h3><button class="modal-close" onclick="closeModal('editVisit')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group"><label>Povezani slučaj</label><select>
+                        <option>I10 — Esencijalna hipertenzija</option>
+                        <option>E11 — Dijabetes mellitus tip 2</option>
+                        <option value="">— Bez slučaja —</option>
+                    </select></div>
+                <div class="form-group"><label>Prioritet</label><select>
+                        <option>Redovni</option>
+                        <option>Hitni</option>
+                    </select></div>
+                <div class="form-group"><label>Napomena</label><textarea
+                        placeholder="Opcionalna napomena..."></textarea></div>
+            </div>
+            <div class="modal-foot"><button class="btn btn-secondary"
+                    onclick="closeModal('editVisit')">Odustani</button><button class="btn btn-primary"
+                    onclick="doAction('Posjeta ažurirana')">Spremi</button></div>
+        </div>
+    </div>
+
+    <!-- Close Visit -->
+    <div class="modal-overlay" id="modal-closeVisit">
+        <div class="modal">
+            <div class="modal-head">
+                <h3>✅ Zatvaranje posjete</h3><button class="modal-close" onclick="closeModal('closeVisit')">×</button>
+            </div>
+            <div class="modal-body">
+                <p>Zatvaranjem posjete status se mijenja u <b>Završena</b>. Datum otpusta se automatski postavlja.</p>
+                <div class="form-group"><label>Datum otpusta</label><input type="datetime-local"
+                        value="2026-03-04T14:30"></div>
+            </div>
+            <div class="modal-foot"><button class="btn btn-secondary"
+                    onclick="closeModal('closeVisit')">Odustani</button><button class="btn btn-primary"
+                    onclick="doAction('Posjeta zatvorena')">Zatvori</button></div>
+        </div>
+    </div>
+
+    <!-- Delete Visit -->
+    <div class="modal-overlay" id="modal-deleteVisit">
+        <div class="modal">
+            <div class="modal-head">
+                <h3>🗑 Brisanje posjete</h3><button class="modal-close" onclick="closeModal('deleteVisit')">×</button>
+            </div>
+            <div class="modal-body">
+                <p>Posjeta se označava kao <b>obrisana</b> (entered-in-error). Podaci se ne brišu fizički.</p>
+                <p style="color:#f87171;">⚠ Brisanje nije moguće ako postoje aktivne uputnice ili dokumenti vezani za
+                    ovu posjetu.</p>
+            </div>
+            <div class="modal-foot"><button class="btn btn-secondary"
+                    onclick="closeModal('deleteVisit')">Odustani</button><button class="btn btn-danger"
+                    onclick="doAction('Posjeta obrisana')">Obriši</button></div>
+        </div>
+    </div>
+
+    <!-- Reopen Visit -->
+    <div class="modal-overlay" id="modal-reopenVisit">
+        <div class="modal">
+            <div class="modal-head">
+                <h3>🔄 Ponovno otvaranje posjete</h3><button class="modal-close"
+                    onclick="closeModal('reopenVisit')">×</button>
+            </div>
+            <div class="modal-body">
+                <p>Posjeta će se vratiti u status <b>Aktivna</b> (in-progress).</p>
+                <p style="color:#fbbf24;">⚠ Moguće samo unutar definiranog vremenskog roka od zatvaranja/brisanja.</p>
+            </div>
+            <div class="modal-foot"><button class="btn btn-secondary"
+                    onclick="closeModal('reopenVisit')">Odustani</button><button class="btn btn-primary"
+                    onclick="doAction('Posjeta ponovno otvorena')">Otvori</button></div>
+        </div>
+    </div>
+
+    <!-- New Case -->
+    <div class="modal-overlay" id="modal-newCase">
+        <div class="modal">
+            <div class="modal-head">
+                <h3>📋 Novi slučaj</h3><button class="modal-close" onclick="closeModal('newCase')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group"><label>Dijagnoza (MKB-10)</label><input type="text"
+                        placeholder="Pretraži dijagnozu..." value="I10 — Esencijalna hipertenzija"></div>
+                <div class="form-group"><label>Status verifikacije</label><select>
+                        <option>Potvrđen (confirmed)</option>
+                        <option>Nepotvrđen (unconfirmed)</option>
+                        <option>Privremeni (provisional)</option>
+                    </select></div>
+                <div class="form-group"><label>Datum početka</label><input type="date" value="2026-03-04"></div>
+            </div>
+            <div class="modal-foot"><button class="btn btn-secondary"
+                    onclick="closeModal('newCase')">Odustani</button><button class="btn btn-primary"
+                    onclick="doAction('Slučaj kreiran')">Kreiraj</button></div>
+        </div>
+    </div>
+
+    <!-- Edit Case -->
+    <div class="modal-overlay" id="modal-editCase">
+        <div class="modal">
+            <div class="modal-head">
+                <h3>✏️ Izmjena slučaja</h3><button class="modal-close" onclick="closeModal('editCase')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group"><label>Dijagnoza</label><input type="text"
+                        value="I10 — Esencijalna hipertenzija"></div>
+                <div class="form-group"><label>Status verifikacije</label><select>
+                        <option>Potvrđen</option>
+                        <option>Nepotvrđen</option>
+                    </select></div>
+                <div class="form-group"><label>Napomena</label><textarea></textarea></div>
+            </div>
+            <div class="modal-foot"><button class="btn btn-secondary"
+                    onclick="closeModal('editCase')">Odustani</button><button class="btn btn-primary"
+                    onclick="doAction('Slučaj ažuriran')">Spremi</button></div>
+        </div>
+    </div>
+
+    <!-- Remission Case -->
+    <div class="modal-overlay" id="modal-remissionCase">
+        <div class="modal">
+            <div class="modal-head">
+                <h3>💤 Remisija slučaja</h3><button class="modal-close" onclick="closeModal('remissionCase')">×</button>
+            </div>
+            <div class="modal-body">
+                <p>Status slučaja se mijenja u <b>Remisija</b>. Bolest je u mirovanju.</p>
+            </div>
+            <div class="modal-foot"><button class="btn btn-secondary"
+                    onclick="closeModal('remissionCase')">Odustani</button><button class="btn btn-primary"
+                    onclick="doAction('Status → Remisija')">Potvrdi</button></div>
+        </div>
+    </div>
+
+    <!-- Relapse Case -->
+    <div class="modal-overlay" id="modal-relapseCase">
+        <div class="modal">
+            <div class="modal-head">
+                <h3>🔁 Recidiv slučaja</h3><button class="modal-close" onclick="closeModal('relapseCase')">×</button>
+            </div>
+            <div class="modal-body">
+                <p>Status slučaja se mijenja u <b>Recidiv</b>. Bolest se ponovno aktivirala.</p>
+            </div>
+            <div class="modal-foot"><button class="btn btn-secondary"
+                    onclick="closeModal('relapseCase')">Odustani</button><button class="btn btn-primary"
+                    onclick="doAction('Status → Recidiv')">Potvrdi</button></div>
+        </div>
+    </div>
+
+    <!-- Close Case -->
+    <div class="modal-overlay" id="modal-closeCase">
+        <div class="modal">
+            <div class="modal-head">
+                <h3>✅ Zatvaranje slučaja</h3><button class="modal-close" onclick="closeModal('closeCase')">×</button>
+            </div>
+            <div class="modal-body">
+                <p>Status slučaja se mijenja u <b>Zatvoren</b> (resolved).</p>
+                <div class="form-group"><label>Datum zatvaranja</label><input type="date" value="2026-03-04"></div>
+            </div>
+            <div class="modal-foot"><button class="btn btn-secondary"
+                    onclick="closeModal('closeCase')">Odustani</button><button class="btn btn-primary"
+                    onclick="doAction('Slučaj zatvoren')">Zatvori</button></div>
+        </div>
+    </div>
+
+    <!-- Delete Case -->
+    <div class="modal-overlay" id="modal-deleteCase">
+        <div class="modal">
+            <div class="modal-head">
+                <h3>🗑 Brisanje slučaja</h3><button class="modal-close" onclick="closeModal('deleteCase')">×</button>
+            </div>
+            <div class="modal-body">
+                <p>Slučaj se označava kao <b>obrisan</b>. Podaci se ne brišu fizički.</p>
+                <p style="color:#f87171;">⚠ Brisanje nije moguće ako postoje aktivne uputnice, dokumenti ili posjete
+                    vezane za ovaj slučaj.</p>
+            </div>
+            <div class="modal-foot"><button class="btn btn-secondary"
+                    onclick="closeModal('deleteCase')">Odustani</button><button class="btn btn-danger"
+                    onclick="doAction('Slučaj obrisan')">Obriši</button></div>
+        </div>
+    </div>
+
+    <!-- Reopen Case -->
+    <div class="modal-overlay" id="modal-reopenCase">
+        <div class="modal">
+            <div class="modal-head">
+                <h3>🔄 Ponovno otvaranje slučaja</h3><button class="modal-close"
+                    onclick="closeModal('reopenCase')">×</button>
+            </div>
+            <div class="modal-body">
+                <p>Slučaj se vraća u status <b>Aktivan</b>.</p>
+                <p style="color:#fbbf24;">⚠ Moguće samo unutar definiranog vremenskog roka od zatvaranja/brisanja.</p>
+            </div>
+            <div class="modal-foot"><button class="btn btn-secondary"
+                    onclick="closeModal('reopenCase')">Odustani</button><button class="btn btn-primary"
+                    onclick="doAction('Slučaj ponovno otvoren')">Otvori</button></div>
+        </div>
+    </div>
+
+    <!-- Recurring Case -->
+    <div class="modal-overlay" id="modal-recurringCase">
+        <div class="modal">
+            <div class="modal-head">
+                <h3>🔁 Ponovljeni slučaj</h3><button class="modal-close"
+                    onclick="closeModal('recurringCase')">×</button>
+            </div>
+            <div class="modal-body">
+                <p>Kreira se <b>novi slučaj</b> koji je ponavljanje prethodnog zatvorenog slučaja. Dijagnoza se preuzima
+                    iz originalnog slučaja.</p>
+                <div class="form-group"><label>Datum početka</label><input type="date" value="2026-03-04"></div>
+            </div>
+            <div class="modal-foot"><button class="btn btn-secondary"
+                    onclick="closeModal('recurringCase')">Odustani</button><button class="btn btn-primary"
+                    onclick="doAction('Ponovljeni slučaj kreiran')">Kreiraj</button></div>
+        </div>
+    </div>
+
+    <!-- New Document -->
+    <div class="modal-overlay" id="modal-newDoc">
+        <div class="modal">
+            <div class="modal-head">
+                <h3>📄 Novi dokument</h3><button class="modal-close" onclick="closeModal('newDoc')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group"><label>Tip dokumenta</label><select>
+                        <option>Izvješće nakon pregleda u ambulanti</option>
+                        <option>Nalaz specijalističke ordinacije</option>
+                        <option>Otpusno pismo</option>
+                    </select></div>
+                <div class="form-group"><label>Povezana posjeta</label><select>
+                        <option>VIS-2026-0412 — Kontrolni pregled</option>
+                        <option value="">— Bez posjete —</option>
+                    </select></div>
+            </div>
+            <div class="modal-foot"><button class="btn btn-secondary"
+                    onclick="closeModal('newDoc')">Odustani</button><button class="btn btn-primary"
+                    onclick="doAction('Dokument kreiran')">Kreiraj</button></div>
+        </div>
+    </div>
+
+    <!-- ═══ Toast ═══ -->
+    <div class="toast" id="toast"><span class="t-icon">✅</span> <span id="toastMsg"></span></div>
+
+    <script>
+        // ── Card expand/collapse ──
+        function toggleCard(card, e) {
+            if (e.target.closest('.dropdown-wrap') || e.target.closest('.btn-dots')) return;
+            const wasExpanded = card.classList.contains('expanded');
+            card.closest('.card-list').querySelectorAll('.card').forEach(c => c.classList.remove('expanded'));
+            if (!wasExpanded) card.classList.add('expanded');
+        }
+
+        // ── Dropdown ──
+        function toggleDropdown(btn, e) {
+            e.stopPropagation();
+            const dd = btn.nextElementSibling;
+            const wasOpen = dd.classList.contains('show');
+            document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('show'));
+            if (!wasOpen) dd.classList.add('show');
+        }
+        document.addEventListener('click', () => document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('show')));
+
+        // ── Filter toggle ──
+        function setFilter(btn, scope) {
+            btn.parentElement.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            showToast(btn.textContent === 'Sve' ? 'Prikazujem sve (uklj. CEZIH)' : 'Prikazujem samo moje');
+        }
+
+        // ── Document tabs ──
+        function setDocTab(btn, tab) {
+            btn.parentElement.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('docListLocal').style.display = tab === 'local' ? '' : 'none';
+            document.getElementById('docListCezih').style.display = tab === 'cezih' ? '' : 'none';
+            document.getElementById('docCount').textContent = tab === 'local' ? '3' : '2';
+        }
+
+        // ── Modals ──
+        function openModal(id) {
+            document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('show'));
+            document.getElementById('modal-' + id).classList.add('show');
+        }
+        function closeModal(id) { document.getElementById('modal-' + id).classList.remove('show'); }
+
+        // ── Toast ──
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            document.getElementById('toastMsg').textContent = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 2500);
+        }
+        function doAction(msg) {
+            document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('show'));
+            showToast(msg);
+        }
+    </script>
+</body>
+
+</html>

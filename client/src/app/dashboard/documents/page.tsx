@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { FileText, RefreshCw, XCircle, Search, Eye, Filter, Save, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
+import { getDocumentTypeShortLabel } from '@/lib/documentTypeLabels';
 
 interface DiagnosisSuggestion {
     code: string;
@@ -267,8 +268,8 @@ export default function DocumentsPage() {
             {/* Toast notification */}
             {toast && (
                 <div className={`fixed top-6 right-6 z-[100] flex items-center gap-3 px-5 py-4 rounded-2xl shadow-2xl border transition-all animate-in slide-in-from-top-2 ${toast.type === 'success'
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                        : 'bg-rose-50 border-rose-200 text-rose-800'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : 'bg-rose-50 border-rose-200 text-rose-800'
                     }`}>
                     {toast.type === 'success'
                         ? <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0" />
@@ -340,7 +341,7 @@ export default function DocumentsPage() {
                             documents.map((doc) => (
                                 <tr key={doc.id} className="hover:bg-gray-50">
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(doc.createdAt)}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{doc.type}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{getDocumentTypeShortLabel(doc.type)}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                         <div className="font-medium">{doc.firstName} {doc.lastName}</div>
                                         <div className="text-xs">{doc.patientMbo}</div>
@@ -394,7 +395,7 @@ export default function DocumentsPage() {
                                 </div>
                                 <div>
                                     <span className="text-gray-500 block">Tip</span>
-                                    <span className="font-medium bg-slate-100 px-2 py-0.5 rounded">{selectedDocument.type}</span>
+                                    <span className="font-medium bg-slate-100 px-2 py-0.5 rounded">{getDocumentTypeShortLabel(selectedDocument.type)}</span>
                                 </div>
                                 <div>
                                     <span className="text-gray-500 block">Status</span>

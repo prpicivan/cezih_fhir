@@ -1,0 +1,1430 @@
+<!DOCTYPE html>
+<html lang="hr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WBS_FHIR — Redesign V3 (Teal + Warm)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #f0ece6;
+            color: #292524;
+            min-height: 100vh
+        }
+
+        /* ── Navbar ── */
+        .navbar {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(255, 252, 248, .8);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(13, 148, 136, .07);
+            box-shadow: 0 1px 4px rgba(0, 0, 0, .03)
+        }
+
+        .nav-inner {
+            max-width: 1500px;
+            margin: 0 auto;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: 56px
+        }
+
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px
+        }
+
+        .nav-logo {
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #0d9488, #0f766e);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-weight: 800;
+            font-size: 13px;
+            box-shadow: 0 2px 8px rgba(13, 148, 136, .25)
+        }
+
+        .nav-title {
+            font-size: 16px;
+            font-weight: 800;
+            color: #292524;
+            letter-spacing: -.5px
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2px
+        }
+
+        .nav-link {
+            padding: 7px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #78716c;
+            text-decoration: none;
+            border-radius: 8px;
+            transition: all .15s;
+            cursor: pointer;
+            border: none;
+            background: none
+        }
+
+        .nav-link:hover {
+            color: #0d9488;
+            background: rgba(13, 148, 136, .06)
+        }
+
+        .nav-link.active {
+            color: #0d9488;
+            background: rgba(13, 148, 136, .08)
+        }
+
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 10px
+        }
+
+        .online-dot {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 10px;
+            font-weight: 700;
+            color: #0d9488;
+            background: rgba(13, 148, 136, .08);
+            padding: 4px 10px;
+            border-radius: 16px;
+            border: 1px solid rgba(13, 148, 136, .12)
+        }
+
+        .online-dot::before {
+            content: '';
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: #0d9488;
+            box-shadow: 0 0 4px #0d9488
+        }
+
+        .btn-logout {
+            padding: 6px 14px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #e07a5f;
+            background: rgba(224, 122, 95, .06);
+            border: 1px solid rgba(224, 122, 95, .12);
+            border-radius: 8px;
+            cursor: pointer
+        }
+
+        /* ── Pages ── */
+        .page {
+            max-width: 1500px;
+            margin: 0 auto;
+            padding: 20px 24px;
+            display: none
+        }
+
+        .page.active {
+            display: block
+        }
+
+        /* ── Common ── */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .3px
+        }
+
+        .b-green {
+            background: rgba(13, 148, 136, .1);
+            color: #0f766e
+        }
+
+        .b-amber {
+            background: rgba(217, 119, 6, .1);
+            color: #b45309
+        }
+
+        .b-red {
+            background: rgba(220, 38, 38, .1);
+            color: #dc2626
+        }
+
+        .b-teal {
+            background: rgba(13, 148, 136, .08);
+            color: #0d9488
+        }
+
+        .b-gray {
+            background: #e7e2db;
+            color: #78716c
+        }
+
+        .b-coral {
+            background: rgba(224, 122, 95, .1);
+            color: #c4593d
+        }
+
+        .btn {
+            padding: 7px 16px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all .15s
+        }
+
+        .btn-p {
+            background: linear-gradient(135deg, #0d9488, #0f766e);
+            color: #fff;
+            box-shadow: 0 2px 6px rgba(13, 148, 136, .25)
+        }
+
+        .btn-p:hover {
+            box-shadow: 0 4px 12px rgba(13, 148, 136, .35)
+        }
+
+        .btn-s {
+            background: #fffcf8;
+            color: #0d9488;
+            border: 1px solid rgba(13, 148, 136, .18)
+        }
+
+        .btn-s:hover {
+            background: rgba(13, 148, 136, .04)
+        }
+
+        .btn-g {
+            background: transparent;
+            color: #78716c;
+            border: 1px solid #d6d0c8
+        }
+
+        .btn-g:hover {
+            border-color: #b8b0a4
+        }
+
+        .btn-coral {
+            background: linear-gradient(135deg, #e07a5f, #c4593d);
+            color: #fff;
+            box-shadow: 0 2px 6px rgba(224, 122, 95, .25)
+        }
+
+        /* ── Card ── */
+        .card {
+            background: #fffcf8;
+            border: 1px solid rgba(0, 0, 0, .05);
+            border-radius: 14px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, .03)
+        }
+
+        .card-h {
+            padding: 14px 18px;
+            border-bottom: 1px solid rgba(0, 0, 0, .04);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 13px;
+            font-weight: 700;
+            color: #292524
+        }
+
+        .card-b {
+            padding: 14px 18px
+        }
+
+        /* Search */
+        .search {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #fffcf8;
+            border: 1.5px solid rgba(13, 148, 136, .06);
+            border-radius: 12px;
+            padding: 3px 4px;
+            transition: border-color .15s
+        }
+
+        .search:focus-within {
+            border-color: rgba(13, 148, 136, .2)
+        }
+
+        .search input {
+            flex: 1;
+            border: none;
+            outline: none;
+            padding: 8px 12px;
+            font-size: 13px;
+            color: #292524;
+            background: none;
+            font-family: inherit
+        }
+
+        .search input::placeholder {
+            color: #a8a29e
+        }
+
+        .search .si {
+            padding-left: 12px;
+            color: #a8a29e;
+            font-size: 16px
+        }
+
+        /* ═══ PATIENT LIST ═══ */
+        .p-item {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all .12s;
+            border: 1px solid transparent
+        }
+
+        .p-item:hover {
+            background: rgba(13, 148, 136, .03);
+            border-color: rgba(13, 148, 136, .06)
+        }
+
+        .p-av {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, rgba(13, 148, 136, .08), rgba(15, 118, 110, .06));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 700;
+            color: #0d9488;
+            flex-shrink: 0;
+            border: 1px solid rgba(13, 148, 136, .08)
+        }
+
+        .p-item:hover .p-av {
+            background: linear-gradient(135deg, #0d9488, #0f766e);
+            color: #fff
+        }
+
+        .p-name {
+            font-size: 13px;
+            font-weight: 700;
+            color: #292524
+        }
+
+        .p-codes {
+            display: flex;
+            gap: 6px;
+            margin-top: 2px
+        }
+
+        .p-codes span {
+            font-size: 10px;
+            font-family: monospace;
+            color: #78716c;
+            background: #ece7e0;
+            padding: 1px 6px;
+            border-radius: 4px
+        }
+
+        .p-arrow {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            background: #ece7e0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #a8a29e;
+            margin-left: auto;
+            font-size: 12px;
+            transition: all .12s
+        }
+
+        .p-item:hover .p-arrow {
+            background: #0d9488;
+            color: #fff
+        }
+
+        /* ═══ 3-COL CHART ═══ */
+        .pt-header {
+            background: #fffcf8;
+            border: 1px solid rgba(0, 0, 0, .05);
+            border-radius: 14px;
+            padding: 16px 20px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, .03)
+        }
+
+        .pt-av {
+            width: 48px;
+            height: 48px;
+            border-radius: 14px;
+            background: linear-gradient(135deg, #0d9488, #0f766e);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 18px;
+            font-weight: 800;
+            box-shadow: 0 3px 12px rgba(13, 148, 136, .25);
+            flex-shrink: 0
+        }
+
+        .columns {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 12px;
+            min-height: calc(100vh - 160px)
+        }
+
+        .col {
+            display: flex;
+            flex-direction: column
+        }
+
+        .col-head {
+            background: #fffcf8;
+            border: 1px solid rgba(0, 0, 0, .05);
+            border-radius: 14px 14px 0 0;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 12px;
+            font-weight: 700;
+            color: #292524
+        }
+
+        .col-head .cnt {
+            background: #e7e2db;
+            color: #78716c;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 1px 7px;
+            border-radius: 6px;
+            margin-left: 4px
+        }
+
+        .col-body {
+            background: #fffcf8;
+            border: 1px solid rgba(0, 0, 0, .05);
+            border-top: none;
+            border-radius: 0 0 14px 14px;
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px
+        }
+
+        .col-body::-webkit-scrollbar {
+            width: 3px
+        }
+
+        .col-body::-webkit-scrollbar-thumb {
+            background: #d6d0c8;
+            border-radius: 2px
+        }
+
+        .mc {
+            background: #f5f0ea;
+            border: 1px solid rgba(0, 0, 0, .04);
+            border-radius: 10px;
+            padding: 10px 12px;
+            cursor: pointer;
+            transition: all .12s;
+            margin-bottom: 6px
+        }
+
+        .mc:hover {
+            border-color: rgba(13, 148, 136, .15);
+            background: #ece7e0
+        }
+
+        .mc.selected {
+            border-color: #0d9488;
+            background: rgba(13, 148, 136, .04);
+            box-shadow: inset 3px 0 0 #0d9488
+        }
+
+        .mc-top {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 6px
+        }
+
+        .mc-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #292524
+        }
+
+        .mc-sub {
+            font-size: 10px;
+            color: #a8a29e;
+            margin-top: 2px
+        }
+
+        .mc-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 4px;
+            font-size: 10px;
+            color: #a8a29e
+        }
+
+        .fpills {
+            display: flex;
+            background: #ece7e0;
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid #d6d0c8
+        }
+
+        .fpill {
+            padding: 4px 10px;
+            font-size: 10px;
+            font-weight: 600;
+            color: #a8a29e;
+            border: none;
+            background: none;
+            cursor: pointer
+        }
+
+        .fpill.active {
+            background: #0d9488;
+            color: #fff
+        }
+
+        /* ── Drawer ── */
+        .drawer-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(41, 37, 36, .2);
+            backdrop-filter: blur(3px);
+            z-index: 200;
+            display: none;
+            justify-content: flex-end
+        }
+
+        .drawer-overlay.show {
+            display: flex
+        }
+
+        .drawer {
+            width: 560px;
+            max-width: 90vw;
+            background: #fffcf8;
+            box-shadow: -8px 0 40px rgba(0, 0, 0, .1);
+            display: flex;
+            flex-direction: column;
+            animation: slideIn .2s ease
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%)
+            }
+
+            to {
+                transform: translateX(0)
+            }
+        }
+
+        .drawer-head {
+            padding: 18px 22px;
+            border-bottom: 1px solid rgba(0, 0, 0, .05);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: linear-gradient(135deg, rgba(13, 148, 136, .03), rgba(224, 122, 95, .02))
+        }
+
+        .drawer-head h3 {
+            font-size: 15px;
+            font-weight: 700
+        }
+
+        .drawer-close {
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            border: 1px solid #d6d0c8;
+            background: #fffcf8;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #78716c
+        }
+
+        .drawer-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 22px
+        }
+
+        .drawer-meta {
+            display: flex;
+            justify-content: space-between;
+            padding-bottom: 14px;
+            margin-bottom: 18px;
+            border-bottom: 1px solid rgba(0, 0, 0, .04)
+        }
+
+        .drawer-meta div {
+            font-size: 9px;
+            font-weight: 700;
+            color: #a8a29e;
+            text-transform: uppercase;
+            letter-spacing: .5px
+        }
+
+        .drawer-meta .val {
+            font-size: 14px;
+            font-weight: 700;
+            color: #292524;
+            margin-top: 2px
+        }
+
+        .doc-sec {
+            border-left: 3px solid;
+            padding-left: 14px;
+            margin-bottom: 16px
+        }
+
+        .doc-sec h4 {
+            font-size: 9px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 5px
+        }
+
+        .doc-sec p {
+            font-size: 12px;
+            line-height: 1.7;
+            color: #57534e;
+            background: #f5f0ea;
+            padding: 10px 14px;
+            border-radius: 10px;
+            border: 1px solid rgba(0, 0, 0, .03)
+        }
+
+        .diag-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 18px;
+            background: #292524;
+            border-radius: 12px;
+            color: #fff
+        }
+
+        .diag-bar .label {
+            font-size: 8px;
+            color: #78716c;
+            font-weight: 700;
+            text-transform: uppercase
+        }
+
+        .diag-bar .val {
+            font-size: 15px;
+            font-weight: 800
+        }
+
+        .drawer-foot {
+            padding: 14px 22px;
+            border-top: 1px solid rgba(0, 0, 0, .04);
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            background: #f9f5f0
+        }
+
+        /* ═══ TABLE ═══ */
+        .tbl {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0
+        }
+
+        .tbl thead th {
+            padding: 10px 14px;
+            font-size: 9px;
+            font-weight: 700;
+            color: #a8a29e;
+            text-transform: uppercase;
+            letter-spacing: .7px;
+            text-align: left;
+            background: #f5f0ea;
+            border-bottom: 1px solid rgba(0, 0, 0, .04)
+        }
+
+        .tbl tbody tr {
+            transition: all .12s
+        }
+
+        .tbl tbody tr:hover {
+            background: rgba(13, 148, 136, .02)
+        }
+
+        .tbl tbody td {
+            padding: 12px 14px;
+            font-size: 12px;
+            color: #57534e;
+            border-bottom: 1px solid rgba(0, 0, 0, .03)
+        }
+
+        .tbl tbody tr:hover td:first-child {
+            box-shadow: inset 3px 0 0 #0d9488
+        }
+
+        /* ── Inspector ── */
+        .inspector {
+            background: #292524;
+            border-radius: 12px;
+            padding: 14px
+        }
+
+        .inspector .lbl {
+            font-size: 8px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .7px;
+            margin-bottom: 4px
+        }
+
+        .inspector pre {
+            font-size: 10px;
+            font-family: 'Cascadia Code', monospace;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-all
+        }
+
+        /* ── TC items ── */
+        .tc-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            border-radius: 10px;
+            border: 1px solid transparent;
+            transition: all .12s
+        }
+
+        .tc-item:hover {
+            background: rgba(13, 148, 136, .02);
+            border-color: rgba(13, 148, 136, .05)
+        }
+
+        .tc-id {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            font-weight: 800;
+            flex-shrink: 0
+        }
+
+        .tc-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: #292524
+        }
+
+        .tc-desc {
+            font-size: 10px;
+            color: #a8a29e;
+            margin-top: 1px
+        }
+
+        /* ── Stats ── */
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 20px
+        }
+
+        .stat {
+            background: #fffcf8;
+            border: 1px solid rgba(0, 0, 0, .05);
+            border-radius: 14px;
+            padding: 16px 18px
+        }
+
+        .stat .s-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #a8a29e
+        }
+
+        .stat .s-val {
+            font-size: 22px;
+            font-weight: 800;
+            color: #292524;
+            margin-top: 2px
+        }
+
+        .stat .s-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px
+        }
+
+        /* ── Modal ── */
+        .modal-bg {
+            position: fixed;
+            inset: 0;
+            background: rgba(41, 37, 36, .25);
+            backdrop-filter: blur(5px);
+            z-index: 300;
+            display: none;
+            align-items: center;
+            justify-content: center
+        }
+
+        .modal-bg.show {
+            display: flex
+        }
+
+        .modal {
+            background: #fffcf8;
+            border-radius: 20px;
+            width: 440px;
+            max-width: 90vw;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, .12);
+            overflow: hidden
+        }
+
+        .modal-h {
+            padding: 18px 22px;
+            border-bottom: 1px solid rgba(0, 0, 0, .04);
+            background: linear-gradient(135deg, rgba(13, 148, 136, .04), rgba(224, 122, 95, .02))
+        }
+
+        .modal-h h3 {
+            font-size: 16px;
+            font-weight: 700
+        }
+
+        .modal-h p {
+            font-size: 11px;
+            color: #a8a29e;
+            margin-top: 2px
+        }
+
+        .modal-c {
+            padding: 18px 22px
+        }
+
+        .modal-f {
+            padding: 12px 22px;
+            border-top: 1px solid rgba(0, 0, 0, .04);
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            background: #f9f5f0
+        }
+
+        .ff {
+            margin-bottom: 12px
+        }
+
+        .ff label {
+            display: block;
+            font-size: 10px;
+            font-weight: 700;
+            color: #a8a29e;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            margin-bottom: 4px
+        }
+
+        .ff input {
+            width: 100%;
+            padding: 9px 12px;
+            border: 1.5px solid #d6d0c8;
+            border-radius: 10px;
+            font-size: 12px;
+            font-family: inherit;
+            color: #292524;
+            outline: none;
+            background: #fffcf8;
+            transition: border-color .15s
+        }
+
+        .ff input:focus {
+            border-color: #0d9488
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: .4
+            }
+        }
+
+        .h-title {
+            font-size: 20px;
+            font-weight: 800;
+            color: #292524;
+            letter-spacing: -.5px
+        }
+
+        .h-sub {
+            font-size: 12px;
+            color: #a8a29e;
+            margin-top: 2px
+        }
+
+        .flex {
+            display: flex
+        }
+
+        .aic {
+            align-items: center
+        }
+
+        .jcb {
+            justify-content: space-between
+        }
+
+        .gap2 {
+            gap: 8px
+        }
+
+        .gap3 {
+            gap: 12px
+        }
+
+        .mb4 {
+            margin-bottom: 16px
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- NAVBAR -->
+    <nav class="navbar">
+        <div class="nav-inner">
+            <div class="nav-brand">
+                <div class="nav-logo">W</div><span class="nav-title">WBS_FHIR</span>
+            </div>
+            <div class="nav-links">
+                <button class="nav-link active" onclick="go('patients')">👥 Pacijenti</button>
+                <button class="nav-link" onclick="go('chart')">📋 Karton</button>
+                <button class="nav-link" onclick="go('docs')">📄 Dokumenti</button>
+                <button class="nav-link" onclick="go('audit')">🔍 Praćenje</button>
+                <button class="nav-link" onclick="go('cert')">🏆 Certifikacija</button>
+            </div>
+            <div class="nav-right"><span class="online-dot">Online</span><button class="btn-logout">↩ Odjava</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- PACIJENTI -->
+    <div class="page active" id="pg-patients">
+        <div class="flex aic jcb mb4">
+            <div>
+                <h1 class="h-title">Registar pacijenata</h1>
+                <p class="h-sub">Centralno upravljanje identitetom i sinkronizacija s CEZIH</p>
+            </div>
+            <div class="flex gap2"><button class="btn btn-s"
+                    onclick="document.getElementById('regMod').classList.add('show')">🔍 Registracija (TC
+                    10)</button><button class="btn btn-coral">➕ Registracija stranca</button></div>
+        </div>
+        <div class="search mb4"><span class="si">🔎</span><input placeholder="Pretraži po imenu, MBO-u ili OIB-u..." />
+        </div>
+        <div class="card">
+            <div class="card-b" style="padding:6px 8px">
+                <div class="p-item" onclick="go('chart')">
+                    <div class="p-av">II</div>
+                    <div style="flex:1">
+                        <div class="p-name">Ivo Ivić</div>
+                        <div class="p-codes"><span>MBO: 180223069</span><span>OIB: 12345678901</span></div>
+                    </div>
+                    <div style="text-align:right">
+                        <div style="font-size:8px;font-weight:700;color:#a8a29e;text-transform:uppercase">Sinkr.</div>
+                        <div style="font-size:10px;color:#0d9488;font-weight:600">✓ 04.03.</div>
+                    </div>
+                    <div class="p-arrow">→</div>
+                </div>
+                <div class="p-item">
+                    <div class="p-av">MH</div>
+                    <div style="flex:1">
+                        <div class="p-name">Marija Horvat</div>
+                        <div class="p-codes"><span>MBO: 999999423</span></div>
+                    </div>
+                    <div style="text-align:right">
+                        <div style="font-size:8px;font-weight:700;color:#a8a29e;text-transform:uppercase">Sinkr.</div>
+                        <div style="font-size:10px;color:#0d9488;font-weight:600">✓ 03.03.</div>
+                    </div>
+                    <div class="p-arrow">→</div>
+                </div>
+                <div class="p-item">
+                    <div class="p-av">PK</div>
+                    <div style="flex:1">
+                        <div class="p-name">Petar Kovačević</div>
+                        <div class="p-codes"><span>MBO: 555111333</span></div>
+                    </div>
+                    <div style="text-align:right">
+                        <div style="font-size:8px;font-weight:700;color:#a8a29e;text-transform:uppercase">Sinkr.</div>
+                        <div style="font-size:10px;color:#b45309;font-weight:600">⏳ Nije</div>
+                    </div>
+                    <div class="p-arrow">→</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PATIENT CHART -->
+    <div class="page" id="pg-chart">
+        <div class="pt-header">
+            <div class="flex aic gap3">
+                <div class="pt-av">II</div>
+                <div>
+                    <div class="flex aic gap2">
+                        <h1 style="font-size:18px;font-weight:800">Ivo Ivić</h1><span class="badge b-green">✓
+                            CEZIH</span>
+                    </div>
+                    <div class="flex aic gap3" style="margin-top:4px"><span style="font-size:11px;color:#78716c">📅
+                            15.06.1985</span><span
+                            style="font-size:10px;font-family:monospace;color:#78716c;background:#ece7e0;padding:2px 8px;border-radius:4px">MBO:
+                            180223069</span></div>
+                </div>
+            </div>
+            <div class="flex gap2"><button class="btn btn-g" onclick="go('patients')">← Natrag</button><button
+                    class="btn btn-s">🔄 Sinkroniziraj</button><button class="btn btn-p">🩺 Novi posjet</button></div>
+        </div>
+        <div class="columns">
+            <div class="col">
+                <div class="col-head">
+                    <div>🏥 Posjete <span class="cnt">3</span></div>
+                    <div class="flex gap2">
+                        <div class="fpills"><button class="fpill active">Moje</button><button class="fpill">Sve</button>
+                        </div><button class="btn btn-p"
+                            style="padding:4px 8px;font-size:14px;border-radius:6px">+</button>
+                    </div>
+                </div>
+                <div class="col-body">
+                    <div class="mc selected">
+                        <div class="mc-top">
+                            <div>
+                                <div class="mc-title">Kontrolni pregled</div>
+                                <div class="mc-sub">Ambulantni (SKZZ)</div>
+                            </div><span class="badge b-green">● Aktivan</span>
+                        </div>
+                        <div class="mc-row"><span>04.03.2026 09:15</span><span
+                                style="margin-left:auto;font-family:monospace;font-size:9px;color:#a8a29e">VIS-0412</span>
+                        </div>
+                    </div>
+                    <div class="mc">
+                        <div class="mc-top">
+                            <div>
+                                <div class="mc-title">Specijalistički pregled</div>
+                                <div class="mc-sub">Ambulantni (LOM)</div>
+                            </div><span class="badge b-teal">Završen</span>
+                        </div>
+                        <div class="mc-row">01.03.2026</div>
+                    </div>
+                    <div class="mc">
+                        <div class="mc-top">
+                            <div>
+                                <div class="mc-title">Trijažni pregled</div>
+                            </div><span class="badge b-teal">Završen</span>
+                        </div>
+                        <div class="mc-row">15.02.2026</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col">
+                <div class="col-head">
+                    <div>📋 Slučajevi <span class="cnt">2</span></div>
+                    <div class="flex gap2">
+                        <div class="fpills"><button class="fpill active">Aktivni</button><button
+                                class="fpill">Svi</button></div><button class="btn btn-p"
+                            style="padding:4px 8px;font-size:14px;border-radius:6px">+</button>
+                    </div>
+                </div>
+                <div class="col-body">
+                    <div class="mc">
+                        <div class="mc-top">
+                            <div>
+                                <div class="mc-title">Gonartroza desnog koljena</div>
+                                <div class="mc-sub">M17.1 — Od: 01.03.2026</div>
+                            </div><span class="badge b-green">● Aktivan</span>
+                        </div>
+                        <div class="mc-row">Dr. Ivan Prpić<span
+                                style="margin-left:auto;width:6px;height:6px;border-radius:50%;background:#0d9488;animation:pulse 2s infinite"></span>
+                        </div>
+                    </div>
+                    <div class="mc">
+                        <div class="mc-top">
+                            <div>
+                                <div class="mc-title">Hipertenzija</div>
+                                <div class="mc-sub">I10 — Od: 15.01.2026</div>
+                            </div><span class="badge b-amber">Remisija</span>
+                        </div>
+                        <div class="mc-row">Dr. Ana Matić</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col">
+                <div class="col-head">
+                    <div>📄 Dokumenti <span class="cnt">3</span></div>
+                    <div class="fpills"><button class="fpill active">Lokalni</button><button
+                            class="fpill">CEZIH</button></div>
+                </div>
+                <div class="col-body">
+                    <div class="mc" onclick="openDrawer()">
+                        <div class="mc-top">
+                            <div>
+                                <div class="mc-title">Otpusno pismo</div>
+                                <div class="mc-sub">04.03.2026</div>
+                            </div><span class="badge b-green">Poslano</span>
+                        </div>
+                        <div class="mc-row"><span style="font-family:monospace;font-size:9px">M17.1</span> Gonartroza
+                        </div>
+                    </div>
+                    <div class="mc" onclick="openDrawer()">
+                        <div class="mc-top">
+                            <div>
+                                <div class="mc-title">Lab. nalaz</div>
+                                <div class="mc-sub">01.03.2026</div>
+                            </div><span class="badge b-green">Poslano</span>
+                        </div>
+                    </div>
+                    <div class="mc" style="opacity:.5;margin-left:12px;border-left:2px solid #d6d0c8;padding-left:10px"
+                        onclick="openDrawer()">
+                        <div class="mc-top">
+                            <div>
+                                <div class="mc-title" style="color:#a8a29e">Stari nalaz</div>
+                                <div class="mc-sub">25.02.2026</div>
+                            </div><span class="badge b-red">Storniran</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DRAWER -->
+    <div class="drawer-overlay" id="drawer" onclick="if(event.target===this)closeDrawer()">
+        <div class="drawer">
+            <div class="drawer-head">
+                <h3>📄 Otpusno pismo</h3><button class="drawer-close" onclick="closeDrawer()">✕</button>
+            </div>
+            <div class="drawer-body">
+                <div class="drawer-meta">
+                    <div>
+                        <div>Vrsta</div>
+                        <div class="val">Otpusno pismo</div>
+                    </div>
+                    <div>
+                        <div>Pacijent</div>
+                        <div class="val">Ivo Ivić</div>
+                    </div>
+                    <div style="text-align:right">
+                        <div>Datum</div>
+                        <div class="val">04.03.2026</div><span class="badge b-green"
+                            style="margin-top:4px">aktivan</span>
+                    </div>
+                </div>
+                <div class="doc-sec" style="border-color:#0d9488">
+                    <h4 style="color:#0d9488">● Anamneza</h4>
+                    <p>Pacijent se javlja radi bolova u desnom koljenu koji traju nekoliko tjedana.</p>
+                </div>
+                <div class="doc-sec" style="border-color:#e07a5f">
+                    <h4 style="color:#e07a5f">● Klinički nalaz</h4>
+                    <p>Gonartroza desnog koljena stupnja II po Kellgren-Lawrence.</p>
+                </div>
+                <div class="doc-sec" style="border-color:#0f766e">
+                    <h4 style="color:#0f766e">● Terapija</h4>
+                    <p>NSAID per os, fizikalna terapija 10 dana.</p>
+                </div>
+                <div class="doc-sec" style="border-color:#b45309">
+                    <h4 style="color:#b45309">● Preporuka</h4>
+                    <p>Kontrola za 4 tjedna. RTG koljena po potrebi.</p>
+                </div>
+                <div class="diag-bar">
+                    <div>
+                        <div class="label">Dijagnoza (MKB-10)</div>
+                        <div class="val">M17.1 — Gonartroza</div>
+                    </div>
+                </div>
+            </div>
+            <div class="drawer-foot"><button class="btn btn-g">🖨 Ispiši</button><button class="btn btn-s"
+                    style="color:#b45309;border-color:rgba(180,83,9,.2)">✏ Izmijeni</button><button class="btn btn-g"
+                    style="color:#dc2626;border-color:rgba(220,38,38,.15)">🗑 Storniraj</button></div>
+        </div>
+    </div>
+
+    <!-- DOKUMENTI -->
+    <div class="page" id="pg-docs">
+        <div class="flex aic jcb mb4">
+            <div>
+                <h1 class="h-title">Klinički Dokumenti</h1>
+                <p class="h-sub">Pregled svih poslanih e-Nalaza</p>
+            </div>
+        </div>
+        <div class="flex gap3 mb4">
+            <div class="search" style="flex:1"><span class="si">🔎</span><input
+                    placeholder="Pretraži po MBO ili OID-u..." /></div><select
+                style="padding:8px 14px;border:1.5px solid #d6d0c8;border-radius:10px;font-size:12px;color:#78716c;background:#fffcf8;outline:none">
+                <option>Svi statusi</option>
+            </select>
+        </div>
+        <div class="card">
+            <div class="card-b" style="padding:0;overflow:hidden;border-radius:14px">
+                <table class="tbl">
+                    <thead>
+                        <tr>
+                            <th>Datum</th>
+                            <th>Tip</th>
+                            <th>Pacijent</th>
+                            <th>Status</th>
+                            <th>OID</th>
+                            <th style="text-align:right">Akcije</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td style="font-weight:600;color:#292524">04.03.2026</td>
+                            <td>Otpusno pismo</td>
+                            <td>
+                                <div style="font-weight:600">Ivo Ivić</div>
+                                <div style="font-size:10px;color:#a8a29e">180223069</div>
+                            </td>
+                            <td><span class="badge b-green">Poslano</span></td>
+                            <td style="font-family:monospace;font-size:10px;color:#a8a29e">2.16.840.1...</td>
+                            <td style="text-align:right"><button class="btn btn-g"
+                                    style="padding:3px 8px;font-size:10px">🔄</button> <button class="btn btn-g"
+                                    style="padding:3px 8px;font-size:10px;color:#dc2626">✕</button></td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight:600;color:#292524">01.03.2026</td>
+                            <td>Lab. nalaz</td>
+                            <td>
+                                <div style="font-weight:600">Marija Horvat</div>
+                            </td>
+                            <td><span class="badge b-green">Poslano</span></td>
+                            <td style="font-family:monospace;font-size:10px;color:#a8a29e">2.16.840.2...</td>
+                            <td style="text-align:right"><button class="btn btn-g"
+                                    style="padding:3px 8px;font-size:10px">🔄</button></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- AUDIT -->
+    <div class="page" id="pg-audit">
+        <div class="flex aic jcb mb4">
+            <div>
+                <h1 class="h-title">🔍 Praćenje statusa</h1>
+                <p class="h-sub">Telemetrija CEZIH FHIR komunikacije</p>
+            </div><button class="btn btn-g">Osvježi</button>
+        </div>
+        <div class="search mb4"><span class="si">🔎</span><input placeholder="Pretraži..." /></div>
+        <div style="display:grid;grid-template-columns:3fr 1fr;gap:12px">
+            <div class="card">
+                <div class="card-b" style="padding:0;overflow:hidden;border-radius:14px">
+                    <table class="tbl">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th>Vrijeme</th>
+                                <th>Pacijent</th>
+                                <th>Akcija</th>
+                                <th>Status</th>
+                                <th style="text-align:right">Smjer</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr style="background:rgba(13,148,136,.02)">
+                                <td>
+                                    <div style="width:12px;height:12px;border-radius:50%;background:#0d9488"></div>
+                                </td>
+                                <td>
+                                    <div style="font-weight:700">04.03.2026</div>
+                                    <div style="font-size:9px;color:#a8a29e;font-family:monospace">14:22:15</div>
+                                </td>
+                                <td style="font-weight:600">Ivo Ivić</td>
+                                <td style="font-weight:700">DOCUMENT_SEND</td>
+                                <td><span class="badge b-green">✓ Uspješno</span></td>
+                                <td style="text-align:right"><span class="badge b-teal">→ CEZIH</span></td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div style="width:12px;height:12px;border-radius:50%;border:2px solid #d6d0c8">
+                                    </div>
+                                </td>
+                                <td>
+                                    <div style="font-weight:700">04.03.2026</div>
+                                    <div style="font-size:9px;color:#a8a29e;font-family:monospace">09:15:42</div>
+                                </td>
+                                <td style="font-weight:600">Ivo Ivić</td>
+                                <td style="font-weight:700">VISIT_CREATE</td>
+                                <td><span class="badge b-green">✓ Uspješno</span></td>
+                                <td style="text-align:right"><span class="badge b-teal">→ CEZIH</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card" style="display:flex;flex-direction:column">
+                <div class="card-h">🔬 Inspector</div>
+                <div class="card-b" style="flex:1">
+                    <div class="inspector">
+                        <div class="lbl" style="color:#a8a29e">Request</div>
+                        <pre style="color:#a8a29e">{ "resourceType": "Bundle" }</pre>
+                    </div>
+                    <div class="inspector" style="margin-top:10px">
+                        <div class="lbl" style="color:#5eead4">Response</div>
+                        <pre style="color:#5eead4">{ "success": true }</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CERTIFIKACIJA -->
+    <div class="page" id="pg-cert">
+        <div class="flex aic jcb mb4">
+            <div>
+                <h1 class="h-title">🏆 FHIR Certification Test Bench</h1>
+                <p class="h-sub">22 testna scenarija</p>
+            </div>
+            <div class="flex gap2"><span class="online-dot">Gateway aktivan</span><span class="badge b-green"
+                    style="padding:5px 12px;font-size:10px">✅ 14</span><span class="badge b-amber"
+                    style="padding:5px 12px;font-size:10px">⚠️ 3</span><button class="btn btn-p"
+                    style="font-size:11px">▶ Pokreni sve</button></div>
+        </div>
+        <div class="stats">
+            <div class="stat">
+                <div class="flex aic jcb">
+                    <div>
+                        <div class="s-label">Pristup</div>
+                        <div class="s-val">TC 1-3</div>
+                    </div>
+                    <div class="s-icon" style="background:rgba(13,148,136,.08);color:#0d9488">🔐</div>
+                </div>
+            </div>
+            <div class="stat">
+                <div class="flex aic jcb">
+                    <div>
+                        <div class="s-label">Infrastruktura</div>
+                        <div class="s-val">TC 4-9</div>
+                    </div>
+                    <div class="s-icon" style="background:rgba(224,122,95,.08);color:#e07a5f">⚙️</div>
+                </div>
+            </div>
+            <div class="stat">
+                <div class="flex aic jcb">
+                    <div>
+                        <div class="s-label">Dokumentacija</div>
+                        <div class="s-val">TC 18-22</div>
+                    </div>
+                    <div class="s-icon" style="background:rgba(180,83,9,.08);color:#b45309">📄</div>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-h">👥 Upravljanje Pacijentima <button class="btn btn-g"
+                    style="font-size:10px;padding:4px 10px;margin-left:auto">▶ Pokreni</button></div>
+            <div class="card-b" style="padding:6px 10px">
+                <div class="tc-item">
+                    <div class="tc-id" style="background:rgba(13,148,136,.1);color:#0f766e">TC10</div>
+                    <div style="flex:1">
+                        <div class="tc-title">Identifikacija pacijenta <span class="badge b-green">✓ Prošao</span> <span
+                                style="font-size:9px;color:#a8a29e">312ms</span></div>
+                        <div class="tc-desc">Dohvat demografskih podataka (IHE PDQm)</div>
+                    </div><button class="btn btn-g" style="font-size:9px;padding:3px 8px">▶</button>
+                </div>
+                <div class="tc-item">
+                    <div class="tc-id" style="background:#ece7e0;color:#a8a29e">TC11</div>
+                    <div style="flex:1">
+                        <div class="tc-title" style="color:#a8a29e">Registracija stranca <span
+                                class="badge b-gray">Skip</span></div>
+                        <div class="tc-desc" style="font-style:italic">Zahtijeva testne podatke</div>
+                    </div><button class="btn btn-g" style="font-size:9px;padding:3px 8px;opacity:.4">▶</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL -->
+    <div class="modal-bg" id="regMod" onclick="if(event.target===this)this.classList.remove('show')">
+        <div class="modal">
+            <div class="modal-h">
+                <h3>🔍 Registracija (TC 10)</h3>
+                <p>Unesite MBO pacijenta</p>
+            </div>
+            <div class="modal-c">
+                <div class="ff"><label>MBO (9 znamenki)</label><input placeholder="123456789" maxlength="9"
+                        style="font-family:monospace" /></div>
+            </div>
+            <div class="modal-f"><button class="btn btn-g"
+                    onclick="document.getElementById('regMod').classList.remove('show')">Odustani</button><button
+                    class="btn btn-p">🔎 Dohvati</button></div>
+        </div>
+    </div>
+
+    <script>
+        function go(id) { document.querySelectorAll('.page').forEach(p => p.classList.remove('active')); document.getElementById('pg-' + id).classList.add('active'); document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active')); if (event && event.target) event.target.classList.add('active') }
+        function openDrawer() { document.getElementById('drawer').classList.add('show') }
+        function closeDrawer() { document.getElementById('drawer').classList.remove('show') }
+    </script>
+</body>
+
+</html>

@@ -259,14 +259,29 @@ class SignatureService {
             ? (jwk.crv === 'P-384' ? 'ES384' : (jwk.crv === 'P-521' ? 'ES512' : 'ES256'))
             : 'RS256';
 
+        // For document bundles: signature.who must use { reference: "urn:uuid:..." }
+        // (hr-document profile: who.reference min:1, who.type max:0, who.identifier max:0)
+        // For message bundles: signature.who uses { identifier: {...}, type: "Practitioner" }
+        // (DIGSIG-1: who = MessageHeader.author with identifier)
+        let whoRef: any;
+        if (bundle.type === 'document' && bundle.signature?.who?.reference) {
+            // Document bundle: preserve the original urn:uuid reference
+            whoRef = { reference: bundle.signature.who.reference };
+            if (bundle.signature.who.display) {
+                whoRef.display = bundle.signature.who.display;
+            }
+        } else {
+            // Message bundle or fallback: use identifier-based reference
+            whoRef = signerRef || this.extractAuthorFromBundle(bundle);
+        }
+
         // Signature placeholder — Bundle.signature.data mora biti prazan string pri potpisivanju
-        // CEZIH spec: signature je OBJEKT (ne array), who koristi identifier (ne reference), nema sigFormat
         const bundleWithSigPlaceholder = {
             ...bundle,
             signature: {
                 type: [{ system: 'urn:iso-astm:E1762-95:2013', code: '1.2.840.10065.1.12.1.1' }],
                 when: new Date().toISOString(),
-                who: authorRef,   // { identifier: { system, value }, type: 'Practitioner' }
+                who: whoRef,
                 data: '',
             },
         };

@@ -23,8 +23,8 @@ export const config = {
             notification: '/notification-pull-service/api/v1',
             referral: '/sgp-referral-service/api/v1',
             registry: '/patient-registry-services/api/v1',
-            // mCSD (ITI-90) Organization/Practitioner — separate from patient-registry
-            mcsd: process.env.CEZIH_MCSD_SERVICE_PATH || '/R4/fhir',
+            // mCSD (ITI-90) — port 9443 only, system auth
+            mcsd: process.env.CEZIH_MCSD_SERVICE_PATH || '/mcsd/api',
         },
     },
 

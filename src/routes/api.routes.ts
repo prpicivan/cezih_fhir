@@ -107,6 +107,38 @@ router.get('/auth/status', (_req: Request, res: Response) => {
     res.json(status);
 });
 
+// Health check — combined status of all 3 auth methods
+router.get('/auth/health-check', (_req: Request, res: Response) => {
+    const gwStatus = authService.getSessionStatus();
+    const m2mStatus = authService.getSystemTokenStatus();
+
+    // Smart card PKCS#11 status
+    let smartCard: { initialized: boolean; tokenLabel?: string; algorithm?: string; subject?: string } = { initialized: false };
+    try {
+        const { pkcs11Service } = require('../services/pkcs11.service');
+        if (pkcs11Service.isActive()) {
+            const ki = pkcs11Service.getKeyInfo();
+            const subjectMatch = ki?.certificate?.match(/CN=([^\n]+)/);
+            smartCard = {
+                initialized: true,
+                tokenLabel: 'Iden',
+                algorithm: ki?.algo || 'unknown',
+                subject: subjectMatch?.[1]?.trim() || 'unknown',
+            };
+        }
+    } catch (_) { /* pkcs11 not available */ }
+
+    res.json({
+        gateway: {
+            active: gwStatus.authenticated,
+            ageMinutes: gwStatus.createdAt ? Math.round((Date.now() - gwStatus.createdAt) / 60000) : null,
+            maxAgeMinutes: 240,
+        },
+        systemToken: m2mStatus,
+        smartCard,
+    });
+});
+
 // Return gateway session headers (for use in test scripts / remote signing)
 router.get('/auth/gateway-token', (_req: Request, res: Response) => {
     try {
@@ -678,6 +710,39 @@ router.post('/settings/menu', (req: Request, res: Response) => {
     }
 });
 
+// Document Type Labels — user-customizable display names for CEZIH codes
+const DEFAULT_DOC_LABELS: Record<string, string> = {
+    '011': 'Izvješće nakon pregleda u ambulanti privatne zdravstvene ustanove',
+    '012': 'Nalazi iz specijalističke ordinacije privatne zdravstvene ustanove',
+    '013': 'Otpusno pismo iz privatne zdravstvene ustanove',
+};
+
+router.get('/settings/document-types', (_req: Request, res: Response) => {
+    try {
+        const row = db.prepare("SELECT value FROM settings WHERE key = 'document_type_labels'").get() as any;
+        const labels = row ? JSON.parse(row.value) : DEFAULT_DOC_LABELS;
+        res.json({ success: true, labels });
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+router.post('/settings/document-types', (req: Request, res: Response) => {
+    try {
+        const labels = req.body;
+        if (!labels || typeof labels !== 'object') {
+            return res.status(400).json({ success: false, error: 'Expected JSON object with code→label mapping' });
+        }
+        db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(
+            'document_type_labels',
+            JSON.stringify(labels)
+        );
+        res.json({ success: true });
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // ============================================================
 // Case Routes (Test Cases 15-17)
 // ============================================================
@@ -710,6 +775,21 @@ router.put('/case/:id', async (req: Request, res: Response) => {
         res.json({ success: true, result });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
+    }
+});
+
+// Case action dispatcher (2.2–2.8)
+router.post('/case/:id/action', async (req: Request, res: Response) => {
+    try {
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
+        const { action, ...data } = req.body;
+        if (!action) {
+            return res.status(400).json({ success: false, error: 'Missing action code (2.2, 2.3, 2.4, 2.5, 2.7, 2.8)' });
+        }
+        const result = await caseService.performCaseAction(req.params.id as string, action, data, userToken);
+        res.json({ success: true, result });
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
@@ -747,6 +827,19 @@ router.post('/document/send/complete', async (req: Request, res: Response) => {
         res.json({ success: true, result });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
+    }
+});
+
+// TEMP: Update document bundle (for testing corrected bundle structure)
+router.put('/document/:oid/bundle', async (req: Request, res: Response) => {
+    try {
+        const { oid } = req.params;
+        const { bundleJson } = req.body;
+        if (!bundleJson) return res.status(400).json({ error: 'Missing bundleJson' });
+        db.prepare('UPDATE documents SET bundleJson = ? WHERE id = ?').run(bundleJson, oid);
+        res.json({ success: true });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
     }
 });
 

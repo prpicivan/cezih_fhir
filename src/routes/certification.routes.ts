@@ -150,27 +150,29 @@ router.post('/run/:tcId', async (req: Request, res: Response) => {
                 break;
 
             case 'tc-9': // Registry Search
-                const orgs = await registryService.searchOrganizations({ active: true }, userToken);
-                const pracs = await registryService.searchPractitioners({ active: true }, userToken);
+                const orgs = await registryService.searchOrganizations({ active: true });
+                const pracs = await registryService.searchPractitioners({ active: true });
                 result = { organizations: orgs.length, practitioners: pracs.length, detail: 'Registry sync verified.' };
                 break;
 
             case 'tc-10': // Patient Identification (MBO)
-                result = await patientService.searchByMbo('123456789', userToken);
+                result = await patientService.searchByMbo('999999423', userToken);
                 break;
 
-            case 'tc-11': // Register Foreigner (PMIR)
+            case 'tc-11': { // Register Foreigner (PMIR)
+                const ts = Date.now().toString().slice(-8);
                 result = await patientService.registerForeigner({
                     name: {
-                        family: 'Doe',
-                        given: ['John']
+                        family: `TestCert${ts}`,
+                        given: ['Maria']
                     },
-                    birthDate: '1980-01-01',
-                    gender: 'male',
-                    nationality: 'DE',
-                    euCardNumber: '12345678901234567890'
+                    birthDate: '1992-03-15',
+                    gender: 'female',
+                    nationality: 'AT',
+                    passportNumber: `ATCERT${ts}`
                 }, userToken);
                 break;
+            }
 
             case 'tc-12': { // Encounter Create (Kreiranje posjete)
                 const { config: cfg } = await import('../config');
@@ -266,8 +268,7 @@ router.post('/run/:tcId', async (req: Request, res: Response) => {
         }
 
         // Auto-save the status to DB
-        const isMock = result && (typeof result === 'object') && (result.mock === true ||
-            (result.entry && result.entry[0]?.resource?.response?.code === 'ok' && !result.id));
+        const isMock = result && (typeof result === 'object') && result.mock === true;
         const value = JSON.stringify({
             status: 'passed',
             isMock: !!isMock,

@@ -284,8 +284,9 @@ class PatientService {
     buildPMIRBundle(data: ForeignerRegistrationData): any {
         const crypto = require('crypto');
         const now = new Date().toISOString();
-        const messageHeaderFullUrl = crypto.randomUUID();
-        const historyBundleFullUrl = crypto.randomUUID();
+        const bundleId = crypto.randomUUID();
+        const messageHeaderFullUrl = `urn:uuid:${crypto.randomUUID()}`;
+        const historyBundleFullUrl = `urn:uuid:${crypto.randomUUID()}`;
         const patientFullUrl = `urn:uuid:${crypto.randomUUID()}`;
 
         // Patient identifiers (closed slicing, min=1, max=2)
@@ -323,6 +324,7 @@ class PatientService {
 
         const bundle: any = {
             resourceType: 'Bundle',
+            id: bundleId,
             meta: {
                 profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HRRegisterPatient'],
             },
@@ -350,7 +352,7 @@ class PatientService {
                         },
                         author: practitionerWho,
                         source: {
-                            endpoint: `urn:oid:${config.software.name}`,
+                            endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
                         },
                         focus: [{
                             reference: historyBundleFullUrl,
@@ -470,7 +472,8 @@ class PatientService {
             // 4. Send to CEZIH patient-registry-services
             try {
                 const headers = authService.getUserAuthHeaders(userToken);
-                const url = `${config.cezih.gatewayBase}${config.cezih.services.patient}/iti93`;
+                // ITI-93 uses /api/iti93 (NOT /api/v1/iti93) — confirmed by CEZIH team
+                const url = `${config.cezih.gatewayBase}/patient-registry-services/api/iti93`;
                 console.log('[PatientService] Sending PMIR bundle to:', url);
 
                 const response = await axios.post(url, signedBundle, {

@@ -138,9 +138,24 @@ export function initDatabase() {
     db.exec('ALTER TABLE documents ADD COLUMN bundleJson TEXT');
   } catch (e) { /* column already exists */ }
 
+  // Migration: add caseId column to documents (for TC18 MHD reference resolution)
+  try {
+    db.exec('ALTER TABLE documents ADD COLUMN caseId TEXT');
+  } catch (e) { /* column already exists */ }
+
   // Migration: add cezihVisitId column to visits (CEZIH-assigned identifier for TC13/TC14)
   try {
     db.exec('ALTER TABLE visits ADD COLUMN cezihVisitId TEXT');
+  } catch (e) { /* column already exists */ }
+
+  // Migration: add cezihCaseId column to cases (CEZIH-assigned identifier for TC17)
+  try {
+    db.exec('ALTER TABLE cases ADD COLUMN cezihCaseId TEXT');
+  } catch (e) { /* column already exists */ }
+
+  // Migration: add clinicalStatus column to cases (recurrence/remission/resolved)
+  try {
+    db.exec('ALTER TABLE cases ADD COLUMN clinicalStatus TEXT');
   } catch (e) { /* column already exists */ }
 
   // Migration: remove FK constraints from cases if they exist

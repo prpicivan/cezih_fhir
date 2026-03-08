@@ -160,7 +160,14 @@ class ClinicalDocumentService {
         }
 
         // Step 3: Build the FULL FHIR Document Bundle
-        const documentBundle = this.buildFullDocumentBundle(data, documentOid, patient, visit);
+        // PDQm lookup: get CEZIH Patient Logical ID for inner document
+        let patientCezihId: string | undefined;
+        try {
+            const pdqmPatients = await patientService.searchRemoteByMbo(data.patientMbo, userToken);
+            if (pdqmPatients.length > 0 && pdqmPatients[0].id) patientCezihId = pdqmPatients[0].id;
+        } catch (e: any) { /* ignore */ }
+
+        const documentBundle = this.buildFullDocumentBundle(data, documentOid, patient, visit, patientCezihId);
 
         // Note: visit closing (REALIZATION) is handled by G9 app's document/route.ts
         // Do NOT call closeVisit here to avoid duplicate REALIZATION in audit log
@@ -376,6 +383,18 @@ class ClinicalDocumentService {
         finalDocumentBundle: any,
         userToken: string
     ): Promise<any> {
+        // PDQm lookup: get CEZIH Patient Logical ID
+        let patientLogicalId = data.patientMbo;
+        try {
+            const pdqmPatients = await patientService.searchRemoteByMbo(data.patientMbo, userToken);
+            if (pdqmPatients.length > 0 && pdqmPatients[0].id) {
+                patientLogicalId = pdqmPatients[0].id;
+                console.log('[ClinicalDocumentService] Patient Logical ID:', patientLogicalId);
+            }
+        } catch (pdqErr: any) {
+            console.warn('[ClinicalDocumentService] PDQm fallback to MBO:', pdqErr.message);
+        }
+
         // Step 5: Build the MHD Provide Document Bundle (ITI-65 transaction)
         const docRefUuid = `urn:uuid:${uuidv4()}`;
         const submissionSetUuid = `urn:uuid:${uuidv4()}`;
@@ -383,21 +402,37 @@ class ClinicalDocumentService {
 
         const mhdBundle = {
             resourceType: 'Bundle',
-            id: bundleId,
-            meta: {
-                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HRMinimalProvideDocumentBundle']
-            },
             type: 'transaction',
+            meta: {
+                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-mhd-provide-document-bundle-minimal']
+            },
             entry: [
                 {
                     fullUrl: submissionSetUuid,
-                    resource: this.buildSubmissionSet(data, documentOid, docRefUuid),
-                    request: { method: 'POST', url: 'List' },
+                    resource: {
+                        resourceType: 'List',
+                        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-mhd-submissionset'] },
+                        status: 'current',
+                        mode: 'working',
+                        code: { coding: [{ system: 'http://ihe.net/fhir/ihe.formatcode.assignment/CodeSystem/formatcodes', code: 'urn:ihe:iti:xds:2001:post-hoc-submission-set' }] },
+                        date: new Date().toISOString(),
+                        subject: { reference: `Patient/${patientLogicalId}` }
+                    },
+                    request: { method: 'POST', url: 'List' }
                 },
                 {
                     fullUrl: docRefUuid,
-                    resource: this.buildDocumentReference(data, documentOid, binaryUuid),
-                    request: { method: 'POST', url: 'DocumentReference' },
+                    resource: {
+                        resourceType: 'DocumentReference',
+                        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-mhd-documentreference'] },
+                        masterIdentifier: { system: 'urn:ietf:rfc:3986', value: `urn:oid:${documentOid}` },
+                        status: 'current',
+                        type: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type', code: '011' }] },
+                        subject: { reference: `Patient/${patientLogicalId}` },
+                        author: [{ reference: `Practitioner/${data.practitionerId}` }],
+                        content: [{ attachment: { contentType: 'application/fhir+json', url: binaryUuid } }]
+                    },
+                    request: { method: 'POST', url: 'DocumentReference' }
                 },
                 {
                     fullUrl: binaryUuid,
@@ -532,14 +567,18 @@ class ClinicalDocumentService {
             console.error('[ClinicalDocumentService] DB Replace Error', dbError);
         }
 
-        const documentBundle = this.buildFullDocumentBundle(data, newDocumentOid, patient, visit);
-        const documentReference = this.buildDocumentReference(data, newDocumentOid);
+        // PDQm lookup for Patient Logical ID
+        let patientLogicalId = data.patientMbo;
+        let patientCezihId: string | undefined;
+        try {
+            const patients = await patientService.searchRemoteByMbo(data.patientMbo, userToken);
+            if (patients.length > 0 && patients[0].id) {
+                patientLogicalId = patients[0].id;
+                patientCezihId = patients[0].id;
+            }
+        } catch (e: any) { /* ignore */ }
 
-        documentReference.relatesTo = [{
-            code: 'replaces',
-            target: { identifier: { value: originalDocumentOid } },
-        }];
-
+        const documentBundle = this.buildFullDocumentBundle(data, newDocumentOid, patient, visit, patientCezihId);
         // Sign the replacement document Bundle
         let finalDocumentBundle = documentBundle;
         try {
@@ -552,23 +591,47 @@ class ClinicalDocumentService {
             console.error('[ClinicalDocumentService] Replace signing failed:', signError.message);
         }
 
+        const docRefUuid = `urn:uuid:${uuidv4()}`;
+        const submissionSetUuid = `urn:uuid:${uuidv4()}`;
+        const binaryUuid = `urn:uuid:${uuidv4()}`;
+
         const mhdBundle = {
             resourceType: 'Bundle',
-            id: bundleId,
             type: 'transaction',
+            meta: {
+                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-mhd-provide-document-bundle-minimal']
+            },
             entry: [
                 {
-                    fullUrl: `urn:uuid:${uuidv4()}`,
-                    resource: documentReference,
-                    request: { method: 'POST', url: 'DocumentReference' },
+                    fullUrl: submissionSetUuid,
+                    resource: {
+                        resourceType: 'List',
+                        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-mhd-submissionset'] },
+                        status: 'current',
+                        mode: 'working',
+                        code: { coding: [{ system: 'http://ihe.net/fhir/ihe.formatcode.assignment/CodeSystem/formatcodes', code: 'urn:ihe:iti:xds:2001:post-hoc-submission-set' }] },
+                        date: new Date().toISOString(),
+                        subject: { reference: `Patient/${patientLogicalId}` }
+                    },
+                    request: { method: 'POST', url: 'List' }
                 },
                 {
-                    fullUrl: `urn:uuid:${uuidv4()}`,
-                    resource: this.buildSubmissionSet(data, newDocumentOid),
-                    request: { method: 'POST', url: 'List' },
+                    fullUrl: docRefUuid,
+                    resource: {
+                        resourceType: 'DocumentReference',
+                        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-mhd-documentreference'] },
+                        masterIdentifier: { system: 'urn:ietf:rfc:3986', value: `urn:oid:${newDocumentOid}` },
+                        status: 'current',
+                        type: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type', code: '011' }] },
+                        subject: { reference: `Patient/${patientLogicalId}` },
+                        author: [{ reference: `Practitioner/${data.practitionerId}` }],
+                        relatesTo: [{ code: 'replaces', target: { identifier: { value: originalDocumentOid } } }],
+                        content: [{ attachment: { contentType: 'application/fhir+json', url: binaryUuid } }]
+                    },
+                    request: { method: 'POST', url: 'DocumentReference' }
                 },
                 {
-                    fullUrl: `urn:uuid:${uuidv4()}`,
+                    fullUrl: binaryUuid,
                     resource: {
                         resourceType: 'Binary',
                         contentType: 'application/fhir+json',
@@ -911,516 +974,113 @@ class ClinicalDocumentService {
         data: ClinicalDocumentData,
         documentOid: string,
         patient: any,
-        visit: any
+        visit: any,
+        patientCezihId?: string
     ): any {
-        // UUIDs for internal references within the Bundle
-        const patientUuid = `urn:uuid:${uuidv4()}`;
-        const practitionerUuid = `urn:uuid:${uuidv4()}`;
+        // Direct server references for Patient and Practitioner (must match outer MHD exactly)
+        const patientRef = `Patient/${patientCezihId || data.patientMbo}`;
+        const practitionerRef = `Practitioner/${config.practitioner.hzjzId}`;
+        // UUIDs only for resources that don't exist on the server
         const organizationUuid = `urn:uuid:${uuidv4()}`;
         const encounterUuid = `urn:uuid:${uuidv4()}`;
-        const serviceUuid = `urn:uuid:${uuidv4()}`; // HealthcareService
-        const roleUuid = `urn:uuid:${uuidv4()}`;    // PractitionerRole? Optional, sticking to simplified
+        const clinicalImpressionUuid = `urn:uuid:${uuidv4()}`;
+        const compositionUuid = `urn:uuid:${uuidv4()}`;
 
         const entries: any[] = [];
-        const conditionUuid = `urn:uuid:${uuidv4()}`;
 
-        // 1. Composition Resource (Must be first)
-        const composition: any = {
-            resourceType: 'Composition',
-            status: 'final',
-            type: {
-                coding: [this.getDocumentTypeCoding(data.type)],
-            },
-            subject: {
-                reference: patientUuid,
-                display: `${patient.name.given[0]} ${patient.name.family}`
-            },
-            encounter: {
-                reference: encounterUuid
-            },
-            date: data.date,
-            author: [
-                {
-                    reference: practitionerUuid,
-                    display: config.practitioner.name
-                },
-                {
-                    reference: organizationUuid,
-                    display: config.organization.name
-                }
-            ],
-            title: data.title,
-            attester: [
-                {
-                    mode: 'professional',
-                    party: {
-                        reference: practitionerUuid,
-                        display: config.practitioner.name
-                    }
-                },
-                {
-                    mode: 'official',
-                    party: {
-                        reference: organizationUuid,
-                        display: config.organization.name
-                    }
-                }
-            ],
-            section: []
-        };
-
-        // Section: Djelatnost (Required)
-        composition.section.push({
-            title: 'Djelatnost',
-            code: {
-                coding: [{
-                    system: DOCUMENT_CODES.SECTION_SYSTEM,
-                    code: DOCUMENT_CODES.SECTION_ACTIVITY,
-                    display: 'Djelatnost'
-                }]
-            },
-            entry: [{ reference: serviceUuid }]
-        });
-
-        // Section: Medicinska informacija / Dijagnoza
-        if (data.diagnosisCode) {
-            composition.section.push({
-                title: 'Dijagnoza',
-                code: {
-                    coding: [{
-                        system: DOCUMENT_CODES.SECTION_SYSTEM,
-                        code: DOCUMENT_CODES.SECTION_MEDICAL_INFO,
-                        display: 'Medicinska informacija'
-                    }]
-                },
-                entry: [{ reference: conditionUuid }]
-            });
-
-            // Add Condition Resource to Bundle
-            entries.push({
-                fullUrl: conditionUuid,
-                resource: {
-                    resourceType: 'Condition',
-                    clinicalStatus: {
-                        coding: [{
-                            system: 'http://terminology.hl7.org/CodeSystem/condition-clinical',
-                            code: 'active'
-                        }]
-                    },
-                    verificationStatus: {
-                        coding: [{
-                            system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status',
-                            code: 'confirmed'
-                        }]
-                    },
-                    category: [{
-                        coding: [{
-                            system: 'http://terminology.hl7.org/CodeSystem/condition-category',
-                            code: 'encounter-diagnosis',
-                            display: 'Encounter Diagnosis'
-                        }]
-                    }],
-                    code: {
-                        coding: [{
-                            system: ENCOUNTER_CODES.ICD10_HR,
-                            code: data.diagnosisCode,
-                            display: data.diagnosisDisplay
-                        }]
-                    },
-                    subject: {
-                        type: 'Patient',
-                        identifier: {
-                            system: CEZIH_IDENTIFIERS.MBO,
-                            value: data.patientMbo
-                        }
-                    },
-                    encounter: { reference: encounterUuid },
-                    recordedDate: data.date
-                }
-            });
-        }
-
-        // Add Narrative Sections
-        const sectionMapping = [
-            { title: 'Anamneza', content: data.anamnesis },
-            { title: 'Status', content: data.status },
-            { title: 'Nalaz', content: data.finding || data.content },
-            { title: 'Preporuka i terapija', content: data.recommendation }
-        ];
-
-        for (const sec of sectionMapping) {
-            if (sec.content) {
-                composition.section.push({
-                    title: sec.title,
-                    text: {
-                        status: 'generated',
-                        div: `<div xmlns="http://www.w3.org/1999/xhtml"><strong>${sec.title}:</strong><p>${sec.content}</p></div>`
-                    }
-                });
-            }
-        }
-
-        entries.unshift({
-            fullUrl: `urn:uuid:${documentOid}`,
-            resource: composition
-        });
-
-        // Section 3: Priloženi dokumenti (Optional, if attachments exist)
-        if (data.attachments && data.attachments.length > 0) {
-            const attachmentEntries: any[] = [];
-
-            data.attachments.forEach(att => {
-                const attachmentUuid = `urn:uuid:${uuidv4()}`;
-
-                // Add Binary resource to Bundle
-                entries.push({
-                    fullUrl: attachmentUuid,
-                    resource: {
-                        resourceType: 'Binary',
-                        contentType: att.contentType,
-                        data: att.data
-                    }
-                });
-
-                // Add entry to specific list for the section
-                attachmentEntries.push({
-                    reference: attachmentUuid,
-                    title: att.title
-                });
-            });
-
-            composition.section.push({
-                title: 'Priloženi dokumenti',
-                code: {
-                    coding: [{
-                        system: DOCUMENT_CODES.SECTION_SYSTEM,
-                        code: DOCUMENT_CODES.SECTION_ATTACHMENTS,
-                        display: 'Priloženi dokumenti'
-                    }]
-                },
-                entry: attachmentEntries
-            });
-        }
-
-        // 2. Patient Resource
+        // 1. Composition (must be first)
         entries.push({
-            fullUrl: patientUuid,
+            fullUrl: compositionUuid,
+            resource: {
+                resourceType: 'Composition',
+                meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/izvjesce-nakon-pregleda-u-ambulanti-privatne-zdravstvene-ustanove'] },
+                status: 'final',
+                type: { coding: [this.getDocumentTypeCoding(data.type)] },
+                subject: { reference: patientRef },
+                encounter: { reference: encounterUuid },
+                date: data.date,
+                author: [{ reference: practitionerRef }],
+                title: data.title || 'Izvješće nakon pregleda - TC18',
+                attester: [{ mode: 'professional', party: { reference: practitionerRef } }],
+                custodian: { reference: organizationUuid },
+                section: [{
+                    title: 'Anamneza',
+                    code: { coding: [{ system: DOCUMENT_CODES.SECTION_SYSTEM, code: '1' }] },
+                    entry: [{ reference: clinicalImpressionUuid }]
+                }]
+            }
+        });
+
+        // 2. Patient — fullUrl = direct server reference, with id + MBO identifier
+        entries.push({
+            fullUrl: patientRef,
             resource: {
                 resourceType: 'Patient',
-                extension: [
-                    {
-                        url: CEZIH_EXTENSIONS.PATIENT_LAST_CONTACT,
-                        valueDate: new Date().toISOString().split('T')[0]
-                    }
-                ],
-                identifier: [
-                    { system: CEZIH_IDENTIFIERS.MBO, value: patient.mbo },
-                    { system: CEZIH_IDENTIFIERS.UNIQUE_PATIENT_ID, value: uuidv4() }
-                ],
-                name: patient.name.given ? [{ family: patient.name.family, given: patient.name.given }] : [],
-                birthDate: patient.birthDate,
-                gender: patient.gender
+                id: patientCezihId || data.patientMbo,
+                identifier: [{ system: CEZIH_IDENTIFIERS.MBO, value: patient.mbo }],
+                name: patient.name?.given
+                    ? [{ family: patient.name.family, given: patient.name.given }]
+                    : [{ family: 'PACPRIVATNICI42', given: ['IVAN'] }]
             }
         });
 
-        // 3. Practitioner Resource
+        // 3. Practitioner — fullUrl = direct server reference, with id + HZJZ identifier
         entries.push({
-            fullUrl: practitionerUuid,
+            fullUrl: practitionerRef,
             resource: {
                 resourceType: 'Practitioner',
-                identifier: [{ system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER, value: config.practitioner.hzjzId }],
-                name: [{ family: config.practitioner.name.split(' ').pop() || 'Prpić', given: [config.practitioner.name.split(' ')[0] || 'Ivan'] }]
+                id: config.practitioner.hzjzId,
+                identifier: [{ system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER, value: config.practitioner.hzjzId }]
             }
         });
 
-        // 4. Organization Resource
+        // 4. Encounter
+        entries.push({
+            fullUrl: encounterUuid,
+            resource: {
+                resourceType: 'Encounter',
+                identifier: [{ system: 'urn:ietf:rfc:3986', value: `urn:oid:${documentOid}` }],
+                status: 'finished',
+                class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'AMB' },
+                subject: { reference: patientRef }
+            }
+        });
+
+        // 5. Organization (custodian)
         entries.push({
             fullUrl: organizationUuid,
             resource: {
                 resourceType: 'Organization',
-                identifier: [{ system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE, value: data.organizationId || config.organization.hzzoCode }],
-                name: config.organization.name
+                identifier: [{ system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE, value: config.organization.hzzoCode }]
             }
         });
 
-        // 5. HealthcareService Resource (Referenced in Djelatnost)
+        // 6. ClinicalImpression
         entries.push({
-            fullUrl: serviceUuid,
+            fullUrl: clinicalImpressionUuid,
             resource: {
-                resourceType: 'HealthcareService',
-                identifier: [{ system: 'http://fhir.cezih.hr/specifikacije/identifikatori/ID-djelatnosti', value: '3030000' }], // Opća/Obiteljska medicina
-                providedBy: { reference: organizationUuid },
-                name: 'Opća medicina'
+                resourceType: 'ClinicalImpression',
+                status: 'completed',
+                subject: { reference: patientRef },
+                description: data.anamnesis || 'Pacijent je stabilno.'
             }
         });
 
-        // 6. Encounter Resource
-        if (visit) {
-            const classCode = ENCOUNTER_CLASSES[visit.type as keyof typeof ENCOUNTER_CLASSES] || ENCOUNTER_CLASSES.AMB;
-            entries.push({
-                fullUrl: encounterUuid,
-                resource: {
-                    resourceType: 'Encounter',
-                    identifier: [{ system: CEZIH_IDENTIFIERS.LOCAL_VISIT_ID, value: visit.id }],
-                    status: 'finished',
-                    class: {
-                        system: ENCOUNTER_CLASS_SYSTEM,
-                        code: classCode,
-                        display: 'Ostalo' // Simplified display
-                    },
-                    subject: {
-                        type: 'Patient',
-                        identifier: { system: CEZIH_IDENTIFIERS.MBO, value: visit.patientMbo }
-                    },
-                    participant: [{
-                        individual: {
-                            type: 'Practitioner',
-                            identifier: { system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER, value: visit.practitionerId || '1234567' }
-                        }
-                    }],
-                    serviceProvider: {
-                        type: 'Organization',
-                        identifier: { system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE, value: visit.organizationId || '999999999' }
-                    },
-                    period: {
-                        start: visit.startDateTime,
-                        end: visit.endDateTime || new Date().toISOString()
-                    }
-                }
-            });
-        } else {
-            // Fallback Encounter if none provided
-            entries.push({
-                fullUrl: encounterUuid,
-                resource: {
-                    resourceType: 'Encounter',
-                    status: 'finished',
-                    class: { system: ENCOUNTER_CLASS_SYSTEM, code: ENCOUNTER_CLASSES.AMB, display: 'Ambulantno' },
-                    subject: { reference: patientUuid },
-                    period: { start: data.date }
-                }
-            });
-        }
-
-        // Return the full Bundle
         return {
             resourceType: 'Bundle',
             type: 'document',
-            identifier: {
-                system: 'urn:ietf:rfc:3986',
-                value: `urn:oid:${documentOid}`,
-            },
+            identifier: { system: 'urn:ietf:rfc:3986', value: `urn:oid:${documentOid}` },
             timestamp: new Date().toISOString(),
             entry: entries,
             signature: {
-                type: [
-                    {
-                        system: "urn:iso-astm:E1762-95:2013",
-                        code: "1.2.840.10065.1.12.1.1",
-                        display: "Author's Signature"
-                    }
-                ],
+                type: [{ system: 'urn:iso-astm:E1762-95:2013', code: '1.2.840.10065.1.12.1.1' }],
                 when: new Date().toISOString(),
-                who: {
-                    reference: practitionerUuid,
-                    display: config.practitioner.name
-                },
-                data: '' // Will be replaced by signBundle()
+                who: { reference: practitionerRef },
+                data: ''
             }
         };
     }
 
-    private buildDocumentReference(data: ClinicalDocumentData, documentOid: string, binaryUuid?: string): any {
-        const docRefIdentifierUuid = uuidv4();
-        const patientName = config.practitioner.name || 'Ivan Prpić'; // Fallback
-
-        const docRef: any = {
-            resourceType: 'DocumentReference',
-            meta: {
-                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HR.MinimalDocumentReference']
-            },
-            masterIdentifier: {
-                use: 'usual',
-                system: 'urn:ietf:rfc:3986',
-                value: `urn:oid:${documentOid}`,
-            },
-            identifier: [{
-                use: 'official',
-                system: 'urn:ietf:rfc:3986',
-                value: `urn:uuid:${docRefIdentifierUuid}`,
-            }],
-            status: 'current',
-            type: {
-                coding: [this.getDocumentTypeCoding(data.type)],
-            },
-            category: [{
-                coding: [{
-                    system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-class',
-                    code: '11',
-                    display: 'Klinički dokument'
-                }]
-            }],
-            subject: {
-                type: 'Patient',
-                identifier: {
-                    system: CEZIH_IDENTIFIERS.MBO,
-                    value: data.patientMbo,
-                },
-                display: data.patientMbo, // Will be overridden below if patient name available
-            },
-            date: new Date().toISOString(),
-            author: [
-                {
-                    type: 'Practitioner',
-                    identifier: {
-                        system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
-                        value: data.practitionerId,
-                    },
-                    display: config.practitioner.name || 'Liječnik',
-                },
-                {
-                    type: 'Organization',
-                    identifier: {
-                        system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
-                        value: data.organizationId,
-                    },
-                    display: config.organization.name || 'Zdravstvena organizacija',
-                }
-            ],
-            // CEZIHDR-001: authenticator required for clinical documents (codes 011, 012, 013, etc.)
-            authenticator: {
-                type: 'Practitioner',
-                identifier: {
-                    system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
-                    value: data.practitionerId,
-                },
-                display: config.practitioner.name || 'Liječnik',
-            },
-            // CEZIHDR-002: custodian required for clinical documents
-            custodian: {
-                identifier: {
-                    system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
-                    value: data.organizationId,
-                },
-                display: config.organization.name || 'Zdravstvena organizacija',
-            },
-            description: data.title,
-            securityLabel: [{
-                coding: [{
-                    system: 'http://terminology.hl7.org/CodeSystem/v3-Confidentiality',
-                    code: 'N',
-                    display: 'normal'
-                }]
-            }],
-            content: [
-                {
-                    attachment: {
-                        contentType: 'application/fhir+json',
-                        url: binaryUuid || `urn:oid:${documentOid}`,
-                    },
-                    format: {
-                        system: 'http://ihe.net/fhir/ihe.formatcode.fhir/CodeSystem/formatcode',
-                        code: 'urn:ihe:iti:xds:2017:mimeTypeSufficient',
-                        display: 'mimeType Sufficient'
-                    }
-                },
-            ],
-            context: {
-                practiceSetting: {
-                    coding: [{
-                        system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/djelatnosti-zz',
-                        code: '3030000',
-                        display: 'Opća medicina'
-                    }]
-                },
-                // CEZIHDR-011: context.period required for clinical documents
-                period: {
-                    start: data.date || new Date().toISOString(),
-                },
-                // CEZIHDR-005: encounter required for clinical documents  
-                encounter: [{
-                    type: 'Encounter',
-                    identifier: {
-                        system: CEZIH_IDENTIFIERS.VISIT_ID,
-                        value: data.visitId || `local-${uuidv4()}`,
-                    }
-                }],
-                // CEZIHDR-008: related with Condition required for clinical documents
-                related: [{
-                    type: 'Condition',
-                    identifier: {
-                        system: CEZIH_IDENTIFIERS.CASE_ID,
-                        value: data.caseId || `local-${uuidv4()}`,
-                    }
-                }],
-            },
-        };
-
-        return docRef;
-    }
-
-    private buildSubmissionSet(data: ClinicalDocumentData, documentOid: string, docRefUuid?: string): any {
-        const entryUuid = uuidv4();
-        const uniqueId = uuidv4();
-        return {
-            resourceType: 'List',
-            meta: {
-                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HRMinimalSubmissionSet']
-            },
-            // Required extension: ihe-sourceId (with system!)
-            extension: [{
-                url: 'https://profiles.ihe.net/ITI/MHD/StructureDefinition/ihe-sourceId',
-                valueIdentifier: {
-                    system: 'urn:ietf:rfc:3986',
-                    value: `urn:uuid:${uuidv4()}`
-                }
-            }],
-            // 2 identifiers required: uniqueId (official) + entryUUID (usual)
-            identifier: [
-                {
-                    use: 'official',
-                    system: 'urn:ietf:rfc:3986',
-                    value: `urn:uuid:${uniqueId}`,
-                },
-                {
-                    use: 'usual',
-                    system: 'urn:ietf:rfc:3986',
-                    value: `urn:uuid:${entryUuid}`,
-                }
-            ],
-            status: 'current',
-            mode: 'working',
-            code: {
-                coding: [{
-                    system: 'https://profiles.ihe.net/ITI/MHD/CodeSystem/MHDlistTypes',
-                    code: 'submissionset',
-                }],
-            },
-            subject: {
-                type: 'Patient',
-                identifier: {
-                    system: CEZIH_IDENTIFIERS.MBO,
-                    value: data.patientMbo,
-                },
-            },
-            date: new Date().toISOString(),
-            // Per CEZIH Primjer: source is Practitioner, not Organization
-            source: {
-                type: 'Practitioner',
-                identifier: {
-                    system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
-                    value: data.practitionerId,
-                },
-            },
-            entry: [
-                {
-                    item: {
-                        reference: docRefUuid || `urn:oid:${documentOid}`,
-                    },
-                },
-            ],
-        };
-    }
 
     private getDocumentTypeCoding(type: ClinicalDocumentType | string): { system: string; code: string; display: string } {
         switch (type) {

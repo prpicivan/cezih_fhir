@@ -383,7 +383,7 @@ function ClinicalWorkspace() {
     };
 
     // TC 18: Send Clinical Document (MHD)
-    const sendDocument = async (type: 'ambulatory-report' | 'specialist-finding' | 'discharge-letter') => {
+    const sendDocument = async (type: '011' | '012' | '013') => {
         if (!findingText) {
             showToast('error', 'Molimo unesite tekst nalaza u polje "3. Nalaz i Mišljenje".');
             return;
@@ -850,7 +850,7 @@ function ClinicalWorkspace() {
                         <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-4">
                             <div className="flex flex-col gap-2">
                                 <button
-                                    onClick={() => sendDocument('specialist-finding' as any)}
+                                    onClick={() => sendDocument('011')}
                                     disabled={visitStatus !== 'active' || loading}
                                     title={visitStatus !== 'active' ? 'Prvo morate započeti posjet klikom na gumb "Započni posjet"' : ''}
                                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"

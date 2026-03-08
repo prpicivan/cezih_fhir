@@ -17,7 +17,9 @@ import {
     Users,
     Calendar,
     Activity,
-    Award
+    Award,
+    FileText,
+    RotateCcw
 } from 'lucide-react';
 
 const iconMap: Record<string, any> = {
@@ -37,6 +39,15 @@ export default function SettingsPage() {
     const [syncing, setSyncing] = useState(false);
     const [menuConfig, setMenuConfig] = useState<any[]>([]);
     const [savingMenu, setSavingMenu] = useState(false);
+
+    // Document type labels
+    const DEFAULT_DOC_LABELS: Record<string, string> = {
+        '011': 'Izvješće nakon pregleda u ambulanti privatne zdravstvene ustanove',
+        '012': 'Nalazi iz specijalističke ordinacije privatne zdravstvene ustanove',
+        '013': 'Otpusno pismo iz privatne zdravstvene ustanove',
+    };
+    const [docTypeLabels, setDocTypeLabels] = useState<Record<string, string>>(DEFAULT_DOC_LABELS);
+    const [savingDocTypes, setSavingDocTypes] = useState(false);
 
     const fetchSettings = () => {
         setLoading(true);
@@ -63,9 +74,19 @@ export default function SettingsPage() {
             .catch(err => console.error('Failed to fetch menu:', err));
     };
 
+    const fetchDocTypeLabels = () => {
+        fetch('/api/settings/document-types')
+            .then(res => res.json())
+            .then(data => {
+                if (data.success && data.labels) setDocTypeLabels(data.labels);
+            })
+            .catch(err => console.error('Failed to fetch doc type labels:', err));
+    };
+
     useEffect(() => {
         fetchSettings();
         fetchMenu();
+        fetchDocTypeLabels();
     }, []);
 
     const handleSync = async () => {
@@ -123,6 +144,31 @@ export default function SettingsPage() {
         } finally {
             setSavingMenu(false);
         }
+    };
+
+    const saveDocTypeLabels = async () => {
+        setSavingDocTypes(true);
+        try {
+            const res = await fetch('/api/settings/document-types', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(docTypeLabels)
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast('success', 'Nazivi tipova dokumenata spremljeni!');
+            } else {
+                showToast('error', 'Greška pri spremanju.');
+            }
+        } catch (err) {
+            showToast('error', 'Greška pri komunikaciji sa serverom.');
+        } finally {
+            setSavingDocTypes(false);
+        }
+    };
+
+    const resetDocTypeLabels = () => {
+        setDocTypeLabels({ ...DEFAULT_DOC_LABELS });
     };
 
     return (
@@ -284,6 +330,56 @@ export default function SettingsPage() {
                                     );
                                 })}
                             </div>
+                        </div>
+                    </div>
+
+                    {/* Document Type Labels Section */}
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                        <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                            <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                <FileText className="w-5 h-5 text-amber-600" />
+                                Nazivi kliničke dokumentacije
+                            </h2>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={resetDocTypeLabels}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-500 hover:bg-slate-100 transition"
+                                    title="Vrati na zadane nazive"
+                                >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                    Zadani
+                                </button>
+                                <button
+                                    onClick={saveDocTypeLabels}
+                                    disabled={savingDocTypes}
+                                    className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-1.5 rounded-lg hover:bg-emerald-700 transition disabled:opacity-50 text-sm font-medium"
+                                >
+                                    <Save className="w-4 h-4" />
+                                    {savingDocTypes ? 'Spremanje...' : 'Spremi'}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="p-4 space-y-4">
+                            <p className="text-xs text-slate-400 font-medium">
+                                Prilagodite nazive koji se prikazuju u sučelju za svaki tip CEZIH kliničkog dokumenta.
+                            </p>
+                            {Object.entries(docTypeLabels).map(([code, label]) => (
+                                <div key={code} className="flex items-start gap-3">
+                                    <div className="flex-shrink-0 mt-2.5">
+                                        <span className="inline-block bg-amber-50 text-amber-700 font-mono font-black text-xs px-2.5 py-1 rounded-lg border border-amber-100">
+                                            {code}
+                                        </span>
+                                    </div>
+                                    <div className="flex-1">
+                                        <input
+                                            type="text"
+                                            value={label}
+                                            onChange={e => setDocTypeLabels(prev => ({ ...prev, [code]: e.target.value }))}
+                                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium text-slate-800 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all"
+                                        />
+                                    </div>
+                                </div>
+                            ))}
                         </div>
                     </div>
                 </div>

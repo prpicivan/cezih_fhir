@@ -266,7 +266,26 @@ class CaseService {
             ],
         };
 
-        return this.sendMessage(bundle, userToken, 'CASE_CREATE', localCaseId, data.patientMbo);
+        const response = await this.sendMessage(bundle, userToken, 'CASE_CREATE', localCaseId, data.patientMbo);
+
+        // Extract CEZIH-assigned case ID from response and save to local DB
+        // CEZIH returns identifikator-slucaja which is required for TC17 (update)
+        let cezihCaseId: string | undefined;
+        try {
+            const innerResult = response?.result ?? response;
+            const condition = innerResult?.entry?.find((e: any) => e.resource?.resourceType === 'Condition')?.resource;
+            cezihCaseId = condition?.identifier?.find(
+                (id: any) => id.system === CEZIH_IDENTIFIERS.CASE_ID
+            )?.value;
+            if (cezihCaseId) {
+                db.prepare('UPDATE cases SET cezihCaseId = ? WHERE id = ?').run(cezihCaseId, localCaseId);
+                console.log('[CaseService] Saved CEZIH case ID:', cezihCaseId, 'for local:', localCaseId);
+            }
+        } catch (e) {
+            console.warn('[CaseService] Could not extract CEZIH case ID from response');
+        }
+
+        return { ...response, localCaseId, cezihCaseId };
     }
 
     // ============================================================
@@ -276,6 +295,11 @@ class CaseService {
     async updateCase(caseId: string, data: Partial<CaseData>, userToken: string): Promise<any> {
         const messageId = uuidv4();
         const conditionUuid = uuidv4();
+
+        // Resolve CEZIH case ID — required for CEZIH to accept the update
+        const localCase = db.prepare('SELECT * FROM cases WHERE id = ?').get(caseId) as any;
+        const cezihCaseId = localCase?.cezihCaseId || caseId;
+        console.log('[CaseService] Updating case:', caseId, '→ CEZIH ID:', cezihCaseId);
 
         // Update DB
         try {
@@ -347,7 +371,7 @@ class CaseService {
                             {
                                 // globalni-identifikator: CEZIH-generated case ID
                                 system: CEZIH_IDENTIFIERS.CASE_ID,
-                                value: caseId,
+                                value: cezihCaseId,
                             },
                         ],
                         ...((data.status as string) === 'resolved' || (data.status as string) === 'inactive' ? {
@@ -396,6 +420,372 @@ class CaseService {
         return this.sendMessage(bundle, userToken, 'CASE_UPDATE', caseId, data.patientMbo);
     }
 
+    // ============================================================
+    // Centralized Case Action Dispatcher (2.2–2.8)
+    // ============================================================
+
+    /**
+     * Map of CEZIH health issue actions to their event codes, profiles, and clinicalStatus.
+     */
+    private static readonly ACTION_MAP: Record<string, {
+        eventCode: string;
+        profile: string;
+        clinicalStatus?: string;
+        auditAction: string;
+    }> = {
+            '2.2': {
+                eventCode: '2.2',
+                profile: 'hr-delete-health-issue-message',
+                auditAction: 'CASE_DELETE',
+            },
+            '2.3': {
+                eventCode: '2.3',
+                profile: 'hr-create-recurrent-health-issue-message',
+                clinicalStatus: 'recurrence',
+                auditAction: 'CASE_RECURRENT',
+            },
+            '2.4': {
+                eventCode: '2.4',
+                profile: 'hr-update-health-issue-clinical-status-message',
+                clinicalStatus: 'relapse', // NOT recurrence — per hr-condition docs
+                auditAction: 'CASE_RECIDIV',
+            },
+            '2.5': {
+                eventCode: '2.5',
+                profile: 'hr-update-health-issue-clinical-status-message',
+                clinicalStatus: 'remission',
+                auditAction: 'CASE_REMISSION',
+            },
+            '2.7': {
+                eventCode: '2.7',
+                profile: 'hr-delete-health-issue-message', // CEZIH internally maps 2.7 to this profile
+                // No clinicalStatus — profile forbids it (max=0)
+                auditAction: 'CASE_CLOSE',
+            },
+            '2.8': {
+                eventCode: '2.8',
+                profile: 'hr-update-health-issue-clinical-status-message',
+                clinicalStatus: 'active',
+                auditAction: 'CASE_REOPEN',
+            },
+        };
+
+    /**
+     * Perform a case action (2.2–2.8).
+     * Dispatches to the correct FHIR message based on action code.
+     */
+    async performCaseAction(
+        caseId: string,
+        action: string,
+        data: Partial<CaseData> & { previousCaseId?: string; reason?: string } | undefined,
+        userToken: string
+    ): Promise<any> {
+        // Action 2.3 (recurrent case) is a special create — delegates to createCase with reference
+        if (action === '2.3') {
+            return this.createRecurrentCase(caseId, data || {}, userToken);
+        }
+
+        const actionDef = CaseService.ACTION_MAP[action];
+        if (!actionDef) {
+            throw new Error(`Nepoznata akcija: ${action}. Podržane: 2.2, 2.3, 2.4, 2.5, 2.7, 2.8`);
+        }
+
+        const messageId = uuidv4();
+        const conditionUuid = uuidv4();
+
+        // Resolve CEZIH case ID
+        const localCase = db.prepare('SELECT * FROM cases WHERE id = ?').get(caseId) as any;
+        if (!localCase) throw new Error(`Slučaj ${caseId} nije pronađen u lokalnoj bazi.`);
+        const cezihCaseId = localCase.cezihCaseId || caseId;
+        const patientMbo = data?.patientMbo || localCase.patientMbo;
+
+        console.log(`[CaseService] Action ${action} on case: ${caseId} → CEZIH ID: ${cezihCaseId}`);
+
+        // Update local DB based on action
+        try {
+            if (action === '2.2') {
+                // Delete — mark as entered-in-error
+                db.prepare('UPDATE cases SET status = ? WHERE id = ?').run('entered-in-error', caseId);
+            } else if (action === '2.7') {
+                // Close — resolved + endDate
+                db.prepare('UPDATE cases SET status = ?, end = ?, clinicalStatus = ? WHERE id = ?')
+                    .run('finished', new Date().toISOString(), 'resolved', caseId);
+            } else if (action === '2.8') {
+                // Reopen — active, clear endDate
+                db.prepare('UPDATE cases SET status = ?, end = NULL, clinicalStatus = ? WHERE id = ?')
+                    .run('active', 'active', caseId);
+            } else if (action === '2.4' || action === '2.5') {
+                // Recidiv / Remission — keep active but change clinicalStatus
+                db.prepare('UPDATE cases SET clinicalStatus = ? WHERE id = ?')
+                    .run(actionDef.clinicalStatus, caseId);
+            }
+        } catch (err: any) {
+            console.error(`[CaseService] DB update for action ${action} failed:`, err.message);
+        }
+
+        // Build FHIR Condition resource
+        // hr-delete-health-issue-message profile (used for 2.2/2.7) is very restrictive:
+        // only identifier, subject, note are allowed (code, asserter, onsetDateTime etc. are max=0)
+        const isDeleteProfile = (action === '2.2' || action === '2.7');
+
+        const conditionResource: any = {
+            resourceType: 'Condition',
+            id: conditionUuid,
+            meta: {
+                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-condition'],
+            },
+            identifier: [{
+                system: CEZIH_IDENTIFIERS.CASE_ID,
+                value: cezihCaseId,
+            }],
+            subject: {
+                type: 'Patient',
+                identifier: {
+                    system: CEZIH_IDENTIFIERS.MBO,
+                    value: patientMbo,
+                },
+            },
+        };
+
+        if (isDeleteProfile) {
+            // Delete (2.2) / Close (2.7): minimal Condition — only identifier + subject + note
+            // Profile hr-delete-health-issue-message forbids: code, clinicalStatus, onsetDateTime, asserter, etc.
+            // For 2.2: CEZIH automatically sets verificationStatus=entered-in-error (docs: "zanemaruje")
+            // note with annotation-type (himgmt-1 rule)
+            conditionResource.note = [{
+                extension: [{
+                    url: CEZIH_EXTENSIONS.ANNOTATION_TYPE,
+                    valueCoding: {
+                        system: ENCOUNTER_CODES.ANNOTATION_TYPE_SYSTEM,
+                        code: '1',
+                        display: 'Razlog brisanja podatka',
+                    },
+                }],
+                text: data?.reason || (action === '2.7' ? 'Zatvaranje slučaja' : 'Brisanje slučaja'),
+            }];
+        } else {
+            // Clinical status updates (2.4, 2.5, 2.8): minimal Condition
+            // Docs: asserter, code, onsetDateTime "zanemariti" for these messages; profile may enforce max=0
+            // clinicalStatus: docs say CEZIH sets automatically, but we send it as the profile name suggests it
+            if (actionDef.clinicalStatus) {
+                conditionResource.clinicalStatus = {
+                    coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: actionDef.clinicalStatus }],
+                };
+            }
+        }
+
+        const bundle = {
+            resourceType: 'Bundle',
+            id: messageId,
+            meta: {
+                profile: [`http://fhir.cezih.hr/specifikacije/StructureDefinition/${actionDef.profile}`],
+            },
+            type: 'message',
+            timestamp: new Date().toISOString(),
+            entry: [
+                {
+                    fullUrl: `urn:uuid:${messageId}`,
+                    resource: {
+                        resourceType: 'MessageHeader',
+                        id: messageId,
+                        meta: {
+                            profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-hi-management-message-header'],
+                        },
+                        eventCoding: {
+                            system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
+                            code: actionDef.eventCode,
+                        },
+                        sender: {
+                            type: 'Organization',
+                            identifier: {
+                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                                value: data?.organizationId || config.organization.hzzoCode,
+                            },
+                        },
+                        author: {
+                            type: 'Practitioner',
+                            identifier: {
+                                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
+                                value: config.practitioner.hzjzId || config.practitioner.oib,
+                            }
+                        },
+                        source: {
+                            endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
+                            name: config.software.instance,
+                            software: `${config.software.name}_${config.software.company}`,
+                            version: config.software.version,
+                        },
+                        focus: [{ reference: `urn:uuid:${conditionUuid}` }],
+                    },
+                },
+                {
+                    fullUrl: `urn:uuid:${conditionUuid}`,
+                    resource: conditionResource,
+                },
+            ],
+        };
+
+        return this.sendMessage(bundle, userToken, actionDef.auditAction, caseId, patientMbo);
+    }
+
+    /**
+     * Action 2.3: Create a recurrent case linked to a previous closed case.
+     */
+    private async createRecurrentCase(
+        previousCaseId: string,
+        data: Partial<CaseData>,
+        userToken: string
+    ): Promise<any> {
+        // Get previous case info for diagnosis data
+        const previousCase = db.prepare('SELECT * FROM cases WHERE id = ?').get(previousCaseId) as any;
+        if (!previousCase) throw new Error(`Prethodni slučaj ${previousCaseId} nije pronađen.`);
+
+        const cezihPreviousCaseId = previousCase.cezihCaseId || previousCaseId;
+        const messageId = uuidv4();
+        const newLocalCaseId = uuidv4();
+        const conditionUuid = uuidv4();
+        const patientMbo = data.patientMbo || previousCase.patientMbo;
+
+        // Save new case to DB
+        try {
+            db.prepare(`
+                INSERT INTO cases (id, patientMbo, title, status, clinicalStatus, start, diagnosisCode, diagnosisDisplay, practitionerName)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
+                newLocalCaseId,
+                patientMbo,
+                data.title || previousCase.title || previousCase.diagnosisDisplay || 'Ponovljeni slučaj',
+                'active',
+                'recurrence',
+                data.startDate || new Date().toISOString(),
+                data.diagnosisCode || previousCase.diagnosisCode,
+                data.diagnosisDisplay || previousCase.diagnosisDisplay,
+                data.practitionerId || config.practitioner.hzjzId
+            );
+        } catch (err: any) {
+            console.error('[CaseService] DB Insert for recurrent case failed:', err.message);
+        }
+
+        const conditionResource: any = {
+            resourceType: 'Condition',
+            id: conditionUuid,
+            meta: {
+                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-condition'],
+            },
+            identifier: [{
+                system: CEZIH_IDENTIFIERS.LOCAL_CASE_ID,
+                value: newLocalCaseId,
+            }],
+            clinicalStatus: {
+                coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'recurrence' }],
+            },
+            verificationStatus: {
+                coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'confirmed' }],
+            },
+            code: {
+                coding: [{
+                    system: ENCOUNTER_CODES.ICD10_HR,
+                    code: data.diagnosisCode || previousCase.diagnosisCode,
+                    display: data.diagnosisDisplay || previousCase.diagnosisDisplay,
+                }],
+                text: data.diagnosisDisplay || previousCase.diagnosisDisplay,
+            },
+            subject: {
+                type: 'Patient',
+                identifier: {
+                    system: CEZIH_IDENTIFIERS.MBO,
+                    value: patientMbo,
+                },
+            },
+            onsetDateTime: data.startDate || new Date().toISOString(),
+            asserter: {
+                type: 'Practitioner',
+                identifier: {
+                    system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
+                    value: data.practitionerId || config.practitioner.hzjzId,
+                },
+            },
+            // Reference to previous case (CEZIH extension for recurrent cases)
+            extension: [{
+                url: CEZIH_EXTENSIONS.PREVIOUS_HEALTH_ISSUE,
+                valueReference: {
+                    identifier: {
+                        system: CEZIH_IDENTIFIERS.CASE_ID,
+                        value: cezihPreviousCaseId,
+                    },
+                },
+            }],
+        };
+
+        const bundle = {
+            resourceType: 'Bundle',
+            id: messageId,
+            meta: {
+                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-create-recurrent-health-issue-message'],
+            },
+            type: 'message',
+            timestamp: new Date().toISOString(),
+            entry: [
+                {
+                    fullUrl: `urn:uuid:${messageId}`,
+                    resource: {
+                        resourceType: 'MessageHeader',
+                        id: messageId,
+                        meta: {
+                            profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-hi-management-message-header'],
+                        },
+                        eventCoding: {
+                            system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
+                            code: '2.3',
+                        },
+                        sender: {
+                            type: 'Organization',
+                            identifier: {
+                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                                value: data.organizationId || config.organization.hzzoCode,
+                            },
+                        },
+                        author: {
+                            type: 'Practitioner',
+                            identifier: {
+                                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
+                                value: config.practitioner.hzjzId || config.practitioner.oib,
+                            }
+                        },
+                        source: {
+                            endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
+                            name: config.software.instance,
+                            software: `${config.software.name}_${config.software.company}`,
+                            version: config.software.version,
+                        },
+                        focus: [{ reference: `urn:uuid:${conditionUuid}` }],
+                    },
+                },
+                {
+                    fullUrl: `urn:uuid:${conditionUuid}`,
+                    resource: conditionResource,
+                },
+            ],
+        };
+
+        const response = await this.sendMessage(bundle, userToken, 'CASE_RECURRENT', newLocalCaseId, patientMbo);
+
+        // Extract CEZIH case ID from response
+        try {
+            const innerResult = response?.result ?? response;
+            const condition = innerResult?.entry?.find((e: any) => e.resource?.resourceType === 'Condition')?.resource;
+            const cezihNewId = condition?.identifier?.find(
+                (id: any) => id.system === CEZIH_IDENTIFIERS.CASE_ID
+            )?.value;
+            if (cezihNewId) {
+                db.prepare('UPDATE cases SET cezihCaseId = ? WHERE id = ?').run(cezihNewId, newLocalCaseId);
+            }
+        } catch (e) {
+            console.warn('[CaseService] Could not extract CEZIH case ID from recurrent response');
+        }
+
+        return response;
+    }
 
     private async sendMessage(bundle: any, userToken: string, action: string, caseId?: string, patientMbo?: string): Promise<any> {
         console.log('[CaseService] sendMessage entered');

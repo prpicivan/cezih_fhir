@@ -214,7 +214,7 @@ async function run() {
         const res = await req('POST', '/api/document/send', {
             patientMbo: PATIENT_MBO,
             visitId: createdVisitId || 'test-visit-id',
-            type: 'discharge-summary',
+            type: '011',
             content: '<Bundle><type value="document"/></Bundle>',
             diagnosisCode: 'M17.1',
             diagnosisDisplay: 'Gonartroza',
@@ -236,7 +236,7 @@ async function run() {
                 originalDocumentOid: sentDoc.id,
                 patientMbo: PATIENT_MBO,
                 visitId: sentDoc.visitId || createdVisitId || 'test-visit-id',
-                type: sentDoc.type || 'discharge-summary',
+                type: sentDoc.type || '011',
                 content: sentDoc.content || '<Bundle><type value="document"/></Bundle>',
                 diagnosisCode: sentDoc.diagnosisCode || 'M17.1',
                 diagnosisDisplay: sentDoc.diagnosisDisplay || 'Gonartroza',

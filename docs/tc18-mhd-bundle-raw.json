@@ -1,0 +1,244 @@
+{
+  "resourceType": "Bundle",
+  "id": "eec221dd-792d-4bdc-a330-37423fcfd537",
+  "meta": {
+    "profile": [
+      "http://fhir.cezih.hr/specifikacije/StructureDefinition/HRMinimalProvideDocumentBundle"
+    ]
+  },
+  "type": "transaction",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:7a592635-072f-4720-ac07-b6644483f69f",
+      "resource": {
+        "resourceType": "List",
+        "meta": {
+          "profile": [
+            "http://fhir.cezih.hr/specifikacije/StructureDefinition/HRMinimalSubmissionSet"
+          ]
+        },
+        "extension": [
+          {
+            "url": "https://profiles.ihe.net/ITI/MHD/StructureDefinition/ihe-sourceId",
+            "valueIdentifier": {
+              "system": "urn:ietf:rfc:3986",
+              "value": "urn:uuid:19053811-1571-4814-83b3-0b31601b6d83"
+            }
+          }
+        ],
+        "identifier": [
+          {
+            "use": "official",
+            "system": "urn:ietf:rfc:3986",
+            "value": "urn:uuid:14851080-ac0d-40a3-abd2-84ea766cdcdf"
+          },
+          {
+            "use": "usual",
+            "system": "urn:ietf:rfc:3986",
+            "value": "urn:uuid:5dce0589-d422-41a2-bea0-7b14db54a621"
+          }
+        ],
+        "status": "current",
+        "mode": "working",
+        "code": {
+          "coding": [
+            {
+              "system": "https://profiles.ihe.net/ITI/MHD/CodeSystem/MHDlistTypes",
+              "code": "submissionset"
+            }
+          ]
+        },
+        "subject": {
+          "type": "Patient",
+          "identifier": {
+            "system": "http://fhir.cezih.hr/specifikacije/identifikatori/MBO",
+            "value": "999999423"
+          }
+        },
+        "date": "2026-03-05T18:20:29.517Z",
+        "source": {
+          "type": "Practitioner",
+          "identifier": {
+            "system": "http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika",
+            "value": "4981825"
+          }
+        },
+        "entry": [
+          {
+            "item": {
+              "reference": "urn:uuid:c8c067ad-86f1-42d5-9823-fc555fbca423"
+            }
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "url": "List"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:c8c067ad-86f1-42d5-9823-fc555fbca423",
+      "resource": {
+        "resourceType": "DocumentReference",
+        "meta": {
+          "profile": [
+            "http://fhir.cezih.hr/specifikacije/StructureDefinition/HR.MinimalDocumentReference"
+          ]
+        },
+        "masterIdentifier": {
+          "use": "usual",
+          "system": "urn:ietf:rfc:3986",
+          "value": "urn:oid:2.16.840.1.113883.2.7.50.2.1.732968"
+        },
+        "identifier": [
+          {
+            "use": "official",
+            "system": "urn:ietf:rfc:3986",
+            "value": "urn:uuid:9b7a642b-d4c7-4e94-ad94-dbb0955e37d3"
+          }
+        ],
+        "status": "current",
+        "type": {
+          "coding": [
+            {
+              "system": "http://fhir.cezih.hr/specifikacije/CodeSystem/document-type",
+              "code": "011",
+              "display": "Izvješće nakon pregleda u ambulanti privatne zdravstvene ustanove"
+            }
+          ]
+        },
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://fhir.cezih.hr/specifikacije/CodeSystem/document-class",
+                "code": "11",
+                "display": "Klinički dokument"
+              }
+            ]
+          }
+        ],
+        "subject": {
+          "type": "Patient",
+          "identifier": {
+            "system": "http://fhir.cezih.hr/specifikacije/identifikatori/MBO",
+            "value": "999999423"
+          },
+          "display": "999999423"
+        },
+        "date": "2026-03-05T18:20:29.518Z",
+        "author": [
+          {
+            "type": "Practitioner",
+            "identifier": {
+              "system": "http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika",
+              "value": "4981825"
+            },
+            "display": "Ivan Prpić"
+          },
+          {
+            "type": "Organization",
+            "identifier": {
+              "system": "http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije",
+              "value": "999001425"
+            },
+            "display": "WBS ordinacija"
+          }
+        ],
+        "authenticator": {
+          "type": "Practitioner",
+          "identifier": {
+            "system": "http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika",
+            "value": "4981825"
+          },
+          "display": "Ivan Prpić"
+        },
+        "custodian": {
+          "identifier": {
+            "system": "http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije",
+            "value": "999001425"
+          },
+          "display": "WBS ordinacija"
+        },
+        "description": "Medicinski nalaz",
+        "securityLabel": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/v3-Confidentiality",
+                "code": "N",
+                "display": "normal"
+              }
+            ]
+          }
+        ],
+        "content": [
+          {
+            "attachment": {
+              "contentType": "application/fhir+json",
+              "url": "urn:uuid:6126cb4e-8333-41ac-9288-2598ea749a34"
+            },
+            "format": {
+              "system": "http://ihe.net/fhir/ihe.formatcode.fhir/CodeSystem/formatcode",
+              "code": "urn:ihe:iti:xds:2017:mimeTypeSufficient",
+              "display": "mimeType Sufficient"
+            }
+          }
+        ],
+        "context": {
+          "practiceSetting": {
+            "coding": [
+              {
+                "system": "http://fhir.cezih.hr/specifikacije/CodeSystem/djelatnosti-zz",
+                "code": "3030000",
+                "display": "Opća medicina"
+              }
+            ]
+          },
+          "period": {
+            "start": "2026-03-05T18:20:28.404Z"
+          },
+          "encounter": [
+            {
+              "type": "Encounter",
+              "identifier": {
+                "system": "http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-posjete",
+                "value": "27f1ea2d-e74d-4e67-966d-b55e6705322f"
+              }
+            }
+          ],
+          "related": [
+            {
+              "type": "Condition",
+              "identifier": {
+                "system": "http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja",
+                "value": "local-b1215757-0dbb-4350-9338-7ad4ee089244"
+              }
+            }
+          ]
+        }
+      },
+      "request": {
+        "method": "POST",
+        "url": "DocumentReference"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:6126cb4e-8333-41ac-9288-2598ea749a34",
+      "resource": {
+        "resourceType": "Binary",
+        "meta": {
+          "profile": [
+            "http://hl7.org/fhir/StructureDefinition/Binary"
+          ]
+        },
+        "contentType": "application/fhir+json",
+        "data": "eyJyZXNvdXJjZVR5cGUiOiJCdW5kbGUiLCJ0eXBlIjoiZG9jdW1lbnQiLCJpZGVudGlmaWVyIjp7InN5c3RlbSI6InVybjppZXRmOnJmYzozOTg2IiwidmFsdWUiOiJ1cm46b2lkOjIuMTYuODQwLjEuMTEzODgzLjIuNy41MC4yLjEuNzMyOTY4In0sInRpbWVzdGFtcCI6IjIwMjYtMDMtMDVUMTg6MjA6MjguNDEwWiIsImVudHJ5IjpbeyJmdWxsVXJsIjoidXJuOnV1aWQ6Mi4xNi44NDAuMS4xMTM4ODMuMi43LjUwLjIuMS43MzI5NjgiLCJyZXNvdXJjZSI6eyJyZXNvdXJjZVR5cGUiOiJDb21wb3NpdGlvbiIsInN0YXR1cyI6ImZpbmFsIiwidHlwZSI6eyJjb2RpbmciOlt7InN5c3RlbSI6Imh0dHA6Ly9maGlyLmNlemloLmhyL3NwZWNpZmlrYWNpamUvQ29kZVN5c3RlbS9kb2N1bWVudC10eXBlIiwiY29kZSI6IjAxMSIsImRpc3BsYXkiOiJJenZqZcWhxIdlIG5ha29uIHByZWdsZWRhIHUgYW1idWxhbnRpIHByaXZhdG5lIHpkcmF2c3R2ZW5lIHVzdGFub3ZlIn1dfSwic3ViamVjdCI6eyJyZWZlcmVuY2UiOiJ1cm46dXVpZDowY2ZhYzk5Yi1iNjcxLTQ2ZmItOTg1ZS05ZjhiYTU0MzM3NTYiLCJkaXNwbGF5IjoiSVZBTiBQQUNQUklWQVROSUNJNDIifSwiZW5jb3VudGVyIjp7InJlZmVyZW5jZSI6InVybjp1dWlkOmQxMTUwYTMzLWQ3ZWUtNDQwMC05NWRjLTk3NWQxYjA3OTQ4NSJ9LCJkYXRlIjoiMjAyNi0wMy0wNVQxOToyMDoyNiswMTowMCIsImF1dGhvciI6W3sicmVmZXJlbmNlIjoidXJuOnV1aWQ6OTA2MjBkNTktZDU3Yy00MmQzLTkxZjEtOGQyNTc3NmY3MDk2IiwiZGlzcGxheSI6Ikl2YW4gUHJwacSHIn0seyJyZWZlcmVuY2UiOiJ1cm46dXVpZDo2MDUwNTdiMi02YjZhLTQ3MzMtODc2MS1jNDk3NmRiMjFkNGQiLCJkaXNwbGF5IjoiV0JTIG9yZGluYWNpamEifV0sInRpdGxlIjoiVEMxOCBiaW5hcnkrcHJvZmlsZSIsImF0dGVzdGVyIjpbeyJtb2RlIjoicHJvZmVzc2lvbmFsIiwicGFydHkiOnsicmVmZXJlbmNlIjoidXJuOnV1aWQ6OTA2MjBkNTktZDU3Yy00MmQzLTkxZjEtOGQyNTc3NmY3MDk2IiwiZGlzcGxheSI6Ikl2YW4gUHJwacSHIn19LHsibW9kZSI6Im9mZmljaWFsIiwicGFydHkiOnsicmVmZXJlbmNlIjoidXJuOnV1aWQ6NjA1MDU3YjItNmI2YS00NzMzLTg3NjEtYzQ5NzZkYjIxZDRkIiwiZGlzcGxheSI6IldCUyBvcmRpbmFjaWphIn19XSwic2VjdGlvbiI6W3sidGl0bGUiOiJEamVsYXRub3N0IiwiY29kZSI6eyJjb2RpbmciOlt7InN5c3RlbSI6Imh0dHA6Ly9maGlyLmNlemloLmhyL3NwZWNpZmlrYWNpamUvQ29kZVN5c3RlbS9kb2N1bWVudC1zZWN0aW9uIiwiY29kZSI6IjEyIiwiZGlzcGxheSI6IkRqZWxhdG5vc3QifV19LCJlbnRyeSI6W3sicmVmZXJlbmNlIjoidXJuOnV1aWQ6ZDU4YzZkMTYtMDVkMy00N2RhLWI1MDUtMDhlMTNkNGE4ZTk4In1dfSx7InRpdGxlIjoiRGlqYWdub3phIiwiY29kZSI6eyJjb2RpbmciOlt7InN5c3RlbSI6Imh0dHA6Ly9maGlyLmNlemloLmhyL3NwZWNpZmlrYWNpamUvQ29kZVN5c3RlbS9kb2N1bWVudC1zZWN0aW9uIiwiY29kZSI6IjE4IiwiZGlzcGxheSI6Ik1lZGljaW5za2EgaW5mb3JtYWNpamEifV19LCJlbnRyeSI6W3sicmVmZXJlbmNlIjoidXJuOnV1aWQ6Njg4OWJhMDMtOWQ3OC00NjlmLWJjYWItMTJhNDY3ZjY3NTNhIn1dfSx7InRpdGxlIjoiQW5hbW5lemEiLCJ0ZXh0Ijp7InN0YXR1cyI6ImdlbmVyYXRlZCIsImRpdiI6IjxkaXYgeG1sbnM9XCJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hodG1sXCI+PHN0cm9uZz5BbmFtbmV6YTo8L3N0cm9uZz48cD5Cb2wuPC9wPjwvZGl2PiJ9fSx7InRpdGxlIjoiTmFsYXoiLCJ0ZXh0Ijp7InN0YXR1cyI6ImdlbmVyYXRlZCIsImRpdiI6IjxkaXYgeG1sbnM9XCJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hodG1sXCI+PHN0cm9uZz5OYWxhejo8L3N0cm9uZz48cD5OYWxhei48L3A+PC9kaXY+In19LHsidGl0bGUiOiJQcmVwb3J1a2EgaSB0ZXJhcGlqYSIsInRleHQiOnsic3RhdHVzIjoiZ2VuZXJhdGVkIiwiZGl2IjoiPGRpdiB4bWxucz1cImh0dHA6Ly93d3cudzMub3JnLzE5OTkveGh0bWxcIj48c3Ryb25nPlByZXBvcnVrYSBpIHRlcmFwaWphOjwvc3Ryb25nPjxwPlRlcmFwaWphLjwvcD48L2Rpdj4ifX1dfX0seyJmdWxsVXJsIjoidXJuOnV1aWQ6Njg4OWJhMDMtOWQ3OC00NjlmLWJjYWItMTJhNDY3ZjY3NTNhIiwicmVzb3VyY2UiOnsicmVzb3VyY2VUeXBlIjoiQ29uZGl0aW9uIiwiY2xpbmljYWxTdGF0dXMiOnsiY29kaW5nIjpbeyJzeXN0ZW0iOiJodHRwOi8vdGVybWlub2xvZ3kuaGw3Lm9yZy9Db2RlU3lzdGVtL2NvbmRpdGlvbi1jbGluaWNhbCIsImNvZGUiOiJhY3RpdmUifV19LCJ2ZXJpZmljYXRpb25TdGF0dXMiOnsiY29kaW5nIjpbeyJzeXN0ZW0iOiJodHRwOi8vdGVybWlub2xvZ3kuaGw3Lm9yZy9Db2RlU3lzdGVtL2NvbmRpdGlvbi12ZXItc3RhdHVzIiwiY29kZSI6ImNvbmZpcm1lZCJ9XX0sImNhdGVnb3J5IjpbeyJjb2RpbmciOlt7InN5c3RlbSI6Imh0dHA6Ly90ZXJtaW5vbG9neS5obDcub3JnL0NvZGVTeXN0ZW0vY29uZGl0aW9uLWNhdGVnb3J5IiwiY29kZSI6ImVuY291bnRlci1kaWFnbm9zaXMiLCJkaXNwbGF5IjoiRW5jb3VudGVyIERpYWdub3NpcyJ9XX1dLCJjb2RlIjp7ImNvZGluZyI6W3sic3lzdGVtIjoiaHR0cDovL2ZoaXIuY2V6aWguaHIvc3BlY2lmaWthY2lqZS9Db2RlU3lzdGVtL2ljZDEwLWhyIiwiY29kZSI6Ik0xNy4xIiwiZGlzcGxheSI6IkdvbmFydHJvemEifV19LCJzdWJqZWN0Ijp7InR5cGUiOiJQYXRpZW50IiwiaWRlbnRpZmllciI6eyJzeXN0ZW0iOiJodHRwOi8vZmhpci5jZXppaC5oci9zcGVjaWZpa2FjaWplL2lkZW50aWZpa2F0b3JpL01CTyIsInZhbHVlIjoiOTk5OTk5NDIzIn19LCJlbmNvdW50ZXIiOnsicmVmZXJlbmNlIjoidXJuOnV1aWQ6ZDExNTBhMzMtZDdlZS00NDAwLTk1ZGMtOTc1ZDFiMDc5NDg1In0sInJlY29yZGVkRGF0ZSI6IjIwMjYtMDMtMDVUMTk6MjA6MjYrMDE6MDAifX0seyJmdWxsVXJsIjoidXJuOnV1aWQ6MGNmYWM5OWItYjY3MS00NmZiLTk4NWUtOWY4YmE1NDMzNzU2IiwicmVzb3VyY2UiOnsicmVzb3VyY2VUeXBlIjoiUGF0aWVudCIsImV4dGVuc2lvbiI6W3sidXJsIjoiaHR0cDovL2ZoaXIuY2V6aWguaHIvc3BlY2lmaWthY2lqZS9TdHJ1Y3R1cmVEZWZpbml0aW9uL2hyLXBhdGllbnQtbGFzdC1jb250YWN0IiwidmFsdWVEYXRlIjoiMjAyNi0wMy0wNSJ9XSwiaWRlbnRpZmllciI6W3sic3lzdGVtIjoiaHR0cDovL2ZoaXIuY2V6aWguaHIvc3BlY2lmaWthY2lqZS9pZGVudGlmaWthdG9yaS9NQk8iLCJ2YWx1ZSI6Ijk5OTk5OTQyMyJ9LHsic3lzdGVtIjoiaHR0cDovL2ZoaXIuY2V6aWguaHIvc3BlY2lmaWthY2lqZS9pZGVudGlmaWthdG9yaS9qZWRpbnN0dmVuaS1pZGVudGlmaWthdG9yLXBhY2lqZW50YSIsInZhbHVlIjoiY2IzMWVkNDYtNTQ5Yi00YWY3LWI1NmItOGU1YTE3ZGIxZTdlIn1dLCJuYW1lIjpbeyJmYW1pbHkiOiJQQUNQUklWQVROSUNJNDIiLCJnaXZlbiI6WyJJVkFOIl19XSwiYmlydGhEYXRlIjoiMTk4NS0wNy0wNSIsImdlbmRlciI6Im1hbGUifX0seyJmdWxsVXJsIjoidXJuOnV1aWQ6OTA2MjBkNTktZDU3Yy00MmQzLTkxZjEtOGQyNTc3NmY3MDk2IiwicmVzb3VyY2UiOnsicmVzb3VyY2VUeXBlIjoiUHJhY3RpdGlvbmVyIiwiaWRlbnRpZmllciI6W3sic3lzdGVtIjoiaHR0cDovL2ZoaXIuY2V6aWguaHIvc3BlY2lmaWthY2lqZS9pZGVudGlmaWthdG9yaS9IWkpaLWJyb2otemRyYXZzdHZlbm9nLWRqZWxhdG5pa2EiLCJ2YWx1ZSI6IjQ5ODE4MjUifV0sIm5hbWUiOlt7ImZhbWlseSI6IlBycGnEhyIsImdpdmVuIjpbIkl2YW4iXX1dfX0seyJmdWxsVXJsIjoidXJuOnV1aWQ6NjA1MDU3YjItNmI2YS00NzMzLTg3NjEtYzQ5NzZkYjIxZDRkIiwicmVzb3VyY2UiOnsicmVzb3VyY2VUeXBlIjoiT3JnYW5pemF0aW9uIiwiaWRlbnRpZmllciI6W3sic3lzdGVtIjoiaHR0cDovL2ZoaXIuY2V6aWguaHIvc3BlY2lmaWthY2lqZS9pZGVudGlmaWthdG9yaS9IWlpPLXNpZnJhLXpkcmF2c3R2ZW5lLW9yZ2FuaXphY2lqZSIsInZhbHVlIjoiOTk5MDAxNDI1In1dLCJuYW1lIjoiV0JTIG9yZGluYWNpamEifX0seyJmdWxsVXJsIjoidXJuOnV1aWQ6ZDU4YzZkMTYtMDVkMy00N2RhLWI1MDUtMDhlMTNkNGE4ZTk4IiwicmVzb3VyY2UiOnsicmVzb3VyY2VUeXBlIjoiSGVhbHRoY2FyZVNlcnZpY2UiLCJpZGVudGlmaWVyIjpbeyJzeXN0ZW0iOiJodHRwOi8vZmhpci5jZXppaC5oci9zcGVjaWZpa2FjaWplL2lkZW50aWZpa2F0b3JpL0lELWRqZWxhdG5vc3RpIiwidmFsdWUiOiIzMDMwMDAwIn1dLCJwcm92aWRlZEJ5Ijp7InJlZmVyZW5jZSI6InVybjp1dWlkOjYwNTA1N2IyLTZiNmEtNDczMy04NzYxLWM0OTc2ZGIyMWQ0ZCJ9LCJuYW1lIjoiT3DEh2EgbWVkaWNpbmEifX0seyJmdWxsVXJsIjoidXJuOnV1aWQ6ZDExNTBhMzMtZDdlZS00NDAwLTk1ZGMtOTc1ZDFiMDc5NDg1IiwicmVzb3VyY2UiOnsicmVzb3VyY2VUeXBlIjoiRW5jb3VudGVyIiwiaWRlbnRpZmllciI6W3sic3lzdGVtIjoiaHR0cDovL2ZoaXIuY2V6aWguaHIvc3BlY2lmaWthY2lqZS9pZGVudGlmaWthdG9yaS9sb2thbG5pLWlkZW50aWZpa2F0b3ItcG9zamV0ZSIsInZhbHVlIjoiMjdmMWVhMmQtZTc0ZC00ZTY3LTk2NmQtYjU1ZTY3MDUzMjJmIn1dLCJzdGF0dXMiOiJmaW5pc2hlZCIsImNsYXNzIjp7InN5c3RlbSI6Imh0dHA6Ly9maGlyLmNlemloLmhyL3NwZWNpZmlrYWNpamUvQ29kZVN5c3RlbS9uYWNpbi1wcmlqZW1hIiwiY29kZSI6IjEiLCJkaXNwbGF5IjoiT3N0YWxvIn0sInN1YmplY3QiOnsidHlwZSI6IlBhdGllbnQiLCJpZGVudGlmaWVyIjp7InN5c3RlbSI6Imh0dHA6Ly9maGlyLmNlemloLmhyL3NwZWNpZmlrYWNpamUvaWRlbnRpZmlrYXRvcmkvTUJPIiwidmFsdWUiOiI5OTk5OTk0MjMifX0sInBhcnRpY2lwYW50IjpbeyJpbmRpdmlkdWFsIjp7InR5cGUiOiJQcmFjdGl0aW9uZXIiLCJpZGVudGlmaWVyIjp7InN5c3RlbSI6Imh0dHA6Ly9maGlyLmNlemloLmhyL3NwZWNpZmlrYWNpamUvaWRlbnRpZmlrYXRvcmkvSFpKWi1icm9qLXpkcmF2c3R2ZW5vZy1kamVsYXRuaWthIiwidmFsdWUiOiIxMjM0NTY3In19fV0sInNlcnZpY2VQcm92aWRlciI6eyJ0eXBlIjoiT3JnYW5pemF0aW9uIiwiaWRlbnRpZmllciI6eyJzeXN0ZW0iOiJodHRwOi8vZmhpci5jZXppaC5oci9zcGVjaWZpa2FjaWplL2lkZW50aWZpa2F0b3JpL0haWk8tc2lmcmEtemRyYXZzdHZlbmUtb3JnYW5pemFjaWplIiwidmFsdWUiOiI5OTk5OTk5OTkifX0sInBlcmlvZCI6eyJzdGFydCI6IjIwMjYtMDMtMDVUMTk6MjA6MjYrMDE6MDAiLCJlbmQiOiIyMDI2LTAzLTA1VDE4OjIwOjI4LjQxMFoifX19XSwic2lnbmF0dXJlIjp7InR5cGUiOlt7InN5c3RlbSI6InVybjppc28tYXN0bTpFMTc2Mi05NToyMDEzIiwiY29kZSI6IjEuMi44NDAuMTAwNjUuMS4xMi4xLjEifV0sIndoZW4iOiIyMDI2LTAzLTA1VDE4OjIwOjI4LjUxMVoiLCJ3aG8iOnsidHlwZSI6IlByYWN0aXRpb25lciIsImlkZW50aWZpZXIiOnsic3lzdGVtIjoiaHR0cDovL2ZoaXIuY2V6aWguaHIvc3BlY2lmaWthY2lqZS9pZGVudGlmaWthdG9yaS9IWkpaLWJyb2otemRyYXZzdHZlbm9nLWRqZWxhdG5pa2EiLCJ2YWx1ZSI6IjQ5ODE4MjUifX0sImRhdGEiOiJaWGxLYUdKSFkybFBhVXBHVlhwTk5FNURTWE5KYlhBellYbEpObVY1U25Ka1NHdHBUMmxLUmxGNVNYTkpibFo2V2xOSk5rbHVUbkJhZVVselNXNW5NV1JEVGxSTmFsVXlTV3B2YVZScmRERldlbXQ2VGpGa2MxSkdSbFJoVjNoMldraG9kRk14YUZkVFIwWktZbGM1UTJORmVFUmphMXB1VmpBd01sZFdaRVZXVlVwS1ZWTkpjMGx1WnpGWmVVazJWM2xLVGxOVmJFVmlWbEpFVVRCR05WRXlaRUprTUd4RFVWZGtTbFpXVW5KaVJteFRXVlZ3ZDFkcVJuUk9WbkJDVTFod1ZGTklRWEpQUmxwdVQxZE9XVm96WkVSYU1XeEtVekk1WVZOWWNIRk5SVlpDWkRBeE0xWnNVa1pVUlRGQ1lUQmtRazFXVmtaUmJXaE9VVEZPUjFOWWFFWmxhMFpUVVcxa1QxWnJTa0ppTURGRVlUQmFUVlZyVGtOaE1IaDBUMGhXYVdWVVVqUlNNbkJDVjFWS2JsUnNXa05TTUZaT1VsWmFZVkZzV2taaFJrNU5Wa1pWTUZRd1VsSmxhekZGV25wT1VGSkhkRFJVVmtwV1pEQldNMWRWVWxkVlZrWkZVa1ZHTkZaV1NsZFViRlpTVFVaYVZGWnJWbk5VVms1V1VsaGtTV0ZIVGs5VVYzQmFaREF4Y1ZKVVVrNVdSVlkxVkd0U1FtVldaRzlaTURWT1lXMTBNMVJYY0VaTk1ERlZVbGhzVDFKRlJqUldNbkJEVDBVeFVtTXpaRVJWVm14RlZteEdVbEl3VmpOVGEyeFdZV3RXYVZSVlNuSlNNRVY0VmxWV1JHUXpaRlJWTVdSVFlrZEtkVlZ1UW1GaVYzaHhWMVpvVTJOSFNYbE9WbFpoVjBVMGQxUldSVFJrTUZKU1YxVlNWMVZXUmtaU1JVWmhWVmRPZFZGdVFqUlRWMDQwVWtaU1FsUkZTbTVVYkZwRFVUSTVUbEZyVm5OTmJHeFlUa2hvU0dGclJscFJiV1JQVm10S1FsWldVa1pXYTBwUVZrUkNiMVV3ZUZWVVdHUk9Wa1pzTTFSclVsWmxhemxGV1ROd1RsVnNSak5TVjJSYVVrWmFVbFZWVWtWUldGSkxXa2N4UjJSVmJFZFJibXhxVWpJMVJtRkljRU5OYXpGRFVWVmtRMlZZUmtoVk1EQXdUMVZHYmxKVlpFTlZNMVpEVVd0R1FtRlZSWGxUVlVaRFUzcEJOV1F6VFRCU1ZVWXlaREJTZFdORGMzbFVhekZ3VmxoR1RrMUlUbTVpUXpoNVRqQTFNVlZwT1c5WFZrWjNaVk01VkZwVWJFNVRSV3hZVkdzNVdtUnFhRkpqVjJ4T1RqTmtSMVV5V1hkYWJrWnJZbTFrVlUxWFdUQkxNRGwzVVZaV2IxSkZPVXBYYWtaSFUyMTBRbVJ0VG1oV00yeExUbXBLV2xGclpETmpSVGcxWVVoSk5GRnNVa0pOTTA1NFVURnNWV0ZFVlROVVIzQTFZbXhHUzAxVk1VVlRNWEIzVjFoS2VGUXdUa0pYVjJReldqSmtTRkpWTVVKa01HUkNUVlpXYTFKWVpFWlJhVGt6VlZWT1RsRlZSak5UU0dSYVVrWmFVMDFIY0VOUmJXUXpVbTA1UWxaWGRGUmhiV3hFV2pOV01GVXpTbGxsUlhCVlVqSk9URk5WZEdoaE1qVkdWMms1V2xrelpHMVJWbXhLVXpOa1dsRnJTbEpXVldoQ1ZWVldSbGt3VWtOa1ZURkZXVEJrUkZFelRraFJWa1pXVW10S05sRlZUbTloV0ZKMldrVm9VMlF5VGpaaU0xcE5UVEZLYzFsNlRsSmtWbXQ1Vm01c2ExSXllSHBaVm1SR1pGWnJlVTlZVWsxTmF6VnpXVEkxVW1Sc2EzbFdibXhyVWpKNGVsbFdaRVprVm10NlUycENUbEpGTVVoUk1FNTZVakJHVWxaVldrTmxhMFpEWVVkc2EySXlVa2xWYm1ScVpXMDVNbFJFU1RWaGJVMTZVVmhXYTFJeFdqWmFSVTB4WVd4d1dWTnFRbWhXTTJoM1YxWk5NV0Z0U1hsTlNGcGFUV3hhTlZwRlpITmpNa1pZVWxoa1ZGRldiRVZXYkVsM1dqQktSbEpZWkZGbGEwVTFVVzFqTUdOclNtNVNWVlpDVjFWNFdWZElaRlpWVlVadVVsVk9RbUZyUm5sVVZVNXlVakJPUkdNd1pFSlZWbFpIVVc1a1NsRnJXbTlOVnpsclUwWktNMWt6Y0haa2EzZDZWVzE0YWsweFJqRlhWRXBYWlZkU1NHSklUbWhXTUZZeFYxUkpOV1JGZDNsVWJtUnFaV3RHYlZGdFpFOVdhMmhVVmxWV1NGSkZSbGhSYldSdVkydEtibEpWV2tOVlYwNUZVVmRrV2xNd2RETlhWVXBEVVZWa1JGUnVhRkpSTUVaeFVWUmtRMW93TlZkVFJrazBVbFUxUlZGWWJFNVNSVTV1VkVoR1FtTXlhSEJqUnpsclUwWktNMWt6Y0haa2EzZDVWRzVzYVZGNlZYZFhiR2hQVFVWNGRGUnRlR3BpYkVwM1dXdGtjMkZGZUhSVWJscHBWWHBzY1Zkc2FFdE5SMFpZWlVoQ1dsVjZWbkZaTWpFelpEQm9VbGRWVWxkVmFrSlFVV3RLV2xKVldrTk5WMUV3VWpKS2ExVnJhSEZUUkVKSFVtMVdXbUZYT1c1VldFVjNVVmhzY0ZwWVFrNVJWRkpJVVZSR1ZscEZVak5TVlVsMlpERkdSbEZZWkVwU1IyeEZVVlYwUTFveVpIaGhSM1J4VkRGQ1VsVlZVa0prTURWMVVWVlNRMkV3Um5GUlZVcHFWMjVXUTFwck9YRmtNbk15VmpCT2NGRjZVa3BUU0hCUVRXMW9hbEpIV205T01VWlhZVlV4TkdSV1FtOVVhM0JOVTFWYWVXTllhRk5QUjNNMFpVZGtTVll3Y0ZkaVJrcElVbGM1TTJWdE1WQlJhMVpFVkZWb05WRnVaSFpsYmxZeFQxZGpkbUZGV1haalJGcExZVWRTVWxaclNuQkxNREZTV2xSWmVGTjZaRXhWYTFwTVpGaG9NVnBJVFRCU01EVnRaR3Q0VUdNelZtOWtWRXAzVGtkMFFrNUdSbEZXTWpWeFMzbDBVbEJVTUdsWVUzZHBZbTFLYlVscWIzaE9lbU40VGtSRmVrOUVVWGxNUTBwc1pVaEJhVTlxUlRST2FsbDNUV3BGTkU1RVJYTkpiVTU1WkdsSk5rbHNRWFJOZW1jd1NXbDNhV1ZEU1RaSmJrcFZUVEJPTmxveFJrUllNRVpRV2xjME0xZFVRalZUYkU1MlpXeE9OVkV4YUdaWmJrMTVUbFZuZEZKdGFFUmlhM2MxVTJwamQyUXlUbTlYVkVFeFlWWTVORkV6UmtwbGJscENWbXR3WmxWcE1YZE5iVlZwVEVOS05VbHFiMmxSYkVKWFdESnZNRTV0ZEVOVk1GWk9Ua2RvZFZaV1ZuUlZWVTAxWlVoQ2FWTlhOWGxYYldSR1dXdE9jazU2U2toa2JtUkhWRlZTYkdWWE9VdGhSVGxKWW01T01WVkZkR3RSVnpWV1pEQXhkMkpYZUhCa1UwbzVabEV1TGt4YVgxSkljbEJxWm5sVmQwRk1Ua3hOUTIxNE1GaE1NVUZTTFc0M05uRXdiVk42VVdKUFUweHBYMnc0VW5oRlRWUlpTVEJoYVdSemEwZFVjRWMzWkVReUxYcHJORmRxUkVsaGVteDRNRXRJV0RWSVRYSkNhRTVPWlZoQ2FrNTNTRVZCYldKRlFsbG9RM05NTURoUlYwTjJUWGxXTm5wVVJUWnlSWG80TVcxMCJ9fQ=="
+      },
+      "request": {
+        "method": "POST",
+        "url": "Binary"
+      }
+    }
+  ]
+}
