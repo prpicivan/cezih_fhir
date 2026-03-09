@@ -317,7 +317,8 @@ class ClinicalDocumentService {
     async completeSmartCardSigning(
         documentOid: string,
         transactionCode: string,
-        userToken: string
+        userToken: string,
+        signPin?: string
     ): Promise<any> {
         console.log('[ClinicalDocumentService] Smart card signing for document:', documentOid);
 
@@ -336,7 +337,7 @@ class ClinicalDocumentService {
 
             // 3. Sign locally using PKCS#11 (smart card)
             console.log('[ClinicalDocumentService] Signing bundle via PKCS#11...');
-            const signedResult = await signatureService.signBundle(pendingBundle, undefined, userToken);
+            const signedResult = await signatureService.signBundle(pendingBundle, undefined, userToken, signPin);
             const finalDocumentBundle = signedResult.bundle;
 
             // 4. Reconstruct minimal data for submission
@@ -413,20 +414,22 @@ class ClinicalDocumentService {
         const mhdBundle = {
             resourceType: 'Bundle',
             type: 'transaction',
-            meta: {
-                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-mhd-provide-document-bundle-minimal']
-            },
+
             entry: [
                 {
                     fullUrl: submissionSetUuid,
                     resource: {
                         resourceType: 'List',
-                        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-mhd-submissionset'] },
+
                         status: 'current',
                         mode: 'working',
                         code: { coding: [{ system: 'http://ihe.net/fhir/ihe.formatcode.assignment/CodeSystem/formatcodes', code: 'urn:ihe:iti:xds:2001:post-hoc-submission-set' }] },
-                        date: new Date().toISOString(),
-                        subject: { reference: `Patient/${patientLogicalId}` }
+
+                        subject: { identifier: { system: CEZIH_IDENTIFIERS.MBO, value: data.patientMbo } },
+                        // REQUIRED: entry links SubmissionSet → DocumentReference
+                        entry: [
+                            { item: { reference: docRefUuid } }
+                        ]
                     },
                     request: { method: 'POST', url: 'List' }
                 },
@@ -434,12 +437,13 @@ class ClinicalDocumentService {
                     fullUrl: docRefUuid,
                     resource: {
                         resourceType: 'DocumentReference',
-                        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-mhd-documentreference'] },
+
                         masterIdentifier: { system: 'urn:ietf:rfc:3986', value: `urn:oid:${documentOid}` },
                         status: 'current',
-                        type: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type', code: '011' }] },
-                        subject: { reference: `Patient/${patientLogicalId}` },
-                        author: [{ reference: `Practitioner/${data.practitionerId}` }],
+
+                        type: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type', code: data.type || '011' }] },
+                        subject: { identifier: { system: CEZIH_IDENTIFIERS.MBO, value: data.patientMbo } },
+                        author: [{ identifier: { system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER, value: data.practitionerId } }],
                         content: [{ attachment: { contentType: 'application/fhir+json', url: binaryUuid } }]
                     },
                     request: { method: 'POST', url: 'DocumentReference' }
@@ -448,6 +452,7 @@ class ClinicalDocumentService {
                     fullUrl: binaryUuid,
                     resource: {
                         resourceType: 'Binary',
+                        meta: { profile: ['http://hl7.org/fhir/StructureDefinition/Binary'] },
                         contentType: 'application/fhir+json',
                         data: Buffer.from(JSON.stringify(finalDocumentBundle)).toString('base64'),
                     },
@@ -515,6 +520,63 @@ class ClinicalDocumentService {
                 payload_res: responseData,
                 error_msg: errorMessage
             });
+        }
+
+        return responseData;
+    }
+
+    /**
+     * RAW MHD submission: takes a pre-built MHD bundle and sends it directly
+     * to the CEZIH gateway without any local bundle building or validation.
+     * Useful for certification testing with hand-crafted bundles.
+     */
+    async submitMhdBundleRaw(mhdBundle: any, documentOid: string, userToken: string): Promise<any> {
+        let responseData: any = null;
+        let errorMessage: string | undefined;
+
+        try {
+            let headers: Record<string, string>;
+            try {
+                headers = await authService.getSystemAuthHeaders();
+            } catch (tokenErr: any) {
+                headers = authService.getUserAuthHeaders(userToken);
+            }
+
+            const gatewayHeaders = authService.hasGatewaySession() ? authService.getGatewayAuthHeaders() : {};
+            const combinedHeaders = {
+                ...headers,
+                ...(gatewayHeaders.Cookie ? { Cookie: gatewayHeaders.Cookie } : {}),
+                'Content-Type': 'application/fhir+json',
+                'Accept': 'application/fhir+json',
+            };
+
+            const url = `${config.cezih.gatewayBase}${config.cezih.services.document}/iti-65-service`;
+            console.log('[submitMhdBundleRaw] Submitting to:', url);
+            console.log('[submitMhdBundleRaw] Bundle entries:', mhdBundle.entry?.map((e: any) => e.resource?.resourceType).join(', '));
+            console.log('[submitMhdBundleRaw] Full MHD Bundle:', JSON.stringify(mhdBundle).substring(0, 2000));
+
+            const response = await axios.post(url, mhdBundle, { headers: combinedHeaders });
+            responseData = response.data;
+            console.log('[submitMhdBundleRaw] Success! Response:', JSON.stringify(responseData).substring(0, 500));
+        } catch (error: any) {
+            console.warn('[submitMhdBundleRaw] CEZIH send failed:', error.message);
+            console.warn('[submitMhdBundleRaw] Response status:', error.response?.status);
+            console.warn('[submitMhdBundleRaw] Response data:', JSON.stringify(error.response?.data)?.substring(0, 1000));
+            errorMessage = error.message;
+
+            const cezihDetail = error.response?.data?.issue?.[0]?.diagnostics
+                || error.response?.data?.issue?.[0]?.details?.text
+                || JSON.stringify(error.response?.data)
+                || error.message;
+
+            responseData = {
+                success: false,
+                cezihStatus: 'failed',
+                cezihError: error.response?.status
+                    ? `HTTP ${error.response.status}: ${cezihDetail}`
+                    : error.message,
+                documentOid,
+            };
         }
 
         return responseData;
@@ -609,14 +671,14 @@ class ClinicalDocumentService {
             resourceType: 'Bundle',
             type: 'transaction',
             meta: {
-                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-mhd-provide-document-bundle-minimal']
+                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HRMinimalProvideDocumentBundle']
             },
             entry: [
                 {
                     fullUrl: submissionSetUuid,
                     resource: {
                         resourceType: 'List',
-                        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-mhd-submissionset'] },
+                        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HRMinimalSubmissionSet'] },
                         status: 'current',
                         mode: 'working',
                         code: { coding: [{ system: 'http://ihe.net/fhir/ihe.formatcode.assignment/CodeSystem/formatcodes', code: 'urn:ihe:iti:xds:2001:post-hoc-submission-set' }] },
@@ -629,7 +691,7 @@ class ClinicalDocumentService {
                     fullUrl: docRefUuid,
                     resource: {
                         resourceType: 'DocumentReference',
-                        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-mhd-documentreference'] },
+                        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HR.MinimalDocumentReference'] },
                         masterIdentifier: { system: 'urn:ietf:rfc:3986', value: `urn:oid:${newDocumentOid}` },
                         status: 'current',
                         type: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type', code: '011' }] },
@@ -987,8 +1049,9 @@ class ClinicalDocumentService {
         visit: any,
         patientCezihId?: string
     ): any {
-        // UUIDs for all fullUrl/references within the inner document Bundle
-        const patientUuid = `urn:uuid:${uuidv4()}`;
+        // Prijedlog 1: Ako imamo CEZIH logički Patient ID, koristimo ga kao fullUrl i referencu
+        // da outer DocumentReference.subject (Patient/1118065) i inner Composition.subject budu isti string.
+        const patientFullUrl = patientCezihId ? `Patient/${patientCezihId}` : `urn:uuid:${uuidv4()}`;
         const practitionerUuid = `urn:uuid:${uuidv4()}`;
         const organizationUuid = `urn:uuid:${uuidv4()}`;
         const encounterUuid = `urn:uuid:${uuidv4()}`;
@@ -1010,7 +1073,7 @@ class ClinicalDocumentService {
                 status: 'final',
                 type: { coding: [this.getDocumentTypeCoding(data.type)] },
                 subject: {
-                    reference: patientUuid,
+                    reference: patientFullUrl,
                     identifier: {
                         system: CEZIH_IDENTIFIERS.MBO,
                         value: data.patientMbo
@@ -1033,9 +1096,10 @@ class ClinicalDocumentService {
             }
         });
 
-        // 2. Patient — fullUrl = urn:uuid, but id field = CEZIH logical ID for cross-check
+        // 2. Patient — fullUrl = Patient/{cezihId} kada je poznat (Prijedlog 1)
+        //    To usklađuje inner Composition.subject s outer DocumentReference.subject
         entries.push({
-            fullUrl: patientUuid,
+            fullUrl: patientFullUrl,
             resource: {
                 resourceType: 'Patient',
                 id: patientCezihId || data.patientMbo,
@@ -1065,7 +1129,7 @@ class ClinicalDocumentService {
                 identifier: [{ system: 'urn:ietf:rfc:3986', value: encounterIdentifierValue }],
                 status: 'finished',
                 class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'AMB' },
-                subject: { reference: patientUuid }
+                subject: { reference: patientFullUrl }
             }
         });
 
@@ -1084,7 +1148,7 @@ class ClinicalDocumentService {
             resource: {
                 resourceType: 'ClinicalImpression',
                 status: 'completed',
-                subject: { reference: patientUuid },
+                subject: { reference: patientFullUrl },
                 description: data.anamnesis || 'Pacijent je stabilno.'
             }
         });

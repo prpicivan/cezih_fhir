@@ -409,6 +409,241 @@ function JsonBlock({ data, label }: { data: any; label: string }) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// TC18 Wizard — Sign PIN flow for document submission
+// ─────────────────────────────────────────────────────────────────
+type WizardStep = 'idle' | 'tc12' | 'tc16' | 'pin' | 'signing' | 'tc18' | 'done' | 'error';
+
+interface WizardLog { msg: string; type: 'info' | 'success' | 'error' | 'warn'; }
+interface WizardResult { steps: any[]; success: boolean; error?: string; }
+
+function Tc18Wizard({ onDone }: { onDone?: (ok: boolean, result: WizardResult) => void }) {
+    const [phase, setPhase] = useState<WizardStep>('idle');
+    const [logs, setLogs] = useState<WizardLog[]>([]);
+    const [pin, setPin] = useState('');
+    const [showPin, setShowPin] = useState(false);
+    const [result, setResult] = useState<WizardResult | null>(null);
+    const [expandedJson, setExpandedJson] = useState<Record<string, boolean>>({});
+    const logRef = useRef<HTMLDivElement>(null);
+
+    const addLog = (msg: string, type: WizardLog['type'] = 'info') => {
+        setLogs(prev => [...prev, { msg: `${new Date().toLocaleTimeString('hr')}  ${msg}`, type }]);
+        setTimeout(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, 50);
+    };
+
+    const reset = () => { setPhase('idle'); setLogs([]); setPin(''); setResult(null); setExpandedJson({}); };
+
+    const runFlow = async (signPin?: string) => {
+        setPhase(signPin ? 'signing' : 'tc12');
+        addLog('→ POST /api/test/tc18-full' + (signPin ? ' [Sign PIN proslijeđen]' : ''), 'info');
+        addLog('   Pacijent: 999999423 | Liječnik: 4981825 | Org: 999001425', 'info');
+
+        try {
+            const r = await fetch('http://localhost:3010/api/test/tc18-full', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ signPin }),
+            });
+            const rawText = await r.text();
+            addLog(`← HTTP ${r.status} (${rawText.length} chars)`, r.ok ? 'info' : 'warn');
+            let data: WizardResult;
+            try {
+                data = JSON.parse(rawText) as WizardResult;
+            } catch (_) {
+                addLog('Response nije JSON: ' + rawText.slice(0, 200), 'error');
+                setResult({ success: false, steps: [], error: 'Response nije JSON — provjeri backend' });
+                setPhase('error');
+                return;
+            }
+
+            // Parse step logs from response
+            for (const s of (data.steps ?? [])) {
+                if (s.name === 'tc12') {
+                    if (s.ok) addLog(`← TC12 ✅ Visit/${s.cezihVisitId || s.localVisitId}`, 'success');
+                    else addLog(`← TC12 ❌ ${s.error ?? JSON.stringify(s.response)}`, 'error');
+                } else if (s.name === 'tc16') {
+                    if (s.ok) addLog(`← TC16 ✅ Case/${s.conditionId}`, 'success');
+                    else addLog(`← TC16 ❌ ${s.error ?? JSON.stringify(s.response)}`, 'error');
+                } else if (s.name === 'tc18') {
+                    if (s.ok) addLog('← TC18 ✅ Dokument zaprimljen!', 'success');
+                    else addLog(`← TC18 ❌ ${s.error ?? JSON.stringify(s.response?.result ?? s.response)}`, 'error');
+                }
+            }
+
+            setResult(data);
+            setPhase(data.success ? 'done' : 'error');
+            onDone?.(data.success, data);
+        } catch (e: any) {
+            addLog('Greška: ' + e.message, 'error');
+            setResult({ success: false, steps: [], error: e.message });
+            setPhase('error');
+        }
+    };
+
+    const startFlow = () => {
+        setLogs([]); setResult(null); setPhase('tc12');
+        // First run TC12+TC16, then ask for PIN before TC18
+        // We go straight to PIN ask since backend does tc12+tc16 internally
+        addLog('Pokrećem TC12 i TC16 automatski...', 'info');
+        setTimeout(() => setPhase('pin'), 600);
+    };
+
+    const confirmPin = () => {
+        if (pin.length < 4) return;
+        setPhase('signing');
+        addLog('🔑 Sign PIN proslijeđen — pokrećem TC12 → TC16 → potpis → TC18', 'info');
+        runFlow(pin);
+    };
+
+    const STEP_LABELS: { key: WizardStep; label: string; sub: string }[] = [
+        { key: 'tc12', label: 'TC12 — Posjeta', sub: 'Kreiranje Encounter' },
+        { key: 'tc16', label: 'TC16 — Slučaj', sub: 'Kreiranje Condition' },
+        { key: 'pin', label: 'Digitalni potpis', sub: 'Sign PIN' },
+        { key: 'tc18', label: 'TC18 — CEZIH', sub: 'ITI-65 MHD Submit' },
+    ];
+
+    const orderedPhases: WizardStep[] = ['tc12', 'tc16', 'pin', 'tc18', 'done'];
+    const currentIdx = orderedPhases.indexOf(phase === 'signing' ? 'tc18' : phase === 'error' ? 'tc18' : phase);
+
+    return (
+        <div className="w-full">
+            {/* Step progress */}
+            {phase !== 'idle' && (
+                <div className="flex items-center gap-0 mb-4 mt-1">
+                    {STEP_LABELS.map((s, i) => {
+                        const idx = orderedPhases.indexOf(s.key);
+                        const done = currentIdx > idx || phase === 'done';
+                        const active = currentIdx === idx && phase !== 'done' && phase !== 'error';
+                        return (
+                            <div key={s.key} className="flex items-center flex-1">
+                                <div className="flex flex-col items-center">
+                                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all ${done ? 'bg-emerald-500 text-white' : active ? 'bg-blue-600 text-white ring-2 ring-blue-200' : 'bg-slate-100 text-slate-400 border border-slate-200'}`}>
+                                        {done ? '✓' : i + 1}
+                                    </div>
+                                    <div className="text-[9px] text-slate-500 mt-0.5 text-center leading-tight">{s.label.split(' — ')[1] || s.label}</div>
+                                </div>
+                                {i < STEP_LABELS.length - 1 && (
+                                    <div className={`flex-1 h-0.5 mx-1 transition-all ${done ? 'bg-emerald-400' : 'bg-slate-200'}`} />
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            {/* PIN modal (inline, not overlay) */}
+            {phase === 'pin' && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-3">
+                    <div className="flex items-start gap-3">
+                        <div className="w-9 h-9 bg-blue-100 rounded-lg flex items-center justify-center shrink-0 text-lg">🔐</div>
+                        <div className="flex-1">
+                            <div className="font-semibold text-slate-800 text-sm mb-0.5">Unesite Sign PIN</div>
+                            <div className="text-xs text-slate-500 mb-3">Za potpisivanje dokumenta potreban je <strong>Sign PIN</strong> (ne Iden PIN). PIN nije pohranjen.</div>
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700 mb-3">
+                                ⚠️ Koristite PIN za <strong>Sign certifikat</strong> s Certilia kartice (razlikuje se od PIN-a za prijavu)
+                            </div>
+                            <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                    <input
+                                        id="tc18-sign-pin"
+                                        type={showPin ? 'text' : 'password'}
+                                        value={pin}
+                                        onChange={e => setPin(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && confirmPin()}
+                                        autoFocus
+                                        maxLength={8}
+                                        placeholder="Sign PIN..."
+                                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono tracking-widest pr-9 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPin(v => !v)}
+                                        className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 text-base"
+                                    >
+                                        {showPin ? '🙈' : '👁'}
+                                    </button>
+                                </div>
+                                <button
+                                    onClick={confirmPin}
+                                    disabled={pin.length < 4}
+                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
+                                >
+                                    <KeyRound className="w-3.5 h-3.5" /> Potpisati i Poslati
+                                </button>
+                                <button onClick={reset} className="px-3 py-2 text-slate-500 border border-slate-200 hover:bg-slate-50 rounded-lg text-xs font-semibold">
+                                    Odustani
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Log */}
+            {logs.length > 0 && (
+                <div ref={logRef} className="bg-slate-900 rounded-lg p-3 font-mono text-[10px] max-h-32 overflow-y-auto mb-3">
+                    {logs.map((l, i) => (
+                        <div key={i} className={`py-0.5 ${l.type === 'success' ? 'text-emerald-400' : l.type === 'error' ? 'text-rose-400' : l.type === 'warn' ? 'text-amber-400' : 'text-slate-400'}`}>
+                            {l.msg}
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Result cards */}
+            {result && (
+                <div className={`rounded-xl border p-3 mt-2 ${result.success ? 'border-emerald-200 bg-emerald-50' : 'border-rose-200 bg-rose-50'}`}>
+                    <div className={`font-bold text-sm mb-1 ${result.success ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        {result.success ? '✅ TC18 — Dokument zaprimljen!' : '❌ TC18 — Greška pri slanju'}
+                    </div>
+                    {result.error && <div className="text-xs text-rose-700 mb-2">{result.error}</div>}
+                    {(result.steps ?? []).map((s: any, i: number) => {
+                        const key = `step-${i}`;
+                        const open = expandedJson[key];
+                        return (
+                            <div key={key} className="mb-1">
+                                <button
+                                    onClick={() => setExpandedJson(prev => ({ ...prev, [key]: !prev[key] }))}
+                                    className="w-full text-left text-[10px] text-slate-600 bg-white border border-slate-200 rounded-lg px-2 py-1 flex justify-between items-center hover:bg-slate-50"
+                                >
+                                    <span>📄 {s.name.toUpperCase()} — {s.ok ? '✅ OK' : '❌ Palo'}</span>
+                                    <span>{open ? '▴' : '▾'}</span>
+                                </button>
+                                {open && (
+                                    <pre className="text-[9px] font-mono bg-slate-900 text-slate-300 rounded-b-lg p-2 max-h-48 overflow-y-auto whitespace-pre-wrap">
+                                        {JSON.stringify({ request: s.request, response: s.response }, null, 2)}
+                                    </pre>
+                                )}
+                            </div>
+                        );
+                    })}
+                    <button onClick={reset} className="mt-2 text-xs text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg px-3 py-1 bg-white">
+                        ↺ Novi test
+                    </button>
+                </div>
+            )}
+
+            {/* Idle start button */}
+            {phase === 'idle' && (
+                <button
+                    onClick={startFlow}
+                    className="text-[10px] font-bold px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-all flex items-center gap-1.5"
+                >
+                    <Play className="w-3 h-3 fill-current" /> TC18 Flow
+                </button>
+            )}
+
+            {/* Running indicator */}
+            {(phase === 'signing' || phase === 'tc12' || phase === 'tc16') && (
+                <div className="flex items-center gap-2 text-xs text-blue-700">
+                    <Clock className="w-3.5 h-3.5 animate-spin" />
+                    {phase === 'signing' ? 'Potpisujem i šaljem...' : 'Pokrećem...'}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Main Page
 // ─────────────────────────────────────────────────────────────────
 export default function CertificationPage() {
@@ -743,31 +978,55 @@ export default function CertificationPage() {
                                         <span className={`font-bold ${tc.method === 'GET' ? 'text-sky-600' : tc.method === 'PUT' ? 'text-amber-600' : 'text-violet-600'}`}>{tc.method}</span>
                                         {' '}{tc.endpoint.length > 35 ? tc.endpoint.slice(0, 35) + '…' : tc.endpoint}
                                     </span>
-                                    <button
-                                        onClick={() => runSingle(tc.id)}
-                                        disabled={tc.status === 'running' || runningAll}
-                                        className="text-[10px] font-bold px-3 py-1 rounded-lg bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-600 transition-all disabled:opacity-30"
-                                    >
-                                        {tc.status === 'running' ? '⟳' : '▶ Run'}
-                                    </button>
+                                    {tc.id === 'tc-18' ? (
+                                        <button
+                                            onClick={() => toggleExpand(tc.id)}
+                                            className="text-[10px] font-bold px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-all flex items-center gap-1"
+                                        >
+                                            🔐 TC18 Flow
+                                        </button>
+                                    ) : (
+                                        <button
+                                            onClick={() => runSingle(tc.id)}
+                                            disabled={tc.status === 'running' || runningAll}
+                                            className="text-[10px] font-bold px-3 py-1 rounded-lg bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-600 transition-all disabled:opacity-30"
+                                        >
+                                            {tc.status === 'running' ? '⟳' : '▶ Run'}
+                                        </button>
+                                    )}
                                 </div>
                             </div>
 
                             {/* Expanded details */}
-                            {isExp && tc.result && (
+                            {isExp && (
                                 <div className="px-4 pb-4 border-t border-slate-100 mt-1 pt-3">
-                                    <div className="text-[9px] font-mono text-slate-400 mb-2">
-                                        <span className={`font-bold ${tc.method === 'GET' ? 'text-sky-500' : tc.method === 'PUT' ? 'text-amber-500' : 'text-violet-500'}`}>{tc.method}</span>
-                                        {' '}{tc.endpoint}
-                                    </div>
-                                    {tc.status === 'local' && (
-                                        <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-                                            ⚠️ <strong>Lokalni odgovor</strong> — dokument je spreman lokalno ali <strong>nije stigao na CEZIH</strong>.
-                                            {tc.result.cezihError && <> CEZIH greška: <code className="font-mono bg-amber-100 px-1 rounded">{tc.result.cezihError}</code></>}
-                                        </div>
+                                    {tc.id === 'tc-18' ? (
+                                        <Tc18Wizard onDone={(ok, wizResult) => {
+                                            const cezihErr = wizResult.steps.find((s: any) => s.name === 'tc18' && !s.ok)?.response?.result?.cezihError;
+                                            updateTC('tc-18', ok ? 'passed' : 'local', {
+                                                httpStatus: ok ? 200 : 400,
+                                                request: wizResult.steps.find((s: any) => s.name === 'tc18')?.request,
+                                                response: wizResult.steps.find((s: any) => s.name === 'tc18')?.response,
+                                                localOnly: !ok,
+                                                cezihError: cezihErr,
+                                            });
+                                        }} />
+                                    ) : (
+                                        <>
+                                            <div className="text-[9px] font-mono text-slate-400 mb-2">
+                                                <span className={`font-bold ${tc.method === 'GET' ? 'text-sky-500' : tc.method === 'PUT' ? 'text-amber-500' : 'text-violet-500'}`}>{tc.method}</span>
+                                                {' '}{tc.endpoint}
+                                            </div>
+                                            {tc.result && tc.status === 'local' && (
+                                                <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                                                    ⚠️ <strong>Lokalni odgovor</strong> — dokument je spreman lokalno ali <strong>nije stigao na CEZIH</strong>.
+                                                    {tc.result.cezihError && <> CEZIH greška: <code className="font-mono bg-amber-100 px-1 rounded">{tc.result.cezihError}</code></>}
+                                                </div>
+                                            )}
+                                            {tc.result && <JsonBlock data={tc.result.request} label="Request Body" />}
+                                            {tc.result && <JsonBlock data={tc.result.response} label="Response" />}
+                                        </>
                                     )}
-                                    <JsonBlock data={tc.result.request} label="Request Body" />
-                                    <JsonBlock data={tc.result.response} label="Response" />
                                 </div>
                             )}
 

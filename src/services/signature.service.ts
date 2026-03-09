@@ -173,8 +173,14 @@ class SignatureService {
         return this.signingMode;
     }
 
-    private async performSignature(signingInput: string, finalAlg: string): Promise<Buffer> {
+    private async performSignature(signingInput: string, finalAlg: string, useSignToken: boolean = false, signPin?: string): Promise<Buffer> {
         if (this.signingMode === 'smartcard') {
+            // ★ Document bundles (TC18): Try Sign token if signPin provided or Sign token is active
+            if (useSignToken && pkcs11Service.isSignTokenActive()) {
+                console.log('[SignatureService] Using Sign token for document bundle (non-repudiation).');
+                return pkcs11Service.signWithSignToken(signingInput, finalAlg, signPin);
+            }
+            // Messages (TC12, TC16) or no Sign PIN — use Iden (primary)
             return pkcs11Service.sign(signingInput, finalAlg);
         }
 
@@ -228,7 +234,7 @@ class SignatureService {
         return Buffer.concat([extract(), extract()]);
     }
 
-    async signBundle(bundle: any, signerRef?: string, userToken?: string): Promise<SignedBundle> {
+    async signBundle(bundle: any, signerRef?: string, userToken?: string, signPin?: string): Promise<SignedBundle> {
         // Certilia mode: delegate entirely to CEZIH Udaljeni potpis (remote signing)
         if (this.signingMode === 'certilia') {
             if (!userToken) {
@@ -252,7 +258,19 @@ class SignatureService {
         if (!this.keyPair) throw new Error('Signing not available.');
 
         const authorRef = signerRef || this.extractAuthorFromBundle(bundle);
-        const publicKey = this.keyPair.publicKey!;
+
+        // Sign token: activate when user provides signPin explicitly (frontend PIN input),
+        // or when Sign token is already active and it's a document bundle.
+        // Certilia requires UI authorization for headless Sign — provided PIN may bypass this.
+        const isDocBundle = bundle.type === 'document';
+        const useSignToken = isDocBundle && (!!signPin || false); // false = disabled until Pin provided
+        const activeKeyPair = this.keyPair; // always use Iden keyPair for x5c (Sign cert same issuer)
+        if (isDocBundle) {
+            const tokenName = useSignToken ? 'Sign' : 'Iden';
+            console.log(`[SignatureService] signBundle: document bundle — using ${tokenName} token (signPin ${signPin ? 'provided' : 'not provided'}).`);
+        }
+
+        const publicKey = activeKeyPair.publicKey!;
         const jwk = publicKey.export({ format: 'jwk' });
 
         let finalAlg = (jwk.kty === 'EC')
@@ -289,20 +307,20 @@ class SignatureService {
         const canonicalized = jcsCanonialize(bundleWithSigPlaceholder);
         const payloadB64url = base64urlEncode(canonicalized);
 
-        // x5c certifikat
-        const x5cValue = this.keyPair.certificateDer.toString('base64');
+        // x5c certifikat — Sign cert for document bundles, Iden cert for messages
+        const x5cValue = activeKeyPair.certificateDer.toString('base64');
 
         // Izračunaj x5t#S256 (SHA-256 thumbprint certifikata)
         const x5tS256 = require('crypto')
             .createHash('sha256')
-            .update(this.keyPair.certificateDer)
+            .update(activeKeyPair.certificateDer)
             .digest('base64url');
 
         // Izvuci nbf/exp iz certifikata ako je moguće
         let nbf: number | undefined;
         let exp: number | undefined;
         try {
-            const x509 = new (require('crypto').X509Certificate)(this.keyPair.certificateDer);
+            const x509 = new (require('crypto').X509Certificate)(activeKeyPair.certificateDer);
             nbf = Math.floor(new Date(x509.validFrom).getTime() / 1000);
             exp = Math.floor(new Date(x509.validTo).getTime() / 1000);
         } catch (_) { }
@@ -337,7 +355,7 @@ class SignatureService {
 
         // Potpisujemo: header.payload (standard JWS signing input)
         const signingInput = `${headerB64url}.${payloadB64url}`;
-        const signatureBytes = await this.performSignature(signingInput, finalAlg);
+        const signatureBytes = await this.performSignature(signingInput, finalAlg, useSignToken, signPin);
         const signatureB64url = base64urlEncode(signatureBytes);
 
         // DETACHED JWS: header..signature (prazan payload u compact formi)

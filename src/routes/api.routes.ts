@@ -48,6 +48,102 @@ router.get('/health', (_req: Request, res: Response) => {
 router.use('/certification', certificationRoutes);
 
 // ============================================================
+// Dev/Test Utils
+// ============================================================
+// Sign an arbitrary bundle using backend's signatureService (PKCS#11 / mock)
+router.post('/test/sign-bundle', async (req: Request, res: Response) => {
+    try {
+        const { bundle, signerRef } = req.body;
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
+        if (!bundle || bundle.resourceType !== 'Bundle') {
+            return res.status(400).json({ error: 'Request body must contain a Bundle resource' });
+        }
+        const result = await signatureService.signBundle(bundle, signerRef, userToken);
+        const signedB64 = Buffer.from(JSON.stringify(result.bundle)).toString('base64');
+        res.json({ success: true, signedB64, sigDataLength: result.bundle.signature?.data?.length });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /api/test/tc18-full — Full TC18 certification flow with optional Sign PIN
+// Runs TC12 (visit) → TC16 (case) → sign document bundle → TC18 CEZIH submit
+router.post('/test/tc18-full', async (req: Request, res: Response) => {
+    const { signPin } = req.body ?? {};
+    const steps: any[] = [];
+    const addStep = (name: string, data: any, ok: boolean) => { steps.push({ name, ok, ...data }); };
+
+    try {
+        const PATIENT_MBO = '999999423';
+        const PRACTITIONER_ID = '4981825';
+        const ORG_ID = '999001425';
+        let encounterId: string | undefined;
+        let localVisitId: string | undefined;
+
+        // ── TC12: Create visit ──
+        try {
+            const visitReq: any = { patientMbo: PATIENT_MBO, practitionerId: PRACTITIONER_ID, organizationId: ORG_ID, startDate: new Date().toISOString(), class: 'AMB' };
+            const visitRes = await visitService.createVisit(visitReq, '');
+            // Response can be flat object or wrapped: .result / .result.result
+            const inner = visitRes?.result?.result ?? visitRes?.result ?? visitRes;
+            localVisitId = inner?.localVisitId || inner?.visitId;
+            // cezihVisitId confirms the encounter was saved on CEZIH
+            const cezihVisitId = inner?.cezihVisitId || inner?.cezihEncounterId || inner?.encounterId;
+            const ok = !!(localVisitId || cezihVisitId);
+            addStep('tc12', { request: visitReq, response: visitRes, localVisitId, cezihVisitId }, ok);
+            if (!ok) return res.json({ success: false, steps, error: 'TC12: neither localVisitId nor cezihVisitId returned' });
+        } catch (e: any) {
+            addStep('tc12', { error: e.message }, false);
+            return res.json({ success: false, steps, error: 'TC12: ' + e.message });
+        }
+
+        // ── TC16: Create case ──
+        let conditionId: string | undefined;
+        try {
+            const caseReq: any = { patientMbo: PATIENT_MBO, title: `TC18 test ${new Date().toISOString().slice(0, 10)}`, diagnosisCode: 'J06.9', diagnosisDisplay: 'Akutna infekcija gornjih dišnih putova', practitionerId: PRACTITIONER_ID, organizationId: ORG_ID, startDate: new Date().toISOString() };
+            const caseRes = await caseService.createCase(caseReq, '');
+            // TC16 response: { success, result: Bundle, localCaseId, cezihCaseId } — IDs at root
+            const rootCezihCaseId = caseRes?.cezihCaseId;
+            const rootLocalCaseId = caseRes?.localCaseId;
+            const inner = caseRes?.result?.result ?? caseRes?.result ?? caseRes;
+            conditionId = rootCezihCaseId || rootLocalCaseId || inner?.cezihCaseId || inner?.conditionId || inner?.cezihConditionId || inner?.localCaseId;
+            const ok = !!conditionId;
+            addStep('tc16', { request: caseReq, response: caseRes, conditionId }, ok);
+            if (!ok) return res.json({ success: false, steps, error: 'TC16: no case ID returned' });
+        } catch (e: any) {
+            addStep('tc16', { error: e.message }, false);
+            return res.json({ success: false, steps, error: 'TC16: ' + e.message });
+        }
+
+        // ── TC18: Load wrapper.json and submit raw MHD bundle to CEZIH ──
+        try {
+            const fs = require('fs');
+            const pathMod = require('path');
+            const wrapperPath = pathMod.join(process.cwd(), 'tmp', 'wrapper.json');
+            if (!fs.existsSync(wrapperPath)) {
+                addStep('tc18', { error: 'wrapper.json nije pronađen u tmp/' }, false);
+                return res.json({ success: false, steps, error: 'TC18: wrapper.json not found' });
+            }
+            const wrapper = JSON.parse(fs.readFileSync(wrapperPath, 'utf8'));
+            const { mhdBundle, documentOid } = wrapper;
+            if (!mhdBundle || mhdBundle.resourceType !== 'Bundle') {
+                addStep('tc18', { error: 'wrapper.json ne sadrži validan mhdBundle' }, false);
+                return res.json({ success: false, steps, error: 'TC18: invalid mhdBundle' });
+            }
+            const submitRes = await clinicalDocumentService.submitMhdBundleRaw(mhdBundle, documentOid || 'raw-test', '');
+            const ok = !(submitRes?.cezihStatus === 'failed');
+            addStep('tc18', { request: { source: 'wrapper.json', documentOid }, response: submitRes }, ok);
+            return res.json({ success: ok, steps });
+        } catch (e: any) {
+            addStep('tc18', { error: e.message }, false);
+            return res.json({ success: false, steps, error: 'TC18: ' + e.message });
+        }
+    } catch (e: any) {
+        return res.status(500).json({ success: false, steps, error: e.message });
+    }
+});
+
+// ============================================================
 // Auth Routes (Test Cases 1-3)
 // ============================================================
 
@@ -139,25 +235,29 @@ router.get('/auth/status', (_req: Request, res: Response) => {
 });
 
 // Health check — combined status of all 3 auth methods
-router.get('/auth/health-check', (_req: Request, res: Response) => {
+router.get('/auth/health-check', async (_req: Request, res: Response) => {
     const gwStatus = authService.getSessionStatus();
     const m2mStatus = authService.getSystemTokenStatus();
 
     // Smart card PKCS#11 status
     let smartCard: { initialized: boolean; tokenLabel?: string; algorithm?: string; subject?: string } = { initialized: false };
     try {
-        const { pkcs11Service } = require('../services/pkcs11.service');
-        if (pkcs11Service.isActive()) {
-            const ki = pkcs11Service.getKeyInfo();
+        const { pkcs11Service } = await import('../services/pkcs11.service');
+        const active = pkcs11Service.isActive();
+        const signActive = pkcs11Service.isSignTokenActive();
+        if (active || signActive) {
+            const ki = active ? pkcs11Service.getKeyInfo() : pkcs11Service.getSignKeyInfo();
             const subjectMatch = ki?.certificate?.match(/CN=([^\n]+)/);
             smartCard = {
                 initialized: true,
-                tokenLabel: 'Iden',
+                tokenLabel: active ? 'Iden' : 'Sign',
                 algorithm: ki?.algo || 'unknown',
                 subject: subjectMatch?.[1]?.trim() || 'unknown',
             };
         }
-    } catch (_) { /* pkcs11 not available */ }
+    } catch (e: any) {
+        console.warn('[health-check] PKCS#11 check error:', e.message);
+    }
 
     res.json({
         gateway: {

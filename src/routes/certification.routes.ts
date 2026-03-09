@@ -222,23 +222,21 @@ router.post('/run/:tcId', async (req: Request, res: Response) => {
                 }, userToken);
                 break;
 
-            case 'tc-18': // MHD Send Document
-                result = await clinicalDocumentService.sendDocument({
-                    type: ClinicalDocumentType.AMBULATORY_REPORT,
-                    patientMbo: '123456789',
-                    practitionerId: 'practitioner-1',
-                    organizationId: 'org-1',
-                    visitId: 'some-visit-uuid',
-                    title: 'Testni medicinski nalaz',
-                    anamnesis: 'Pacijent se žali na bol u koljenu.',
-                    status: 'Uredan fizikalni status.',
-                    finding: 'Bez vidljivih trauma.',
-                    recommendation: 'Kontrola za 10 dana.',
-                    diagnosisCode: 'M17.0',
-                    diagnosisDisplay: 'Primarni osteoartritis koljena, obostrani',
-                    date: new Date().toISOString(),
-                }, userToken);
+            case 'tc-18': { // MHD Send Document — šalje wrapper.json direktno na CEZIH
+                const fs = await import('fs');
+                const path = await import('path');
+                const wrapperPath = path.join(process.cwd(), 'tmp', 'wrapper.json');
+                if (!fs.existsSync(wrapperPath)) {
+                    throw new Error('wrapper.json nije pronađen u tmp/ direktoriju');
+                }
+                const wrapper = JSON.parse(fs.readFileSync(wrapperPath, 'utf8'));
+                const { mhdBundle, documentOid } = wrapper;
+                if (!mhdBundle || mhdBundle.resourceType !== 'Bundle') {
+                    throw new Error('wrapper.json ne sadrži validan mhdBundle');
+                }
+                result = await clinicalDocumentService.submitMhdBundleRaw(mhdBundle, documentOid || 'raw-test', userToken);
                 break;
+            }
 
             case 'tc-19': // Document Replace
                 result = await clinicalDocumentService.replaceDocument('old-doc-id', {

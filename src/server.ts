@@ -181,6 +181,30 @@ app.get('/api/debug/gateway-cookie', async (_req, res) => {
         res.status(401).json({ success: false, error: e.message });
     }
 });
+
+// DEBUG: Query CEZIH ITI-67 DocumentReference for a patient
+app.get('/api/debug/cezih-documents', async (req, res) => {
+    const { authService } = await import('./services');
+    const axiosLib = (await import('axios')).default;
+    const https = await import('https');
+    const mbo = (req.query.mbo as string) || '999999423';
+    const baseUrl = process.env.CEZIH_BASE_URL || 'https://certws2.cezih.hr:8443';
+    try {
+        const headers = authService.getGatewayAuthHeaders();
+        const url = `${baseUrl}/services-router/gateway/document-consumer-services/api/v1/DocumentReference?patient.identifier=${encodeURIComponent('http://fhir.cezih.hr/specifikacije/identifikatori/MBO|' + mbo)}&_sort=-date&_count=10`;
+        console.log('[debug/cezih-documents] Querying:', url);
+        const r = await axiosLib.get(url, {
+            headers: { ...headers, 'Accept': 'application/fhir+json' },
+            httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+            validateStatus: () => true,
+            timeout: 15000,
+        });
+        console.log('[debug/cezih-documents] Status:', r.status);
+        res.json({ status: r.status, url, data: r.data });
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
 // DEBUG ENDPOINT za testiranje event kodova
 app.get('/api/debug/test-event-codes', async (_req, res) => {
     const { authService, caseService } = await import('./services');
