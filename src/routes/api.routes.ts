@@ -391,6 +391,24 @@ router.post('/test/tc18-full', async (req: Request, res: Response) => {
     }
 });
 
+// POST /api/test/tc21 — TC21: Search clinical documents for a patient (ITI-67)
+router.post('/test/tc21', async (req: Request, res: Response) => {
+    try {
+        const { patientMbo } = req.body;
+        const mbo = patientMbo || process.env.PATIENT_MBO || '999999423';
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
+
+        console.log(`[tc21] Searching CEZIH documents for MBO=${mbo}`);
+        const documents = await clinicalDocumentService.searchRemoteDocuments({ patientMbo: mbo }, userToken);
+        console.log(`[tc21] Found ${documents.length} document(s)`);
+
+        return res.json({ success: true, patientMbo: mbo, count: documents.length, documents });
+    } catch (e: any) {
+        console.error('[tc21] Error:', e.response?.data || e.message);
+        return res.status(500).json({ success: false, error: e.message, details: e.response?.data });
+    }
+});
+
 // ============================================================
 // Auth Routes (Test Cases 1-3)
 // ============================================================

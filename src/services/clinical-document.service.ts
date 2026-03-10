@@ -598,148 +598,89 @@ class ClinicalDocumentService {
             throw new Error(`Validacijske pogreške: ${validation.errors.join(', ')}`);
         }
         const newDocumentOid = await oidService.generateSingleOid();
-        const bundleId = uuidv4();
 
-        // Fetch related data
-        const patient = (await patientService.searchByMbo(data.patientMbo, userToken))[0];
-        let visit: any = null;
-        if (data.visitId) {
-            visit = visitService.getVisit(data.visitId);
-        }
-
-        // Update Local DB
+        // Step 1: Update Local DB
         try {
             db.prepare('UPDATE documents SET status = ? WHERE id = ?').run('replaced', originalDocumentOid);
-
             const stmt = db.prepare(`
                 INSERT INTO documents (
                     id, patientMbo, visitId, type, status, 
                     anamnesis, status_text, finding, recommendation, 
                     diagnosisCode, diagnosisDisplay, content, 
                     createdAt, sentAt
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `);
             stmt.run(
-                newDocumentOid,
-                data.patientMbo,
-                data.visitId || null,
-                data.type,
-                'sent',
-                data.anamnesis || null,
-                data.status || null,
-                data.finding || null,
-                data.recommendation || null,
-                data.diagnosisCode || null,
-                data.diagnosisDisplay || null,
-                data.content || null,
-                new Date().toISOString(),
-                new Date().toISOString()
+                newDocumentOid, data.patientMbo, data.visitId || null,
+                data.type, 'sent',
+                data.anamnesis || null, data.status || null,
+                data.finding || null, data.recommendation || null,
+                data.diagnosisCode || null, data.diagnosisDisplay || null,
+                data.content || null, new Date().toISOString(), new Date().toISOString()
             );
         } catch (dbError) {
             console.error('[ClinicalDocumentService] DB Replace Error', dbError);
         }
 
-        // PDQm lookup for Patient Logical ID
-        let patientLogicalId = data.patientMbo;
-        let patientCezihId: string | undefined;
+        // Step 2: PDQm lookup for Patient Logical ID
+        let patientCezihId = data.patientMbo;
         try {
             const patients = await patientService.searchRemoteByMbo(data.patientMbo, userToken);
             if (patients.length > 0 && patients[0].id) {
-                patientLogicalId = patients[0].id;
                 patientCezihId = patients[0].id;
             }
         } catch (e: any) { /* ignore */ }
 
-        const documentBundle = this.buildFullDocumentBundle(data, newDocumentOid, patient, visit, patientCezihId);
-        // Sign the replacement document Bundle
-        let finalDocumentBundle = documentBundle;
-        try {
-            if (signatureService.isAvailable()) {
-                const { bundle: signedDoc } = await signatureService.signBundle(documentBundle, `Practitioner/${data.practitionerId}`, userToken);
-                finalDocumentBundle = signedDoc;
-                console.log('[ClinicalDocumentService] Replacement document signed successfully');
-            }
-        } catch (signError: any) {
-            console.error('[ClinicalDocumentService] Replace signing failed:', signError.message);
-        }
+        // Step 3: Get encounter/case IDs from local visit data
+        const visit = data.visitId ? visitService.getVisit(data.visitId) : null;
+        const encCezihId = visit?.cezihVisitId || visit?.id || '';
+        const condFhirId = visit?.caseId || '';
 
-        const docRefUuid = `urn:uuid:${uuidv4()}`;
-        const submissionSetUuid = `urn:uuid:${uuidv4()}`;
-        const binaryUuid = `urn:uuid:${uuidv4()}`;
+        // Step 4: Build & submit using shared MHD builder (same as TC18 + relatesTo)
+        const { buildMhdBundle, submitMhdToGateway } = await import('./mhd-bundle.builder');
 
-        const mhdBundle = {
-            resourceType: 'Bundle',
-            type: 'transaction',
-            meta: {
-                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HRMinimalProvideDocumentBundle']
-            },
-            entry: [
-                {
-                    fullUrl: submissionSetUuid,
-                    resource: {
-                        resourceType: 'List',
-                        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HRMinimalSubmissionSet'] },
-                        status: 'current',
-                        mode: 'working',
-                        code: { coding: [{ system: 'http://ihe.net/fhir/ihe.formatcode.assignment/CodeSystem/formatcodes', code: 'urn:ihe:iti:xds:2001:post-hoc-submission-set' }] },
-                        date: new Date().toISOString(),
-                        subject: { reference: `Patient/${patientLogicalId}` }
-                    },
-                    request: { method: 'POST', url: 'List' }
-                },
-                {
-                    fullUrl: docRefUuid,
-                    resource: {
-                        resourceType: 'DocumentReference',
-                        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HR.MinimalDocumentReference'] },
-                        masterIdentifier: { system: 'urn:ietf:rfc:3986', value: `urn:oid:${newDocumentOid}` },
-                        status: 'current',
-                        type: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type', code: '011' }] },
-                        subject: { reference: `Patient/${patientLogicalId}` },
-                        author: [{ reference: `Practitioner/${data.practitionerId}` }],
-                        relatesTo: [{ code: 'replaces', target: { identifier: { value: originalDocumentOid } } }],
-                        content: [{ attachment: { contentType: 'application/fhir+json', url: binaryUuid } }]
-                    },
-                    request: { method: 'POST', url: 'DocumentReference' }
-                },
-                {
-                    fullUrl: binaryUuid,
-                    resource: {
-                        resourceType: 'Binary',
-                        contentType: 'application/fhir+json',
-                        data: Buffer.from(JSON.stringify(finalDocumentBundle)).toString('base64'),
-                    },
-                    request: { method: 'POST', url: 'Binary' },
-                },
-            ],
-        };
+        console.log(`[TC19] Replacing document ${originalDocumentOid} with new OID ${newDocumentOid}`);
 
         let responseData: any = null;
         let errorMessage: string | undefined;
 
         try {
-            const headers = authService.getUserAuthHeaders(userToken);
-            const replaceUrl = `${config.cezih.gatewayBase}${config.cezih.services.document}/iti-65-service`;
-            console.log('[ClinicalDocumentService] Replacing document at:', replaceUrl);
-            responseData = (await axios.post(replaceUrl, mhdBundle, { headers })).data;
-        } catch (error: any) {
-            console.warn('[ClinicalDocumentService] Replace failed:', error.message);
-            errorMessage = error.message;
+            const { outer } = await buildMhdBundle({
+                docOid: `urn:oid:${newDocumentOid}`,
+                patientMbo: data.patientMbo,
+                patientName: { family: 'PACPRIVATNICI42', given: ['IVAN'] },
+                patientGender: 'male',
+                patientBirthDate: '1980-01-01',
+                patientCezihId,
+                practitionerId: process.env.PRACTITIONER_ID || '4981825',
+                practitionerOib: process.env.PRACTITIONER_OIB || '30160453873',
+                practitionerName: { family: 'Prpic', given: ['Ivan'] },
+                orgId: process.env.ORG_ID || '999001425',
+                orgDisplay: 'WBS privatna ordinacija',
+                encCezihId,
+                condFhirId,
+                diagnosisCode: data.diagnosisCode || '',
+                anamnesis: data.anamnesis || '',
+                replacesOid: originalDocumentOid,  // TC19: relatesTo
+            });
 
-            if (error.response?.status === 404) {
-                throw new Error(`CEZIH server reported 404 during replacement: Original document or patient not found.`);
+            const result = await submitMhdToGateway(outer);
+            if (result.success) {
+                responseData = result.data;
+            } else {
+                errorMessage = result.error;
+                responseData = {
+                    success: true, localOnly: true,
+                    cezihStatus: 'failed', cezihError: result.data?.cezihError,
+                    documentOid: newDocumentOid, replacedOid: originalDocumentOid,
+                };
             }
-
+        } catch (error: any) {
+            errorMessage = error.message;
             responseData = {
-                success: true,
-                localOnly: true,
-                cezihStatus: 'failed',
-                cezihError: error.response?.status
-                    ? `HTTP ${error.response.status}: ${error.response.data?.issue?.[0]?.diagnostics || error.message}`
-                    : error.message,
-                documentOid: newDocumentOid,
-                replacedOid: originalDocumentOid,
+                success: true, localOnly: true,
+                cezihStatus: 'failed', cezihError: error.message,
+                documentOid: newDocumentOid, replacedOid: originalDocumentOid,
             };
         } finally {
             auditService.log({
@@ -748,7 +689,7 @@ class ClinicalDocumentService {
                 action: 'REPLACE_DOCUMENT',
                 direction: 'OUTGOING_CEZIH',
                 status: errorMessage ? 'ERROR' : 'SUCCESS',
-                payload_req: mhdBundle,
+                payload_req: { originalDocumentOid, newDocumentOid },
                 payload_res: responseData,
                 error_msg: errorMessage
             });
@@ -918,16 +859,26 @@ class ClinicalDocumentService {
         if (!params.patientMbo) return [];
 
         try {
-            const headers = authService.getUserAuthHeaders(userToken);
-            let url = `${config.cezih.gatewayBase}${config.cezih.services.document}/DocumentReference?status=current`;
-            url += `&patient.identifier=${encodeURIComponent(`${CEZIH_IDENTIFIERS.MBO}|${params.patientMbo}`)}`;
+            const rawHeaders = authService.getUserAuthHeaders(userToken);
+            // For GET requests, remove Content-Type (no body) and add Accept
+            delete rawHeaders['Content-Type'];
+            const headers = { ...rawHeaders, 'Accept': 'application/fhir+json' };
+            // TC21: ITI-67 endpoint is /DocumentReference (confirmed by CEZIH spec)
+            const baseUrl = `${config.cezih.gatewayBase}${config.cezih.services.document}/DocumentReference`;
+            const qp = new URLSearchParams({
+                'patient.identifier': `${CEZIH_IDENTIFIERS.MBO}|${params.patientMbo}`,
+                'status': 'current',
+            });
+            const url = `${baseUrl}?${qp.toString()}`;
 
-            console.log(`[ClinicalDocumentService] Searching CEZIH-only documents for MBO ${params.patientMbo}`);
+            console.log(`[TC21] GET ${url}`);
             const response = await axios.get(url, { headers });
 
             return (response.data.entry || []).map((e: any) => this.mapRemoteDocument(e.resource));
         } catch (error: any) {
-            console.warn('[ClinicalDocumentService] CEZIH remote search failed:', error.message);
+            console.warn('[TC21] CEZIH remote search failed:', error.message);
+            console.warn('[TC21] Response status:', error.response?.status);
+            console.warn('[TC21] Response data:', JSON.stringify(error.response?.data || ''));
             throw error;
         }
     }

@@ -94,6 +94,10 @@ export default function ChangeDocumentModal({ doc, patientMbo, onClose, onSucces
             setError('Morate odabrati MKB-10 dijagnozu iz ponuđenog popisa.');
             return;
         }
+        if (!form.anamnesis.trim()) {
+            setError('Anamneza je obavezno polje.');
+            return;
+        }
         setSubmitting(true);
         setError(null);
         try {
@@ -216,7 +220,7 @@ export default function ChangeDocumentModal({ doc, patientMbo, onClose, onSucces
 
                     {/* Anamneza */}
                     <div>
-                        <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Anamneza</label>
+                        <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Anamneza <span className="text-rose-500">*</span></label>
                         <textarea
                             value={form.anamnesis}
                             onChange={e => setForm(f => ({ ...f, anamnesis: e.target.value }))}
@@ -287,7 +291,7 @@ export default function ChangeDocumentModal({ doc, patientMbo, onClose, onSucces
                     </button>
                     <button
                         onClick={handleSubmit}
-                        disabled={submitting || !diagnosisSelected}
+                        disabled={submitting || !diagnosisSelected || !form.anamnesis.trim()}
                         className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-black text-sm transition-all ${submitting || !diagnosisSelected
                             ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                             : 'bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-200'

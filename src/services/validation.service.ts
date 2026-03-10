@@ -105,7 +105,12 @@ class ValidationService {
             errors.push('Šifra dijagnoze je obavezna za klinički dokument.');
         }
 
-        // 3. Validate Text Limits
+        // 3. Validate Anamneza (mandatory)
+        if (!data.anamnesis || (typeof data.anamnesis === 'string' && data.anamnesis.trim().length === 0)) {
+            errors.push('Anamneza je obavezno polje za klinički dokument.');
+        }
+
+        // 4. Validate Text Limits
         const limitRes = this.validateTextLimits(data, ['anamnesis', 'finding', 'recommendation', 'status_text']);
         if (!limitRes.isValid) errors.push(...limitRes.errors);
 
