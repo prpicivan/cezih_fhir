@@ -1194,6 +1194,22 @@ router.post('/case/:id/action', async (req: Request, res: Response) => {
 // Clinical Document Routes (Test Cases 18-22)
 // ============================================================
 
+// TC18 Full Flow: sign inner bundle + build MHD outer + submit to CEZIH
+// Frontend stepper calls TC16 first, waits 5s, then calls this endpoint
+router.post('/document/send-full', async (req: Request, res: Response) => {
+    try {
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
+        const result = await clinicalDocumentService.sendDocumentFull(req.body, userToken);
+        res.json(result);
+    } catch (error: any) {
+        console.error('[send-full] Error:', error.message);
+        res.status(error.message?.includes('obavezno') ? 400 : 500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 router.post('/document/send', async (req: Request, res: Response) => {
     try {
         const userToken = req.headers.authorization?.replace('Bearer ', '') || '';

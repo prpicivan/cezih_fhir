@@ -220,6 +220,7 @@ function ClinicalWorkspace() {
 
     const [visitStatus, setVisitStatus] = useState<'idle' | 'active' | 'finished'>('idle');
     const [visitId, setVisitId] = useState<string | null>(null);
+    const [cezihVisitId, setCezihVisitId] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
 
     // Structured Findings State
@@ -251,6 +252,12 @@ function ClinicalWorkspace() {
     const [signingError, setSigningError] = useState<string | null>(null);
     const [transactionCode, setTransactionCode] = useState<string | null>(null);
     const [currentDocOid, setCurrentDocOid] = useState<string | null>(null);
+
+    // TC18 Stepper Flow State
+    const [isStepperOpen, setIsStepperOpen] = useState(false);
+    const [stepperPhase, setStepperPhase] = useState<'idle' | 'tc16' | 'indexing' | 'signing' | 'submitting' | 'done' | 'error'>('idle');
+    const [stepperError, setStepperError] = useState<string | null>(null);
+    const [stepperResult, setStepperResult] = useState<any>(null);
 
     // Smart card signing phase (0=waiting, 1=cert, 2=pin, 3=done)
     const [scSignPhase, setScSignPhase] = useState(0);
@@ -369,79 +376,110 @@ function ClinicalWorkspace() {
             const data = await res.json();
 
             if (data.success) {
-                setVisitId(data.result?.localVisitId || 'fallback-id');
+                const localId = data.result?.localVisitId || 'fallback-id';
+                const cezihId = data.result?.cezihVisitId;
+                setVisitId(localId);
+                setCezihVisitId(cezihId || localId);
                 setVisitStatus('active');
-                addLog('Posjet uspješno kreiran (Encounter resource).');
+                addLog(`Posjet uspješno kreiran. CEZIH ID: ${cezihId || 'lokalni'}`);
             } else {
                 addLog(`Greška: ${data.error}`);
+                showToast('error', `TC12 greška: ${data.error}`);
             }
         } catch (err: any) {
             addLog(`Greška komunikacije: ${err.message}`);
+            showToast('error', `Greška: ${err.message}`);
         } finally {
             setLoading(false);
         }
     };
 
-    // TC 18: Send Clinical Document (MHD)
-    const sendDocument = async (type: '011' | '012' | '013') => {
-        if (!findingText) {
-            showToast('error', 'Molimo unesite tekst nalaza u polje "3. Nalaz i Mišljenje".');
+    // TC 18: Full Send Flow — Stepper (TC16 → wait → sign → submit)
+    const startSendFlow = async () => {
+        if (!anamnesis?.trim()) {
+            showToast('error', 'Anamneza je obavezno polje.');
             return;
         }
-
         if (!diagnosisCode) {
             showToast('error', 'Molimo odaberite primarnu dijagnozu (MKB-10).');
             return;
         }
 
-        setLoading(true);
+        setIsStepperOpen(true);
+        setStepperPhase('tc16');
+        setStepperError(null);
+        setStepperResult(null);
+
+        let condFhirId = selectedCaseId || '';
+
+        // Step 1: TC16 — Create case if not selected
+        if (!condFhirId) {
+            try {
+                const caseRes = await fetch('/api/case/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        patientMbo: effectiveMbo,
+                        title: `Slučaj: ${diagnosisDisplay || diagnosisCode}`,
+                        diagnosisCode,
+                        diagnosisDisplay,
+                        practitionerId: '4981825',
+                        organizationId: '999001425',
+                        startDate: new Date().toISOString(),
+                    })
+                });
+                const caseData = await caseRes.json();
+                const caseResult = caseData.result || caseData;
+                if (caseData.success && (caseResult.cezihCaseId || caseResult.localCaseId)) {
+                    condFhirId = caseResult.cezihCaseId || caseResult.localCaseId;
+                    console.log('[TC18 Flow] TC16 case created:', condFhirId);
+                } else {
+                    throw new Error(caseData.error || 'TC16 nije vratio ID slučaja');
+                }
+            } catch (err: any) {
+                setStepperPhase('error');
+                setStepperError(`TC16 greška: ${err.message}`);
+                return;
+            }
+        }
+
+        // Step 2: Wait for CEZIH indexing (5 seconds)
+        setStepperPhase('indexing');
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        // Step 3: Sign + Build MHD + Submit to CEZIH
+        setStepperPhase('signing');
         try {
-            addLog(`Šaljem dokument: ${type} (TC 18)...`);
-            const res = await fetch('/api/document/send', {
+            const sendRes = await fetch('/api/document/send-full', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    type,
                     patientMbo: effectiveMbo,
-                    practitionerId: '4981825',
-                    organizationId: '999001425',
-                    visitId: visitId,
-                    caseId: caseIdParam || undefined,
-                    title: 'Medicinski nalaz',
-                    anamnesis,
-                    status: physicalStatus,
-                    finding: findingText,
-                    recommendation,
+                    encCezihId: cezihVisitId || visitId,
+                    condFhirId,
                     diagnosisCode,
                     diagnosisDisplay,
-                    date: new Date().toISOString(),
+                    anamnesis,
+                    finding: findingText,
+                    status: physicalStatus,
+                    recommendation,
+                    type: '011',
                 })
             });
-            const data = await res.json();
+            const sendData = await sendRes.json();
 
-            if (data.success) {
-                if (data.result.pendingSignature) {
-                    // Show method selection first
-                    setTransactionCode(data.result.transactionCode);
-                    setCurrentDocOid(data.result.documentOid);
-                    setSigningMethod(null);
-                    setSigningStatus('method-select');
-                    setIsSigningModalOpen(true);
-                } else {
-                    const successMsg = `Dokument uspješno poslan! OID: ${data.result.documentOid}`;
-                    addLog(successMsg);
-                    addLog('Potpisano i arhivirano u CEZIH (MHD ITI-65).');
-                    showToast('success', successMsg);
-                }
+            if (sendData.success) {
+                setStepperPhase('done');
+                setStepperResult(sendData);
+                setCurrentDocOid(sendData.documentOid);
+                showToast('success', `Dokument uspješno poslan! OID: ${sendData.documentOid}`);
             } else {
-                const errorMsg = `Greška slanja: ${data.error}`;
-                addLog(errorMsg);
-                showToast('error', errorMsg);
+                setStepperPhase('error');
+                setStepperError(sendData.error || 'CEZIH je odbio dokument');
             }
         } catch (err: any) {
-            addLog(`Greška komunikacije: ${err.message}`);
-        } finally {
-            setLoading(false);
+            setStepperPhase('error');
+            setStepperError(`Greška: ${err.message}`);
         }
     };
 
@@ -850,7 +888,7 @@ function ClinicalWorkspace() {
                         <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-4">
                             <div className="flex flex-col gap-2">
                                 <button
-                                    onClick={() => sendDocument('011')}
+                                    onClick={() => startSendFlow()}
                                     disabled={visitStatus !== 'active' || loading}
                                     title={visitStatus !== 'active' ? 'Prvo morate započeti posjet klikom na gumb "Započni posjet"' : ''}
                                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1090,6 +1128,94 @@ function ClinicalWorkspace() {
                             >
                                 Zatvori
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* TC18 Stepper Modal */}
+            {isStepperOpen && (
+                <div className="fixed inset-0 z-[120] flex items-center justify-center p-4" style={{ background: 'rgba(10,15,30,0.88)', backdropFilter: 'blur(10px)' }}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+                        {/* Header */}
+                        <div className="p-5 bg-gradient-to-r from-blue-600 to-indigo-700 text-white">
+                            <h3 className="text-lg font-bold flex items-center gap-2">
+                                <Send className="w-5 h-5" />
+                                Slanje Medicinskog Nalaza
+                            </h3>
+                            <p className="text-sm text-blue-100 mt-1">TC16 → Indeksacija → Potpis → CEZIH</p>
+                        </div>
+
+                        {/* Stepper */}
+                        <div className="p-5 space-y-4">
+                            {[
+                                { key: 'tc16', label: '1. Kreiranje slučaja (TC16)', sub: 'U sklopu posjete potrebno je kreirati medicinski slučaj za praćenje dijagnoze.', icon: '📋' },
+                                { key: 'indexing', label: '2. CEZIH indeksacija', sub: 'Čekam da CEZIH indeksira slučaj...', icon: '⏳' },
+                                { key: 'signing', label: '3. Potpis dokumenta', sub: 'Gradnja i potpis unutarnjeg bundlea (Sign token)', icon: '🔐' },
+                                { key: 'done', label: '4. Slanje na CEZIH', sub: 'MHD ITI-65 submit', icon: '🚀' },
+                            ].map((step, idx) => {
+                                const phases = ['tc16', 'indexing', 'signing', 'done'];
+                                const currentIdx = phases.indexOf(stepperPhase === 'error' ? phases[phases.length - 1] : stepperPhase);
+                                const stepIdx = idx;
+                                const isActive = phases[stepIdx] === stepperPhase;
+                                const isDone = stepIdx < currentIdx || stepperPhase === 'done';
+                                const isError = stepperPhase === 'error' && stepIdx === currentIdx;
+
+                                return (
+                                    <div key={step.key} className={`flex items-start gap-3 p-3 rounded-xl transition-all ${isActive ? 'bg-blue-50 border border-blue-200' : isDone ? 'bg-emerald-50 border border-emerald-100' : 'bg-slate-50 border border-slate-100'}`}>
+                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${isDone ? 'bg-emerald-500 text-white' : isActive ? 'bg-blue-500 text-white animate-pulse' : 'bg-slate-200 text-slate-400'}`}>
+                                            {isDone ? '✓' : step.icon}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className={`text-sm font-semibold ${isDone ? 'text-emerald-700' : isActive ? 'text-blue-700' : 'text-slate-400'}`}>
+                                                {step.label}
+                                            </div>
+                                            {(isActive || isDone) && (
+                                                <div className={`text-xs mt-0.5 ${isDone ? 'text-emerald-500' : 'text-blue-500'}`}>
+                                                    {isDone ? '✅ Gotovo' : step.sub}
+                                                </div>
+                                            )}
+                                        </div>
+                                        {isActive && !isDone && (
+                                            <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin shrink-0 mt-1" />
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {/* Error display */}
+                        {stepperPhase === 'error' && stepperError && (
+                            <div className="mx-5 mb-4 p-3 bg-red-50 border border-red-200 rounded-xl">
+                                <div className="text-sm font-semibold text-red-700 flex items-center gap-2">
+                                    <XCircle className="w-4 h-4" /> Greška
+                                </div>
+                                <div className="text-xs text-red-600 mt-1 break-all">{stepperError}</div>
+                            </div>
+                        )}
+
+                        {/* Success display */}
+                        {stepperPhase === 'done' && stepperResult && (
+                            <div className="mx-5 mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                                <div className="text-sm font-semibold text-emerald-700 flex items-center gap-2">
+                                    <CheckCircle className="w-4 h-4" /> Dokument je uspješno poslan!
+                                </div>
+                                <div className="text-xs text-emerald-600 mt-1 font-mono">
+                                    OID: {stepperResult.documentOid}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Footer */}
+                        <div className="p-4 border-t flex justify-end">
+                            {(stepperPhase === 'done' || stepperPhase === 'error') && (
+                                <button
+                                    onClick={() => { setIsStepperOpen(false); setStepperPhase('idle'); }}
+                                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-medium transition-colors"
+                                >
+                                    Zatvori
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>

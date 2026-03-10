@@ -38,6 +38,9 @@ export interface MhdDocumentParams {
     condFhirId: string;              // CEZIH case identifier
     diagnosisCode: string;
     anamnesis: string;
+    finding?: string;                // Klinički nalaz i status
+    status?: string;                 // Status (alternative key for finding)
+    recommendation?: string;         // Preporuka
     activityCode?: string;           // Healthcare service code (default: 3030000)
     activityDisplay?: string;
     signPin?: string;                // Sign token PIN (optional)
@@ -68,6 +71,7 @@ export function buildInnerBundle(p: MhdDocumentParams): any {
         comp: uuidv4(), pat: uuidv4(), prac: uuidv4(), org: uuidv4(),
         enc: uuidv4(), ci: uuidv4(), hcs: uuidv4(),
         obsAnam: uuidv4(), obsIshod: uuidv4(),
+        obsNalaz: uuidv4(), obsPreporuka: uuidv4(),
     };
     const actCode = p.activityCode || '3030000';
     const actDisplay = p.activityDisplay || 'Opca/obiteljska medicina';
@@ -112,7 +116,23 @@ export function buildInnerBundle(p: MhdDocumentParams): any {
                                 { reference: `urn:uuid:${U.ci}` },
                                 { reference: `urn:uuid:${U.obsIshod}` }
                             ]
-                        }
+                        },
+                        {
+                            title: 'Anamneza i anamnestički podaci',
+                            text: { status: 'generated', div: `<div xmlns="http://www.w3.org/1999/xhtml">${p.anamnesis}</div>` },
+                        },
+                        ...(p.finding || p.status ? [{
+                            title: 'Klinički nalaz i status',
+                            text: { status: 'generated', div: `<div xmlns="http://www.w3.org/1999/xhtml">${p.finding || p.status}</div>` },
+                        }] : []),
+                        ...(p.recommendation ? [{
+                            title: 'Terapija',
+                            text: { status: 'generated', div: `<div xmlns="http://www.w3.org/1999/xhtml">${p.recommendation}</div>` },
+                        },
+                        {
+                            title: 'Preporuka',
+                            text: { status: 'generated', div: `<div xmlns="http://www.w3.org/1999/xhtml">${p.recommendation}</div>` },
+                        }] : [])
                     ]
                 }
             },

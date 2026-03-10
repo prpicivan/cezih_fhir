@@ -192,6 +192,126 @@ class ClinicalDocumentService {
         };
     }
 
+    // ============================================================
+    // TC18 Full Flow: Sign + Build MHD + Submit to CEZIH
+    // Uses proven mhd-bundle.builder (extracted from TC18 test route)
+    // Called from frontend stepper — AFTER TC16 case is created
+    // ============================================================
+
+    async sendDocumentFull(data: {
+        patientMbo: string;
+        encCezihId: string;      // CEZIH visit identifier (from TC12)
+        condFhirId: string;      // CEZIH case identifier (from TC16)
+        diagnosisCode: string;
+        diagnosisDisplay?: string;
+        anamnesis: string;
+        finding?: string;
+        status?: string;
+        recommendation?: string;
+        type?: string;
+        signPin?: string;        // Sign token PIN
+    }, userToken: string): Promise<any> {
+        console.log('[sendDocumentFull] Starting TC18 full flow for patient:', data.patientMbo);
+
+        // Step 1: Validate mandatory fields
+        if (!data.anamnesis?.trim()) throw new Error('Anamneza je obavezno polje.');
+        if (!data.diagnosisCode?.trim()) throw new Error('Dijagnoza je obavezno polje.');
+        if (!data.encCezihId?.trim()) throw new Error('ID posjete (encCezihId) je obavezan — pokrenite TC12 prvo.');
+        if (!data.condFhirId?.trim()) throw new Error('ID slučaja (condFhirId) je obavezan — pokrenite TC16 prvo.');
+
+        // Step 2: PDQm lookup — get CEZIH patient logical ID
+        const patients = await patientService.searchRemoteByMbo(data.patientMbo, userToken);
+        const patient = patients?.[0];
+        if (!patient) throw new Error(`Pacijent nije pronađen na CEZIH-u (MBO: ${data.patientMbo})`);
+        const patientCezihId = patient.id || '1118065'; // fallback
+
+        // Get full patient details from local DB
+        const localPatient = (await patientService.searchByMbo(data.patientMbo, userToken))[0];
+
+        // Step 3: Generate OID for new document
+        const docOidRaw = await oidService.generateSingleOid();
+        const docOid = `urn:oid:${docOidRaw}`;
+        console.log('[sendDocumentFull] Generated OID:', docOid);
+
+        // Step 4: Build + sign inner bundle, build outer MHD, submit
+        const { buildMhdBundle, submitMhdToGateway } = await import('./mhd-bundle.builder');
+
+        const { outer, innerBundle } = await buildMhdBundle({
+            docOid,
+            patientMbo: data.patientMbo,
+            patientName: {
+                family: localPatient?.name?.family || patient?.name?.family || 'NEPOZNATO',
+                given: [localPatient?.name?.given?.[0] || patient?.name?.given?.[0] || 'N']
+            },
+            patientGender: localPatient?.gender || patient?.gender || 'unknown',
+            patientBirthDate: localPatient?.birthDate || patient?.birthDate || '1980-01-01',
+            patientCezihId,
+            practitionerId: process.env.PRACTITIONER_ID || '4981825',
+            practitionerOib: process.env.PRACTITIONER_OIB || '30160453873',
+            practitionerName: { family: 'Prpic', given: ['Ivan'] },
+            orgId: process.env.ORG_ID || '999001425',
+            orgDisplay: 'WBS privatna ordinacija',
+            encCezihId: data.encCezihId,
+            condFhirId: data.condFhirId,
+            diagnosisCode: data.diagnosisCode,
+            anamnesis: data.anamnesis,
+            signPin: data.signPin,
+        });
+
+        console.log('[sendDocumentFull] MHD bundle built, submitting to CEZIH...');
+        const result = await submitMhdToGateway(outer);
+
+        // Step 5: Save to local DB
+        try {
+            db.prepare(`
+                INSERT OR REPLACE INTO documents (
+                    id, patientMbo, visitId, type, status,
+                    anamnesis, status_text, finding, recommendation,
+                    diagnosisCode, diagnosisDisplay, content,
+                    createdAt, sentAt, caseId
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
+                docOidRaw,
+                data.patientMbo,
+                data.encCezihId,
+                data.type || '011',
+                result.success ? 'sent' : 'error',
+                data.anamnesis || null,
+                data.status || null,
+                data.finding || null,
+                data.recommendation || null,
+                data.diagnosisCode || null,
+                data.diagnosisDisplay || null,
+                null,
+                new Date().toISOString(),
+                result.success ? new Date().toISOString() : null,
+                data.condFhirId || null,
+            );
+            console.log('[sendDocumentFull] Saved document to local DB:', docOidRaw);
+        } catch (dbError: any) {
+            console.error('[sendDocumentFull] DB Error:', dbError.message);
+        }
+
+        // Step 6: Audit log
+        await auditService.log({
+            action: 'SEND_DOCUMENT_FULL',
+            direction: 'OUTGOING_CEZIH',
+            status: result.success ? 'SUCCESS' : 'ERROR',
+            visitId: data.encCezihId,
+            patientMbo: data.patientMbo,
+            payload_req: JSON.stringify({ documentOid: docOidRaw, encCezihId: data.encCezihId, condFhirId: data.condFhirId }),
+            payload_res: JSON.stringify(result),
+            error_msg: result.error || undefined,
+        });
+
+        return {
+            success: result.success,
+            documentOid: docOidRaw,
+            cezihResponse: result.data,
+            error: result.error,
+        };
+    }
+
     /**
      * Initiates the remote signing flow (Certilia mobileID).
      * Returns a transactionCode for the frontend to poll.
