@@ -1,6 +1,7 @@
 /**
  * Visit Management Service (Test Cases 12-14)
- * Create, update, and close patient visits using FHIR Messaging.
+ * Unified approach: buildEncounterBundle() handles CREATE, UPDATE, CLOSE, CANCEL, ERROR.
+ * Full Encounter payload is always sent (PUT semantics).
  */
 import axios from 'axios';
 import { config } from '../config';
@@ -28,16 +29,24 @@ export interface VisitData {
     reasonDisplay?: string;
     diagnosisCode?: string;
     diagnosisDisplay?: string;
-    class: 'AMB' | 'IMP' | 'EMER'; // ambulatory, inpatient, emergency
+    class: 'AMB' | 'IMP' | 'EMER';
     caseId?: string;
-    // Parameterized org identifier for testing
     orgIdentifierSystem?: string;
     orgIdentifierValue?: string;
-    // Skip serviceProvider entirely
     skipServiceProvider?: boolean;
-    // Optional: CEZIH server-assigned patient ID — if set, uses REST reference instead of MBO identifier
     patientFhirId?: string;
 }
+
+type EncounterAction = 'CREATE' | 'UPDATE' | 'CLOSE' | 'CANCEL' | 'ERROR';
+
+// Maps action → { eventCode, profile, status }
+const ACTION_MAP: Record<EncounterAction, { eventCode: string; profile: string }> = {
+    CREATE: { eventCode: '1.1', profile: 'hr-create-encounter-message' },
+    UPDATE: { eventCode: '1.2', profile: 'hr-update-encounter-message' },
+    CLOSE: { eventCode: '1.3', profile: 'hr-close-encounter-message' },
+    CANCEL: { eventCode: '1.2', profile: 'hr-update-encounter-message' }, // cancel = update with status=cancelled
+    ERROR: { eventCode: '1.2', profile: 'hr-update-encounter-message' }, // entered-in-error = update
+};
 
 class VisitService {
     // ============================================================
@@ -65,21 +74,269 @@ class VisitService {
         return db.prepare('SELECT * FROM visits WHERE id = ?').get(id);
     }
 
+    // ============================================================
+    // Unified Bundle Builder — "Swiss Army Knife"
+    // Always emits a FULL Encounter payload (PUT semantics)
+    // ============================================================
 
-    async createVisit(data: VisitData, userToken: string): Promise<any> {
+    private buildEncounterBundle(
+        action: EncounterAction,
+        data: {
+            patientMbo: string;
+            practitionerId?: string;
+            organizationId?: string;
+            localVisitId: string;
+            cezihVisitId?: string;
+            startDate: string;
+            endDate?: string;
+            reasonCode?: string;
+            reasonDisplay?: string;
+            class?: 'AMB' | 'IMP' | 'EMER';
+            caseId?: string;
+            patientFhirId?: string;
+            skipServiceProvider?: boolean;
+            orgIdentifierSystem?: string;
+            orgIdentifierValue?: string;
+        }
+    ): any {
         const messageId = uuidv4();
         const encounterUuid = uuidv4();
+        const { eventCode, profile } = ACTION_MAP[action];
+
+        // ============================================================
+        // TC14 CLOSE: Minimal bundle — just MessageHeader + slim Encounter
+        // CEZIH spec: NO Observation, NO Patient/Practitioner entries,
+        // NO extension, NO type, NO participant.
+        // ============================================================
+        if (action === 'CLOSE') {
+            return {
+                resourceType: 'Bundle',
+                id: uuidv4(),
+                meta: { profile: [`http://fhir.cezih.hr/specifikacije/StructureDefinition/${profile}`] },
+                type: 'message',
+                timestamp: new Date().toISOString(),
+                entry: [
+                    {
+                        fullUrl: `urn:uuid:${messageId}`,
+                        resource: {
+                            resourceType: 'MessageHeader',
+                            id: messageId,
+                            meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-encounter-management-message-header'] },
+                            eventCoding: { system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types', code: '1.3' },
+                            sender: {
+                                type: 'Organization',
+                                identifier: { system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE, value: data.organizationId || config.organization.hzzoCode },
+                                display: config.organization.name,
+                            },
+                            author: {
+                                type: 'Practitioner',
+                                identifier: { system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER, value: data.practitionerId || config.practitioner.hzjzId },
+                                display: config.practitioner.name,
+                            },
+                            source: {
+                                endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
+                                name: config.software.instance,
+                                software: `${config.software.name}_${config.software.company}`,
+                                version: config.software.version,
+                            },
+                            focus: [{ reference: `urn:uuid:${encounterUuid}` }],
+                        },
+                    },
+                    {
+                        fullUrl: `urn:uuid:${encounterUuid}`,
+                        resource: {
+                            resourceType: 'Encounter',
+                            id: encounterUuid,
+                            identifier: [{
+                                system: CEZIH_IDENTIFIERS.VISIT_ID,
+                                value: data.cezihVisitId || data.localVisitId,
+                            }],
+                            status: 'finished',
+                            class: {
+                                system: ENCOUNTER_CLASS_SYSTEM,
+                                code: ENCOUNTER_CLASSES[data.class || 'AMB'] || '1',
+                                display: data.class === 'EMER' ? 'Hitni' : data.class === 'IMP' ? 'Stacionarni' : 'Redovni',
+                            },
+                            period: {
+                                start: data.startDate || new Date().toISOString(),
+                                ...(data.endDate && { end: data.endDate }),
+                            },
+                            subject: {
+                                type: 'Patient',
+                                identifier: { system: CEZIH_IDENTIFIERS.MBO, value: data.patientMbo },
+                            },
+                            serviceProvider: {
+                                type: 'Organization',
+                                identifier: {
+                                    system: data.orgIdentifierSystem || CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                                    value: data.orgIdentifierValue || data.organizationId || config.organization?.hzzoCode,
+                                },
+                            },
+                        },
+                    },
+                ],
+            };
+        }
+
+        // ============================================================
+        // CREATE / UPDATE / CANCEL / ERROR: Full Encounter payload
+        // ============================================================
+
+        let encounterStatus: string;
+        if (action === 'CANCEL') {
+            encounterStatus = 'cancelled';
+        } else if (action === 'ERROR') {
+            encounterStatus = 'entered-in-error';
+        } else if (action === 'CREATE') {
+            const now = new Date();
+            const visitDate = new Date(data.startDate);
+            encounterStatus = visitDate.getTime() > now.getTime() + 3600000 ? 'planned' : 'in-progress';
+        } else {
+            encounterStatus = 'in-progress';
+        }
+
+        const encounterIdentifiers: any[] = [];
+        if (action === 'CREATE') {
+            encounterIdentifiers.push({ system: CEZIH_IDENTIFIERS.LOCAL_VISIT_ID, value: data.localVisitId });
+        } else {
+            encounterIdentifiers.push({ system: CEZIH_IDENTIFIERS.VISIT_ID, value: data.cezihVisitId || data.localVisitId });
+        }
+
+        // Logical identifier references (no urn:uuid — Patient/Practitioner NOT in bundle)
+        const subject = {
+            type: 'Patient',
+            identifier: { system: CEZIH_IDENTIFIERS.MBO, value: data.patientMbo },
+        };
+
+        const encounterResource: any = {
+            resourceType: 'Encounter',
+            meta: { profile: [CEZIH_EXTENSIONS.ENCOUNTER_PROFILE] },
+            extension: [{
+                url: CEZIH_EXTENSIONS.COST_PARTICIPATION,
+                extension: [
+                    { url: 'oznaka', valueCoding: { system: ENCOUNTER_CODES.COST_PARTICIPATION_SYSTEM, code: 'N' } },
+                    { url: 'sifra-oslobodjenja', valueCoding: { system: ENCOUNTER_CODES.EXEMPTION_REASON_SYSTEM, code: '55' } },
+                ]
+            }],
+            status: encounterStatus,
+            class: {
+                system: ENCOUNTER_CLASS_SYSTEM,
+                code: ENCOUNTER_CLASSES[data.class || 'AMB'] || '1',
+                display: data.class === 'EMER' ? 'Hitni' : data.class === 'IMP' ? 'Stacionarni' : 'Redovni'
+            },
+            type: [
+                { coding: [{ system: ENCOUNTER_CODES.VISIT_TYPE_SYSTEM, code: '1', display: 'Pacijent prisutan' }] },
+                { coding: [{ system: ENCOUNTER_CODES.VISIT_SUBTYPE_SYSTEM, code: '2', display: 'Posjeta SKZZ' }] },
+            ],
+            identifier: encounterIdentifiers,
+            priority: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v3-ActPriority', code: 'R' }] },
+            subject,
+            participant: [{
+                individual: {
+                    type: 'Practitioner',
+                    identifier: { system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER, value: data.practitionerId || config.practitioner.hzjzId },
+                    display: config.practitioner.name,
+                },
+            }],
+            period: {
+                start: data.startDate || new Date().toISOString(),
+                ...(data.endDate && { end: data.endDate }),
+            },
+        };
+
+        if (!data.skipServiceProvider) {
+            encounterResource.serviceProvider = {
+                type: 'Organization',
+                identifier: {
+                    system: data.orgIdentifierSystem || CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
+                    value: data.orgIdentifierValue || data.organizationId || config.organization?.hzzoCode,
+                },
+                display: config.organization.name,
+            };
+        }
+
+        if (data.reasonCode) {
+            encounterResource.reasonCode = [{ text: data.reasonDisplay || data.reasonCode }];
+        }
+
+        if (data.caseId) {
+            const conditionContainedId = uuidv4();
+            // Add contained Condition so HAPI can resolve the reference locally
+            encounterResource.contained = [{
+                resourceType: 'Condition',
+                id: conditionContainedId,
+                identifier: [{
+                    system: CEZIH_IDENTIFIERS.CASE_ID,
+                    value: data.caseId,
+                }],
+                subject: {
+                    type: 'Patient',
+                    identifier: { system: CEZIH_IDENTIFIERS.MBO, value: data.patientMbo },
+                },
+            }];
+            encounterResource.diagnosis = [{
+                condition: {
+                    reference: `#${conditionContainedId}`,
+                    type: 'Condition',
+                    identifier: { system: CEZIH_IDENTIFIERS.CASE_ID, value: data.caseId },
+                },
+            }];
+        }
+
+        // Bundle entries: only MessageHeader + Encounter (no Patient/Practitioner entries)
+        const entries: any[] = [
+            {
+                fullUrl: `urn:uuid:${messageId}`,
+                resource: {
+                    resourceType: 'MessageHeader',
+                    id: messageId,
+                    meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-encounter-management-message-header'] },
+                    eventCoding: { system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types', code: eventCode },
+                    sender: {
+                        type: 'Organization',
+                        identifier: { system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE, value: data.organizationId || config.organization.hzzoCode },
+                        display: config.organization.name,
+                    },
+                    author: {
+                        type: 'Practitioner',
+                        identifier: { system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER, value: config.practitioner.hzjzId || config.practitioner.oib },
+                        display: config.practitioner.name,
+                    },
+                    source: {
+                        endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
+                        name: config.software.instance,
+                        software: `${config.software.name}_${config.software.company}`,
+                        version: config.software.version,
+                    },
+                    focus: [{ reference: `urn:uuid:${encounterUuid}` }],
+                },
+            },
+            { fullUrl: `urn:uuid:${encounterUuid}`, resource: encounterResource },
+        ];
+
+        return {
+            resourceType: 'Bundle',
+            id: uuidv4(),
+            meta: { profile: [`http://fhir.cezih.hr/specifikacije/StructureDefinition/${profile}`] },
+            type: 'message',
+            timestamp: new Date().toISOString(),
+            entry: entries,
+        };
+    }
+
+    // ============================================================
+    // TC12: Create Visit
+    // ============================================================
+
+    async createVisit(data: VisitData, userToken: string): Promise<any> {
         const localVisitId = data.localVisitId || uuidv4();
 
         const now = new Date();
         const visitDate = new Date(data.startDate);
-        // If visit is in the future (> 1 hour from now), it's planned. Otherwise in-progress.
         const initialStatus = visitDate.getTime() > now.getTime() + 3600000 ? 'planned' : 'in-progress';
 
         // 1. Save to Local DB
         try {
-            // Ensure the patient exists in the local DB (FK constraint).
-            // We use INSERT OR IGNORE so existing records are not overwritten.
             db.prepare(`
                 INSERT OR IGNORE INTO patients (mbo, firstName, lastName)
                 VALUES (?, ?, ?)
@@ -89,11 +346,10 @@ class VisitService {
                 (data as any).patientName?.split(' ')[0] || null,
             );
 
-            const stmt = db.prepare(`
-                INSERT INTO visits (id, patientMbo, status, startDateTime, endDateTime, type, priority, doctorName)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `);
-            stmt.run(
+            db.prepare(`
+                INSERT INTO visits (id, patientMbo, status, startDateTime, endDateTime, type, priority, doctorName, reasonCode, reasonDisplay)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
                 localVisitId,
                 data.patientMbo,
                 initialStatus,
@@ -101,7 +357,9 @@ class VisitService {
                 data.endDate || null,
                 data.class,
                 'regular',
-                config.practitioner.name || 'Dr. Ivan Prpić'
+                config.practitioner.name || 'Dr. Ivan Prpić',
+                data.reasonCode || null,
+                data.reasonDisplay || null,
             );
             console.log('[VisitService] Saved visit to local DB:', localVisitId);
         } catch (dbError: any) {
@@ -109,195 +367,27 @@ class VisitService {
             throw new Error(`Database error: ${dbError.message}`);
         }
 
-        const bundle: any = {
-            resourceType: 'Bundle',
-            id: uuidv4(),
-            meta: {
-                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-create-encounter-message']
-            },
-            type: 'message',
-            timestamp: new Date().toISOString(),
-            entry: [
-                {
-                    fullUrl: `urn:uuid:${messageId}`,
-                    resource: {
-                        resourceType: 'MessageHeader',
-                        id: messageId,
-                        meta: {
-                            profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-encounter-management-message-header'],
-                        },
-                        eventCoding: {
-                            // ehe-message-types / 1.1 — prema hr-create-encounter-message StructureDefinition
-                            system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
-                            code: '1.1',
-                        },
-                        sender: {
-                            type: 'Organization',
-                            identifier: {
-                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
-                                value: data.organizationId || config.organization.hzzoCode,
-                            },
-                            display: config.organization.name,
-                        },
-                        // DIGSIG-1: autor poruke mora biti jednak Bundle.signature.who
-                        author: {
-                            type: 'Practitioner',
-                            identifier: {
-                                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
-                                value: config.practitioner.hzjzId || config.practitioner.oib,
-                            },
-                            display: config.practitioner.name,
-                        },
-                        source: {
-                            endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
-                            name: config.software.instance,
-                            software: `${config.software.name}_${config.software.company}`,
-                            version: config.software.version,
-                        },
-                        focus: [{ reference: `urn:uuid:${encounterUuid}` }],
-                    },
-                },
-                {
-                    fullUrl: `urn:uuid:${encounterUuid}`,
-                    resource: {
-                        resourceType: 'Encounter',
-                        meta: {
-                            profile: [CEZIH_EXTENSIONS.ENCOUNTER_PROFILE]
-                        },
-                        extension: [
-                            {
-                                url: CEZIH_EXTENSIONS.COST_PARTICIPATION,
-                                extension: [
-                                    {
-                                        url: 'oznaka',
-                                        valueCoding: {
-                                            system: ENCOUNTER_CODES.COST_PARTICIPATION_SYSTEM,
-                                            code: 'N' // Default to No (Not self-paying)
-                                        }
-                                    },
-                                    {
-                                        url: 'sifra-oslobodjenja',
-                                        valueCoding: {
-                                            system: ENCOUNTER_CODES.EXEMPTION_REASON_SYSTEM,
-                                            code: '55' // Default to 55 (General exemption)
-                                        }
-                                    }
-                                ]
-                            }
-                        ],
-                        status: initialStatus as 'planned' | 'arrived' | 'triaged' | 'in-progress' | 'onleave' | 'finished' | 'cancelled',
-                        class: {
-                            system: ENCOUNTER_CLASS_SYSTEM,
-                            code: ENCOUNTER_CLASSES[data.class] || '1',
-                            display: data.class === 'AMB' ? 'Redovni' : data.class === 'EMER' ? 'Hitni' : 'Stacionarni'
-                        },
-                        type: [
-                            {
-                                // VrstaPosjete — prisutnost pacijenta (vrsta-posjete)
-                                // 1=Pacijent prisutan, 2=Pacijent udaljeno prisutan, 3=Pacijent nije prisutan
-                                coding: [
-                                    {
-                                        system: ENCOUNTER_CODES.VISIT_TYPE_SYSTEM,
-                                        code: '1',
-                                        display: 'Pacijent prisutan'
-                                    }
-                                ]
-                            },
-                            {
-                                // TipPosjete — 1=LOM, 2=SKZZ, 3=Hospitalizacija
-                                coding: [
-                                    {
-                                        system: ENCOUNTER_CODES.VISIT_SUBTYPE_SYSTEM,
-                                        code: '2', // Posjeta SKZZ (specijalistička)
-                                        display: 'Posjeta SKZZ'
-                                    }
-                                ]
-                            }
-                        ],
-                        identifier: [
-                            {
-                                // Lokalni identifikator — šalje Gx aplikacija
-                                system: CEZIH_IDENTIFIERS.LOCAL_VISIT_ID,
-                                value: localVisitId,
-                            },
-                        ],
-                        priority: {
-                            coding: [
-                                {
-                                    system: 'http://terminology.hl7.org/CodeSystem/v3-ActPriority',
-                                    code: 'R'
-                                }
-                            ]
-                        },
-                        subject: data.patientFhirId
-                            ? {
-                                reference: `Patient/${data.patientFhirId}`,
-                                type: 'Patient',
-                                identifier: {
-                                    system: CEZIH_IDENTIFIERS.MBO,
-                                    value: data.patientMbo,
-                                },
-                                display: (data as any).patientName || config.practitioner.name,
-                            }
-                            : {
-                                type: 'Patient',
-                                identifier: {
-                                    system: CEZIH_IDENTIFIERS.MBO,
-                                    value: data.patientMbo,
-                                },
-                            },
-                        participant: [
-                            {
-                                individual: {
-                                    type: 'Practitioner',
-                                    identifier: {
-                                        system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
-                                        value: data.practitionerId || config.practitioner.hzjzId,
-                                    },
-                                    display: config.practitioner.name,
-                                },
-                            },
-                        ],
-                        ...(!data.skipServiceProvider && {
-                            serviceProvider: {
-                                type: 'Organization',
-                                identifier: {
-                                    system: data.orgIdentifierSystem || CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
-                                    value: data.orgIdentifierValue || data.organizationId || config.organization?.hzzoCode || '4981825',
-                                },
-                                display: config.organization.name,
-                            },
-                        }),
-                        period: {
-                            start: data.startDate || new Date().toISOString(),
-                            ...(data.endDate && { end: data.endDate }),
-                        },
-                        ...(data.reasonCode && {
-                            reasonCode: [{
-                                // Spec: reasonCode.coding max=0, samo text!
-                                text: data.reasonDisplay || data.reasonCode,
-                            }],
-                        }),
-                        ...(data.caseId && {
-                            diagnosis: [{
-                                condition: {
-                                    type: 'Condition',
-                                    identifier: {
-                                        system: CEZIH_IDENTIFIERS.CASE_ID,
-                                        value: data.caseId
-                                    }
-                                },
-                            }],
-                        }),
-                    },
-                },
-            ],
-        };
+        // 2. Build unified bundle
+        const bundle = this.buildEncounterBundle('CREATE', {
+            patientMbo: data.patientMbo,
+            practitionerId: data.practitionerId,
+            organizationId: data.organizationId,
+            localVisitId,
+            startDate: data.startDate,
+            endDate: data.endDate,
+            reasonCode: data.reasonCode,
+            reasonDisplay: data.reasonDisplay,
+            class: data.class,
+            caseId: data.caseId,
+            patientFhirId: data.patientFhirId,
+            skipServiceProvider: data.skipServiceProvider,
+            orgIdentifierSystem: data.orgIdentifierSystem,
+            orgIdentifierValue: data.orgIdentifierValue,
+        });
 
+        // 3. Send and extract CEZIH visit ID
         const response = await this.sendMessage(bundle, userToken, 'ENCOUNTER_START', localVisitId, data.patientMbo);
 
-        // Extract CEZIH-assigned visit ID from response and save to local DB
-        // CEZIH returns identifikator-posjete which is required for TC13/TC14
         let cezihVisitId: string | undefined;
         try {
             const encounter = response?.entry?.find((e: any) => e.resource?.resourceType === 'Encounter')?.resource;
@@ -316,260 +406,58 @@ class VisitService {
     }
 
     // ============================================================
-    // ENCOUNTER_START: planned → in-progress
-    // ============================================================
-
-    async startVisit(visitId: string, data: { patientMbo?: string; startTimestamp?: string }, userToken: string): Promise<any> {
-        const messageId = uuidv4();
-
-        // Update Local DB status
-        try {
-            db.prepare('UPDATE visits SET status = ? WHERE id = ?').run('in-progress', visitId);
-            console.log('[VisitService] Started visit in local DB:', visitId);
-        } catch (dbError) {
-            console.error('[VisitService] DB Start Error', dbError);
-        }
-
-        const encounterUuid = uuidv4();
-
-        const bundle: any = {
-            resourceType: 'Bundle',
-            id: uuidv4(),
-            meta: {
-                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-update-encounter-message'],
-            },
-            type: 'message',
-            timestamp: new Date().toISOString(),
-            entry: [
-                {
-                    fullUrl: `urn:uuid:${messageId}`,
-                    resource: {
-                        resourceType: 'MessageHeader',
-                        id: messageId,
-                        meta: {
-                            profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-encounter-management-message-header'],
-                        },
-                        eventCoding: {
-                            // ehe-message-types / 1.2 — Start/Update Encounter
-                            system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
-                            code: '1.2',
-                        },
-                        sender: {
-                            type: 'Organization',
-                            identifier: {
-                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
-                                value: config.organization.hzzoCode,
-                            },
-                            display: config.organization.name,
-                        },
-                        author: {
-                            type: 'Practitioner',
-                            identifier: {
-                                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
-                                value: config.practitioner.hzjzId || config.practitioner.oib,
-                            },
-                            display: config.practitioner.name,
-                        },
-                        source: {
-                            endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
-                            name: config.software.instance,
-                            software: `${config.software.name}_${config.software.company}`,
-                            version: config.software.version,
-                        },
-                        focus: [{ reference: `urn:uuid:${encounterUuid}` }],
-                    },
-                },
-                {
-                    fullUrl: `urn:uuid:${encounterUuid}`,
-                    resource: {
-                        resourceType: 'Encounter',
-                        meta: {
-                            profile: [CEZIH_EXTENSIONS.ENCOUNTER_PROFILE]
-                        },
-                        identifier: [
-                            {
-                                system: CEZIH_IDENTIFIERS.VISIT_ID,
-                                value: visitId,
-                            },
-                        ],
-                        status: 'in-progress',
-                        period: {
-                            start: data.startTimestamp || new Date().toISOString(),
-                        },
-                        ...(data.patientMbo && {
-                            subject: {
-                                type: 'Patient',
-                                identifier: {
-                                    system: CEZIH_IDENTIFIERS.MBO,
-                                    value: data.patientMbo,
-                                },
-                            },
-                        }),
-                    },
-                },
-            ],
-        };
-
-        return this.sendMessage(bundle, userToken, 'ENCOUNTER_START', visitId, data.patientMbo);
-    }
-
-    // ============================================================
-    // Test Case 13: Update Visit (FHIR Messaging)
+    // TC13: Update Visit — full Encounter payload + reasonCode change
     // ============================================================
 
     async updateVisit(visitId: string, data: Partial<VisitData>, userToken: string): Promise<any> {
-        const messageId = uuidv4();
-
-        // Resolve CEZIH visit ID — required for CEZIH to accept the update
         const localVisit = this.getVisit(visitId);
         const cezihVisitId = localVisit?.cezihVisitId || visitId;
+        const patientMbo = data.patientMbo || localVisit?.patientMbo || '999999423';
         console.log('[VisitService] Updating visit:', visitId, '→ CEZIH ID:', cezihVisitId);
 
         // Update Local DB
         try {
-            if (data.endDate) {
-                db.prepare('UPDATE visits SET endDateTime = ? WHERE id = ?').run(data.endDate, visitId);
+            const updates: string[] = [];
+            const values: any[] = [];
+
+            if (data.endDate) { updates.push('endDateTime = ?'); values.push(data.endDate); }
+            if (data.reasonCode) { updates.push('reasonCode = ?'); values.push(data.reasonCode); }
+            if (data.reasonDisplay) { updates.push('reasonDisplay = ?'); values.push(data.reasonDisplay); }
+
+            if (updates.length > 0) {
+                values.push(visitId);
+                db.prepare(`UPDATE visits SET ${updates.join(', ')} WHERE id = ?`).run(...values);
             }
-            // More updates could be added here
         } catch (dbError) {
             console.error('[VisitService] DB Update Error', dbError);
         }
 
-        const encounterUuid = uuidv4();
+        // Build full bundle via helper
+        const bundle = this.buildEncounterBundle('UPDATE', {
+            patientMbo,
+            practitionerId: data.practitionerId,
+            organizationId: data.organizationId,
+            localVisitId: visitId,
+            cezihVisitId,
+            startDate: data.startDate || localVisit?.startDateTime || new Date().toISOString(),
+            endDate: data.endDate,
+            reasonCode: data.reasonCode || localVisit?.reasonCode,
+            reasonDisplay: data.reasonDisplay || localVisit?.reasonDisplay,
+            class: data.class || localVisit?.type || 'AMB',
+            caseId: data.caseId,
+        });
 
-        const bundle: any = {
-            resourceType: 'Bundle',
-            id: uuidv4(),
-            meta: {
-                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-update-encounter-message'],
-            },
-            type: 'message',
-            timestamp: new Date().toISOString(),
-            entry: [
-                {
-                    fullUrl: `urn:uuid:${messageId}`,
-                    resource: {
-                        resourceType: 'MessageHeader',
-                        id: messageId,
-                        meta: {
-                            profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-encounter-management-message-header'],
-                        },
-                        eventCoding: {
-                            // ehe-message-types / 1.2 — Update Encounter (1.1=create, 1.2=update, 1.3=close)
-                            system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
-                            code: '1.2',
-                        },
-                        sender: {
-                            type: 'Organization',
-                            identifier: {
-                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
-                                value: data.organizationId || config.organization.hzzoCode,
-                            },
-                            display: config.organization.name,
-                        },
-                        // DIGSIG-1: autor poruke mora biti jednak Bundle.signature.who
-                        author: {
-                            type: 'Practitioner',
-                            identifier: {
-                                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
-                                value: config.practitioner.hzjzId || config.practitioner.oib,
-                            },
-                            display: config.practitioner.name,
-                        },
-                        source: {
-                            endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
-                            name: config.software.instance,
-                            software: `${config.software.name}_${config.software.company}`,
-                            version: config.software.version,
-                        },
-                        focus: [{ reference: `urn:uuid:${encounterUuid}` }],
-                    },
-                },
-                {
-                    fullUrl: `urn:uuid:${encounterUuid}`,
-                    resource: {
-                        resourceType: 'Encounter',
-                        meta: {
-                            profile: [CEZIH_EXTENSIONS.ENCOUNTER_PROFILE]
-                        },
-                        identifier: [
-                            {
-                                system: CEZIH_IDENTIFIERS.VISIT_ID,
-                                value: cezihVisitId,
-                            },
-                        ],
-                        status: 'in-progress',
-                        class: {
-                            system: ENCOUNTER_CLASS_SYSTEM,
-                            code: ENCOUNTER_CLASSES[data.class || 'AMB'] || '1',
-                        },
-                        subject: {
-                            type: 'Patient',
-                            identifier: {
-                                system: CEZIH_IDENTIFIERS.MBO,
-                                value: data.patientMbo || this.getVisit(visitId)?.patientMbo || '999999423',
-                            },
-                        },
-                        participant: [
-                            {
-                                individual: {
-                                    type: 'Practitioner',
-                                    identifier: {
-                                        system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
-                                        value: data.practitionerId || config.practitioner.hzjzId,
-                                    },
-                                    display: config.practitioner.name,
-                                },
-                            },
-                        ],
-                        serviceProvider: {
-                            type: 'Organization',
-                            identifier: {
-                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
-                                value: data.organizationId || config.organization?.hzzoCode || '4981825',
-                            },
-                            display: config.organization.name,
-                        },
-                        period: {
-                            start: data.startDate || this.getVisit(visitId)?.startDateTime || new Date().toISOString(),
-                            ...(data.endDate && { end: data.endDate }),
-                        },
-                        ...(data.caseId && {
-                            diagnosis: [{
-                                condition: {
-                                    type: 'Condition',
-                                    identifier: {
-                                        system: CEZIH_IDENTIFIERS.CASE_ID,
-                                        value: data.caseId
-                                    }
-                                }
-                            }],
-                        }),
-                    },
-                },
-            ],
-        };
-
-        // Resolve patientMbo — fallback to local DB lookup if not provided
-        const resolvedPatientMbo = data.patientMbo
-            || localVisit?.patientMbo
-            || bundle.entry?.[1]?.resource?.subject?.identifier?.value
-            || '999999423';
-        console.log('[VisitService] Resolved patientMbo for audit:', resolvedPatientMbo, '(from data:', data.patientMbo, ', localVisit:', localVisit?.patientMbo, ')');
-        return this.sendMessage(bundle, userToken, 'ENCOUNTER_UPDATE', visitId, resolvedPatientMbo);
+        return this.sendMessage(bundle, userToken, 'ENCOUNTER_UPDATE', visitId, patientMbo);
     }
 
     // ============================================================
-    // Test Case 14: Close Visit (FHIR Messaging)
+    // TC14: Close Visit — full payload + Observation for ishod pregleda
     // ============================================================
 
     async closeVisit(visitId: string, endDate: string, userToken: string, patientMbo?: string): Promise<any> {
-        const messageId = uuidv4();
-        const encounterUuid = uuidv4();
-
-        // Resolve CEZIH visit ID — required for CEZIH to accept the close
         const localVisit = this.getVisit(visitId);
         const cezihVisitId = localVisit?.cezihVisitId || visitId;
+        const resolvedMbo = patientMbo || localVisit?.patientMbo || '999999423';
         console.log('[VisitService] Closing visit:', visitId, '→ CEZIH ID:', cezihVisitId);
 
         // Update Local DB
@@ -581,110 +469,53 @@ class VisitService {
             console.error('[VisitService] DB Close Error', dbError);
         }
 
-        const bundle: any = {
-            resourceType: 'Bundle',
-            id: uuidv4(),
-            meta: {
-                profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-close-encounter-message'],
-            },
-            type: 'message',
-            timestamp: new Date().toISOString(),
-            entry: [
-                {
-                    fullUrl: `urn:uuid:${messageId}`,
-                    resource: {
-                        resourceType: 'MessageHeader',
-                        id: messageId,
-                        meta: {
-                            profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-encounter-management-message-header'],
-                        },
-                        eventCoding: {
-                            system: 'http://ent.hr/fhir/CodeSystem/ehe-message-types',
-                            code: '1.3', // Close Encounter (1.1=create, 1.2=update, 1.3=close)
-                        },
-                        sender: {
-                            type: 'Organization',
-                            identifier: {
-                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
-                                value: config.organization.hzzoCode,
-                            },
-                            display: config.organization.name,
-                        },
-                        // DIGSIG-1: autor poruke = Bundle.signature.who
-                        author: {
-                            type: 'Practitioner',
-                            identifier: {
-                                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
-                                value: config.practitioner.hzjzId || config.practitioner.oib,
-                            },
-                            display: config.practitioner.name,
-                        },
-                        source: {
-                            endpoint: `urn:oid:${config.organization.sourceEndpointOid}`,
-                            name: config.software.instance,
-                            software: `${config.software.name}_${config.software.company}`,
-                            version: config.software.version,
-                        },
-                        focus: [{ reference: `urn:uuid:${encounterUuid}` }],
-                    },
-                },
-                {
-                    fullUrl: `urn:uuid:${encounterUuid}`,
-                    resource: {
-                        resourceType: 'Encounter',
-                        meta: {
-                            profile: [CEZIH_EXTENSIONS.ENCOUNTER_PROFILE]
-                        },
-                        identifier: [
-                            {
-                                system: CEZIH_IDENTIFIERS.VISIT_ID,
-                                value: cezihVisitId,
-                            },
-                        ],
-                        status: 'finished',
-                        class: {
-                            system: ENCOUNTER_CLASS_SYSTEM,
-                            code: '1',
-                        },
-                        subject: {
-                            type: 'Patient',
-                            identifier: {
-                                system: CEZIH_IDENTIFIERS.MBO,
-                                value: patientMbo || this.getVisit(visitId)?.patientMbo || '999999423',
-                            },
-                        },
-                        participant: [
-                            {
-                                individual: {
-                                    type: 'Practitioner',
-                                    identifier: {
-                                        system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER,
-                                        value: config.practitioner.hzjzId,
-                                    },
-                                    display: config.practitioner.name,
-                                },
-                            },
-                        ],
-                        serviceProvider: {
-                            type: 'Organization',
-                            identifier: {
-                                system: CEZIH_IDENTIFIERS.HZZO_ORG_CODE,
-                                value: config.organization?.hzzoCode || '4981825',
-                            },
-                            display: config.organization.name,
-                        },
-                        period: {
-                            end: endDate,
-                        },
-                    },
-                },
-            ],
-        };
+        const bundle = this.buildEncounterBundle('CLOSE', {
+            patientMbo: resolvedMbo,
+            localVisitId: visitId,
+            cezihVisitId,
+            startDate: localVisit?.startDateTime || new Date().toISOString(),
+            endDate,
+            reasonCode: localVisit?.reasonCode,
+            reasonDisplay: localVisit?.reasonDisplay,
+            class: localVisit?.type || 'AMB',
+        });
 
-        // Use provided patientMbo (from G9 body); fallback to local DB lookup
-        const resolvedPatientMbo = patientMbo ?? this.getVisit(visitId)?.patientMbo;
-        return this.sendMessage(bundle, userToken, 'REALIZATION', visitId, resolvedPatientMbo);
+        return this.sendMessage(bundle, userToken, 'REALIZATION', visitId, resolvedMbo);
     }
+
+    // ============================================================
+    // Cancel Visit — planned → cancelled
+    // ============================================================
+
+    async cancelVisit(visitId: string, userToken: string, patientMbo?: string): Promise<any> {
+        const localVisit = this.getVisit(visitId);
+        const cezihVisitId = localVisit?.cezihVisitId || visitId;
+        const resolvedMbo = patientMbo || localVisit?.patientMbo || '999999423';
+        console.log('[VisitService] Cancelling visit:', visitId, '→ CEZIH ID:', cezihVisitId);
+
+        // Update local DB
+        try {
+            db.prepare('UPDATE visits SET status = ? WHERE id = ?').run('cancelled', visitId);
+        } catch (dbError) {
+            console.error('[VisitService] DB Cancel Error', dbError);
+        }
+
+        const bundle = this.buildEncounterBundle('CANCEL', {
+            patientMbo: resolvedMbo,
+            localVisitId: visitId,
+            cezihVisitId,
+            startDate: localVisit?.startDateTime || new Date().toISOString(),
+            reasonCode: localVisit?.reasonCode,
+            reasonDisplay: localVisit?.reasonDisplay,
+            class: localVisit?.type || 'AMB',
+        });
+
+        return this.sendMessage(bundle, userToken, 'ENCOUNTER_UPDATE', visitId, resolvedMbo);
+    }
+
+    // ============================================================
+    // Send Message to CEZIH (shared for all actions)
+    // ============================================================
 
     private async sendMessage(bundle: any, userToken: string, action: string, visitId?: string, patientMbo?: string): Promise<any> {
         let bundleToSend = bundle;
@@ -706,9 +537,6 @@ class VisitService {
                 errorMessage = `Signing failed: ${signError.message}`;
             }
 
-            // encounter-services on port 8443 requires gateway session cookies.
-            // Sending Authorization: Bearer on the user gateway causes a redirect
-            // to the Keycloak login page. Prioritize gateway cookies.
             let headers: Record<string, string>;
             if (authService.hasGatewaySession()) {
                 const gatewayHeaders = authService.getGatewayAuthHeaders();
@@ -737,7 +565,6 @@ class VisitService {
             if (cezihBody) console.warn('[VisitService] CEZIH Error Body:', JSON.stringify(cezihBody)?.slice(0, 2000));
             errorMessage = error.message;
 
-            // Extract human-readable CEZIH error for audit log
             const cezihError = (() => {
                 if (!cezihBody) return error.message;
                 if (typeof cezihBody === 'string') return cezihBody.slice(0, 2000);
@@ -754,8 +581,6 @@ class VisitService {
                     || JSON.stringify(cezihBody).slice(0, 2000);
             })();
 
-            // Never re-throw — the visit is already saved to local DB.
-            // All CEZIH errors (400, 404, network) are recorded in audit log.
             errorMessage = `HTTP ${cezihStatus}: ${cezihError}`;
             finalResponse = {
                 localOnly: true,
@@ -764,7 +589,6 @@ class VisitService {
             };
         }
         finally {
-            // Await the audit log write so it's not dropped as fire-and-forget
             await auditService.log({
                 visitId,
                 patientMbo,

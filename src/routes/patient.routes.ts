@@ -59,7 +59,8 @@ router.get('/:mbo/chart', async (req: Request, res: Response) => {
                 allDocuments: documents,
                 activeCases: cases.filter(c => c.status === 'active'),
                 allCases: cases,
-                recentVisits: visits.slice(0, 5)
+                recentVisits: visits.slice(0, 5),
+                allVisits: visits,
             }
         });
     } catch (error: any) {

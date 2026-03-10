@@ -3,7 +3,7 @@
  * Extracted from TC18's proven, CEZIH-accepted bundle structure.
  */
 import { v4 as uuidv4 } from 'uuid';
-import { signatureService } from './signature.service';
+import { signatureService, jcsCanonialize } from './signature.service';
 import { authService } from './auth.service';
 import { oidService } from './oid.service';
 import { config } from '../config';
@@ -180,7 +180,7 @@ export async function buildMhdBundle(p: MhdDocumentParams): Promise<{ outer: any
     // DocumentReference resource
     const docRef: any = {
         resourceType: 'DocumentReference',
-        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HR.MinimalDocumentReference'] },
+        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-document-reference'] },
         masterIdentifier: { use: 'usual', system: 'urn:ietf:rfc:3986', value: p.docOid },
         identifier: [{ use: 'official', system: 'urn:ietf:rfc:3986', value: `urn:uuid:${docRefUuid}` }],
         status: 'current',
@@ -209,6 +209,7 @@ export async function buildMhdBundle(p: MhdDocumentParams): Promise<{ outer: any
         docRef.relatesTo = [{
             code: 'replaces',
             target: {
+                type: 'DocumentReference',
                 identifier: {
                     system: 'urn:ietf:rfc:3986',
                     value: p.replacesOid.startsWith('urn:oid:') ? p.replacesOid : `urn:oid:${p.replacesOid}`
@@ -225,7 +226,7 @@ export async function buildMhdBundle(p: MhdDocumentParams): Promise<{ outer: any
                 fullUrl: `urn:uuid:${listUuid}`,
                 resource: {
                     resourceType: 'List',
-                    meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HRMinimalSubmissionSet'] },
+                    meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-document-submissionset'] },
                     extension: [{ url: 'https://profiles.ihe.net/ITI/MHD/StructureDefinition/ihe-sourceId', valueIdentifier: { system: 'urn:ietf:rfc:3986', value: 'urn:oid:2.16.840.1.113883.2.7.50.2.1' } }],
                     identifier: [
                         { use: 'usual', system: 'urn:ietf:rfc:3986', value: `urn:oid:${subOidRaw}` },
@@ -274,9 +275,36 @@ export async function submitMhdToGateway(bundle: any): Promise<{ success: boolea
 
     const url = `${config.cezih.gatewayBase}${config.cezih.services.document}/iti-65-service`;
     console.log(`[MhdBuilder] Submitting to CEZIH: ${url}`);
+    console.log(`[MhdBuilder] BUNDLE STRUCTURE CHECK: type=${bundle.type}, entries=${bundle.entry?.length}, entryTypes=${bundle.entry?.map((e: any) => e.resource?.resourceType).join(',')}`);
+    console.log(`[MhdBuilder] entry[0] profile: ${JSON.stringify(bundle.entry?.[0]?.resource?.meta?.profile)}`);
+    console.log(`[MhdBuilder] entry[1] profile: ${JSON.stringify(bundle.entry?.[1]?.resource?.meta?.profile)}`);
+
+    // CRITICAL: If bundle has a signature, we MUST send it as a JCS-canonicalized string.
+    // signBundle() signs the JCS-sorted (alphabetical keys) representation.
+    // If we pass a JS object to axios, it uses JSON.stringify() which preserves original key order.
+    // CEZIH re-canonicalizes the received body to verify the signature — key order mismatch → 403!
+    // Solution: convert JCS string to UTF-8 Buffer so wire format ≡ signed format (byte-perfect).
+    const isSigned = !!bundle.signature?.data;
+    let bodyToSend: Buffer | any;
+    if (isSigned) {
+        const jcsString = jcsCanonialize(bundle);
+        bodyToSend = Buffer.from(jcsString, 'utf8'); // Explicit UTF-8 — no implicit encoding surprises
+        combinedHeaders['Content-Type'] = 'application/fhir+json; charset=utf-8';
+        console.log(`[MhdBuilder] Sending JCS Buffer (${bodyToSend.length} bytes) to avoid key-order + encoding mismatch.`);
+    } else {
+        bodyToSend = bundle;
+    }
+
+    // Save exactly what goes to the wire
+    try { require('fs').writeFileSync(require('path').join(process.cwd(), 'tmp', 'mhd-sent-to-cezih.json'), isSigned ? bodyToSend.toString('utf8') : JSON.stringify(bundle, null, 2)); } catch (e) { }
 
     try {
-        const response = await axios.post(url, bundle, { headers: combinedHeaders });
+        const axiosConfig: any = { headers: combinedHeaders };
+        if (isSigned) {
+            // Pass Buffer through without any transformation — axios sends raw bytes
+            axiosConfig.transformRequest = [(data: any) => data];
+        }
+        const response = await axios.post(url, bodyToSend, axiosConfig);
         console.log('[MhdBuilder] ✅ CEZIH accepted!');
         return { success: true, data: response.data };
     } catch (error: any) {

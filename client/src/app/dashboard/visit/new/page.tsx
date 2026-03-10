@@ -214,6 +214,8 @@ function ClinicalWorkspace() {
     const mbo = searchParams.get('mbo');
     const patientMbo = searchParams.get('patientMbo');
     const caseIdParam = searchParams.get('caseId');
+    const mkbParam = searchParams.get('mkb');
+    const mkbDisplayParam = searchParams.get('mkbDisplay');
 
     // Final effective identifiers
     const effectiveMbo = patientMbo || mbo;
@@ -228,8 +230,12 @@ function ClinicalWorkspace() {
     const [physicalStatus, setPhysicalStatus] = useState('');
     const [findingText, setFindingText] = useState('');
     const [recommendation, setRecommendation] = useState('');
-    const [diagnosisCode, setDiagnosisCode] = useState('');
-    const [diagnosisDisplay, setDiagnosisDisplay] = useState('');
+    const [visitReasonCode, setVisitReasonCode] = useState(mkbParam || '');
+    const [visitReasonDisplay, setVisitReasonDisplay] = useState(mkbDisplayParam || '');
+
+    // Diagnosis (clinical document) — prefill from case MKB
+    const [diagnosisCode, setDiagnosisCode] = useState(mkbParam || '');
+    const [diagnosisDisplay, setDiagnosisDisplay] = useState(mkbDisplayParam || '');
     const [diagSuggestions, setDiagSuggestions] = useState<any[]>([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
 
@@ -370,7 +376,9 @@ function ClinicalWorkspace() {
                     organizationId: '999001425',
                     startDate: new Date(startDate).toISOString(),
                     class: visitType,
-                    caseId: selectedCaseId || undefined
+                    caseId: selectedCaseId || undefined,
+                    reasonCode: visitReasonCode || undefined,
+                    reasonDisplay: visitReasonDisplay || undefined,
                 })
             });
             const data = await res.json();
@@ -721,6 +729,37 @@ function ClinicalWorkspace() {
                                         <Database className="w-3.5 h-3.5" />
                                     </button>
                                 </div>
+                            </div>
+                            {/* Razlog dolaska / Reason Code (MKB-10) */}
+                            <div className="flex items-center gap-2 bg-violet-50/50 px-3 py-2 rounded-lg border border-violet-200">
+                                <span className="text-sm">💊</span>
+                                <select
+                                    value={visitReasonCode}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        setVisitReasonCode(val);
+                                        const opts: Record<string, string> = {
+                                            'Z00.0': 'Opći medicinski pregled',
+                                            'J06.9': 'Akutna infekcija gornjeg dišnog sustava',
+                                            'I10': 'Esencijalna hipertenzija',
+                                            'M54.5': 'Križobolja',
+                                            'R51': 'Glavobolja',
+                                            'R05': 'Kašalj',
+                                            'N39.0': 'Infekcija mokraćnog sustava',
+                                        };
+                                        setVisitReasonDisplay(opts[val] || val);
+                                    }}
+                                    className="text-sm text-violet-700 outline-none bg-transparent font-medium max-w-[200px]"
+                                >
+                                    <option value="">Razlog dolaska</option>
+                                    <option value="Z00.0">Z00.0 — Sistematski</option>
+                                    <option value="J06.9">J06.9 — Prehlada</option>
+                                    <option value="I10">I10 — Hipertenzija</option>
+                                    <option value="M54.5">M54.5 — Križobolja</option>
+                                    <option value="R51">R51 — Glavobolja</option>
+                                    <option value="R05">R05 — Kašalj</option>
+                                    <option value="N39.0">N39.0 — Urinarna inf.</option>
+                                </select>
                             </div>
                             <button
                                 onClick={startVisit}

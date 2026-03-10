@@ -290,10 +290,13 @@ class CaseService {
             const condition = innerResult?.entry?.find((e: any) => e.resource?.resourceType === 'Condition')?.resource;
             cezihCaseId = condition?.identifier?.find(
                 (id: any) => id.system === CEZIH_IDENTIFIERS.CASE_ID
+                    || id.system === 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja'
             )?.value;
             if (cezihCaseId) {
                 db.prepare('UPDATE cases SET cezihCaseId = ? WHERE id = ?').run(cezihCaseId, localCaseId);
                 console.log('[CaseService] Saved CEZIH case ID:', cezihCaseId, 'for local:', localCaseId);
+            } else {
+                console.warn('[CaseService] ⚠️ Could not find CEZIH case ID in response identifiers:', JSON.stringify(condition?.identifier));
             }
         } catch (e) {
             console.warn('[CaseService] Could not extract CEZIH case ID from response');

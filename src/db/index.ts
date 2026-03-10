@@ -148,6 +148,14 @@ export function initDatabase() {
     db.exec('ALTER TABLE visits ADD COLUMN cezihVisitId TEXT');
   } catch (e) { /* column already exists */ }
 
+  // Migration: add reasonCode/reasonDisplay to visits (TC13 — razlog dolaska)
+  try {
+    db.exec('ALTER TABLE visits ADD COLUMN reasonCode TEXT');
+  } catch (e) { /* column already exists */ }
+  try {
+    db.exec('ALTER TABLE visits ADD COLUMN reasonDisplay TEXT');
+  } catch (e) { /* column already exists */ }
+
   // Migration: add cezihCaseId column to cases (CEZIH-assigned identifier for TC17)
   try {
     db.exec('ALTER TABLE cases ADD COLUMN cezihCaseId TEXT');

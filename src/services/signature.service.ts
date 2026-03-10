@@ -234,7 +234,7 @@ class SignatureService {
         return Buffer.concat([extract(), extract()]);
     }
 
-    async signBundle(bundle: any, signerRef?: string, userToken?: string, signPin?: string): Promise<SignedBundle> {
+    async signBundle(bundle: any, signerRef?: string, userToken?: string, signPin?: string, forceSignToken?: boolean): Promise<SignedBundle> {
         // Certilia mode: delegate entirely to CEZIH Udaljeni potpis (remote signing)
         if (this.signingMode === 'certilia') {
             if (!userToken) {
@@ -259,13 +259,13 @@ class SignatureService {
 
         const authorRef = signerRef || this.extractAuthorFromBundle(bundle);
 
-        // Sign token: activate ONLY for document bundles when signPin is provided.
+        // Sign token: use for document bundles OR when forceSignToken is set (e.g. TC20 → iti-65-service).
         // Message bundles (TC12/TC16) MUST use Iden cert — Sign cert causes ERR_DS_1002!
         const isDocBundle = bundle.type === 'document';
-        const useSignToken = isDocBundle && (!!signPin || !!process.env.SIGN_PIN);
+        const useSignToken = (isDocBundle || !!forceSignToken) && (!!signPin || !!process.env.SIGN_PIN);
         const activeKeyPair = this.keyPair; // always use Iden keyPair for x5c (Sign cert same issuer)
         const tokenName = useSignToken ? 'Sign' : 'Iden';
-        console.log(`[SignatureService] signBundle: ${bundle.type} bundle — using ${tokenName} token.`);
+        console.log(`[SignatureService] signBundle: ${bundle.type} bundle — using ${tokenName} token (forceSignToken=${!!forceSignToken}).`);
 
         const publicKey = activeKeyPair.publicKey!;
         const jwk = publicKey.export({ format: 'jwk' });

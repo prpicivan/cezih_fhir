@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Search, Building2, User, BookOpen, Tag, RefreshCw, AlertCircle, CheckCircle, Clock } from 'lucide-react';
+import { Search, Building2, User, BookOpen, Tag, RefreshCw, AlertCircle, CheckCircle, Clock, Hash, Copy } from 'lucide-react';
 
-type Tab = 'organizations' | 'practitioners' | 'codeSystems' | 'valueSets';
+type Tab = 'organizations' | 'practitioners' | 'codeSystems' | 'valueSets' | 'oid';
 
 // ─── helpers ──────────────────────────────────────────────────
 function formatDate(iso: string | null) {
@@ -364,12 +364,120 @@ function RegistrySearchTab({ type }: { type: 'organization' | 'practitioner' }) 
     );
 }
 
+// ─── Tab: OID Generation (TC6) ────────────────────────────────
+function OidTab() {
+    const [quantity, setQuantity] = useState(1);
+    const [oids, setOids] = useState<string[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [copied, setCopied] = useState<number | null>(null);
+
+    const generate = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const res = await fetch('/api/oid/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ quantity }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                setOids(prev => [...data.oids, ...prev]);
+            } else {
+                setError(data.error || 'Greška pri generiranju OID-a');
+            }
+        } catch (e: any) {
+            setError(e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const copyOid = (oid: string, idx: number) => {
+        navigator.clipboard.writeText(oid);
+        setCopied(idx);
+        setTimeout(() => setCopied(null), 1500);
+    };
+
+    return (
+        <div className="space-y-4">
+            <div>
+                <h2 className="text-base font-semibold text-slate-800">Generiranje OID-ova</h2>
+                <p className="text-xs text-slate-500 mt-0.5">CEZIH OID servis · TC6 — generiranje jedinstvenih identifikatora dokumenata</p>
+            </div>
+
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                <div className="flex items-end gap-3">
+                    <div>
+                        <label className="text-xs font-medium text-slate-600 block mb-1">Količina</label>
+                        <input
+                            type="number"
+                            min={1}
+                            max={50}
+                            value={quantity}
+                            onChange={(e) => setQuantity(Math.max(1, Math.min(50, Number(e.target.value))))}
+                            className="w-20 px-3 py-2 border border-slate-300 rounded-lg text-sm text-center focus:ring-2 focus:ring-blue-500 outline-none"
+                        />
+                    </div>
+                    <button
+                        onClick={generate}
+                        disabled={loading}
+                        className="flex items-center gap-2 bg-slate-800 hover:bg-slate-900 text-white px-5 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 text-sm"
+                    >
+                        <Hash className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                        {loading ? 'Generiram...' : 'Generiraj OID (TC6)'}
+                    </button>
+                </div>
+            </div>
+
+            {error && <div className="p-3 bg-rose-50 text-rose-700 rounded-lg border border-rose-200 text-sm">{error}</div>}
+
+            {oids.length > 0 ? (
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <table className="w-full text-left text-sm">
+                        <thead className="bg-slate-50 text-slate-500 text-xs font-semibold border-b border-slate-200">
+                            <tr>
+                                <th className="px-5 py-3 w-10">#</th>
+                                <th className="px-5 py-3">OID</th>
+                                <th className="px-5 py-3 w-20 text-center">Kopiraj</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {oids.map((oid, i) => (
+                                <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                    <td className="px-5 py-3 text-xs text-slate-400">{i + 1}</td>
+                                    <td className="px-5 py-3 font-mono text-xs text-slate-700">{oid}</td>
+                                    <td className="px-5 py-3 text-center">
+                                        <button
+                                            onClick={() => copyOid(oid, i)}
+                                            className="p-1 hover:bg-blue-50 rounded text-slate-400 hover:text-blue-600 transition-colors"
+                                            title="Kopiraj OID"
+                                        >
+                                            {copied === i ? <CheckCircle className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            ) : !loading && (
+                <div className="text-center py-12 text-slate-400 text-sm italic">
+                    Kliknite "Generiraj OID" za generiranje jedinstvenih identifikatora...
+                </div>
+            )}
+        </div>
+    );
+}
+
 // ─── Main Page ────────────────────────────────────────────────
 const TABS: { id: Tab; label: string; icon: React.ComponentType<any>; tc?: string }[] = [
-    { id: 'organizations', label: 'Organizacije', icon: Building2, tc: 'TC9' },
-    { id: 'practitioners', label: 'Djelatnici', icon: User, tc: 'TC9' },
+    { id: 'oid', label: 'OID Generator', icon: Hash, tc: 'TC6' },
     { id: 'codeSystems', label: 'Šifrarnici', icon: BookOpen, tc: 'TC7' },
     { id: 'valueSets', label: 'Skupovi vrijednosti', icon: Tag, tc: 'TC8' },
+    { id: 'organizations', label: 'Organizacije', icon: Building2, tc: 'TC9' },
+    { id: 'practitioners', label: 'Djelatnici', icon: User, tc: 'TC9' },
 ];
 
 export default function RegistryPage() {
@@ -411,6 +519,7 @@ export default function RegistryPage() {
 
             {/* Tab content */}
             <div>
+                {activeTab === 'oid' && <OidTab />}
                 {activeTab === 'organizations' && <RegistrySearchTab type="organization" />}
                 {activeTab === 'practitioners' && <RegistrySearchTab type="practitioner" />}
                 {activeTab === 'codeSystems' && <CodeSystemsTab />}

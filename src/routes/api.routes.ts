@@ -275,7 +275,7 @@ router.post('/test/tc18-full', async (req: Request, res: Response) => {
                         fullUrl: `urn:uuid:${listUuid}`,
                         resource: {
                             resourceType: 'List',
-                            meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HRMinimalSubmissionSet'] },
+                            meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-document-submissionset'] },
                             extension: [{ url: 'https://profiles.ihe.net/ITI/MHD/StructureDefinition/ihe-sourceId', valueIdentifier: { system: 'urn:ietf:rfc:3986', value: 'urn:oid:2.16.840.1.113883.2.7.50.2.1' } }],
                             identifier: [
                                 { use: 'usual', system: 'urn:ietf:rfc:3986', value: `urn:oid:${subOidRaw}` },
@@ -293,7 +293,7 @@ router.post('/test/tc18-full', async (req: Request, res: Response) => {
                         fullUrl: `urn:uuid:${docRefUuid}`,
                         resource: {
                             resourceType: 'DocumentReference',
-                            meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HR.MinimalDocumentReference'] },
+                            meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-document-reference'] },
                             masterIdentifier: { use: 'usual', system: 'urn:ietf:rfc:3986', value: docOid },
                             identifier: [{ use: 'official', system: 'urn:ietf:rfc:3986', value: `urn:uuid:${docRefUuid}` }],
                             status: 'current',
@@ -1045,11 +1045,12 @@ router.put('/visit/:id', async (req: Request, res: Response) => {
     }
 });
 
-// Transition a planned visit to in-progress — logs ENCOUNTER_START (not ENCOUNTER_UPDATE)
-router.post('/visit/:id/start', async (req: Request, res: Response) => {
+// Cancel a planned visit — sets status to 'cancelled'
+router.post('/visit/:id/cancel', async (req: Request, res: Response) => {
     try {
         const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
-        const result = await visitService.startVisit(req.params.id as string, req.body, userToken);
+        const { patientMbo } = req.body;
+        const result = await visitService.cancelVisit(req.params.id as string, userToken, patientMbo);
         res.json({ success: true, result });
     } catch (error: any) {
         res.status(500).json({ error: error.message });

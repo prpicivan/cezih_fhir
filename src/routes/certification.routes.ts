@@ -187,16 +187,67 @@ router.post('/run/:tcId', async (req: Request, res: Response) => {
                 break;
             }
 
-            case 'tc-13': // Encounter Update
-                result = await visitService.updateVisit('some-visit-id', {
-                    diagnosisCode: 'M17.1',
-                    diagnosisDisplay: 'Unilateralni osteoartritis koljena'
+            case 'tc-13': { // Encounter Update — dynamic visit lookup + reasonCode change
+                const visits = visitService.getVisits();
+                const lastVisit = visits.find((v: any) => v.cezihVisitId);
+                if (!lastVisit) {
+                    return res.status(400).json({ success: false, error: 'Nema posjete s CEZIH ID-em. Pokrenite TC-12 prvo.' });
+                }
+                result = await visitService.updateVisit(lastVisit.id, {
+                    reasonCode: 'J06.9',
+                    reasonDisplay: 'Akutna infekcija gornjega dišnog sustava',
+                    patientMbo: lastVisit.patientMbo,
                 }, userToken);
                 break;
+            }
 
-            case 'tc-14': // Encounter Close
-                result = await visitService.closeVisit('some-visit-id', new Date().toISOString(), userToken);
+            case 'tc-14': { // Encounter Close — dynamic visit lookup
+                const visitsForClose = visitService.getVisits();
+                const lastVisitForClose = visitsForClose.find((v: any) => v.cezihVisitId);
+                if (!lastVisitForClose) {
+                    return res.status(400).json({ success: false, error: 'Nema posjete s CEZIH ID-em. Pokrenite TC-12 prvo.' });
+                }
+                result = await visitService.closeVisit(lastVisitForClose.id, new Date().toISOString(), userToken, lastVisitForClose.patientMbo);
                 break;
+            }
+
+            case 'tc-12-14-full': { // Full lifecycle: Create → Update → Close
+                const { config: cfgFull } = await import('../config');
+                const steps: any[] = [];
+
+                // TC12: Create
+                const createRes = await visitService.createVisit({
+                    patientMbo: '999999423',
+                    patientFhirId: '1118065',
+                    practitionerId: cfgFull.practitioner.hzjzId,
+                    organizationId: cfgFull.organization.hzzoCode,
+                    startDate: new Date().toISOString(),
+                    class: 'AMB',
+                    reasonCode: 'Z00.0',
+                    reasonDisplay: 'Opći medicinski pregled',
+                }, userToken);
+                steps.push({ step: 'TC12-Create', localVisitId: createRes.localVisitId, cezihVisitId: createRes.cezihVisitId });
+
+                if (!createRes.cezihVisitId && !createRes.localVisitId) {
+                    return res.json({ success: false, steps, error: 'TC12 nije vratio ID posjete' });
+                }
+
+                // TC13: Update (change reasonCode)
+                const visitId = createRes.localVisitId;
+                const updateRes = await visitService.updateVisit(visitId, {
+                    reasonCode: 'J06.9',
+                    reasonDisplay: 'Akutna infekcija gornjega dišnog sustava',
+                    patientMbo: '999999423',
+                }, userToken);
+                steps.push({ step: 'TC13-Update', result: updateRes?.localOnly ? 'local-only' : 'ok' });
+
+                // TC14: Close
+                const closeRes = await visitService.closeVisit(visitId, new Date().toISOString(), userToken, '999999423');
+                steps.push({ step: 'TC14-Close', result: closeRes?.localOnly ? 'local-only' : 'ok' });
+
+                result = { steps };
+                break;
+            }
 
             case 'tc-15': // Case Search (EpisodeOfCare) via IHE QEDm
                 result = await caseService.getPatientCases('999999423', userToken, true); // Pravi testni pacijent, forceRefresh = true
@@ -238,21 +289,30 @@ router.post('/run/:tcId', async (req: Request, res: Response) => {
                 break;
             }
 
-            case 'tc-19': // Document Replace
-                result = await clinicalDocumentService.replaceDocument('old-doc-id', {
+            case 'tc-19': { // Document Replace
+                // Find the most recent sent document to replace
+                const lastDoc19 = db.prepare("SELECT id, patientMbo, visitId, caseId FROM documents WHERE status = 'sent' ORDER BY sentAt DESC LIMIT 1").get() as any;
+                if (!lastDoc19) throw new Error('TC-19: Nema poslanih dokumenata za zamjenu. Pokrenite TC18 prvo.');
+                const { config: cfg19 } = await import('../config');
+                result = await clinicalDocumentService.replaceDocument(lastDoc19.id, {
                     type: ClinicalDocumentType.AMBULATORY_REPORT,
-                    patientMbo: '123456789',
-                    practitionerId: 'practitioner-1',
-                    organizationId: 'org-1',
+                    patientMbo: lastDoc19.patientMbo || '999999423',
+                    practitionerId: cfg19.practitioner.hzjzId,
+                    organizationId: cfg19.organization.hzzoCode,
                     title: 'Ažurirani nalaz (TC-19)',
-                    anamnesis: 'Ažurirana anamneza',
+                    anamnesis: 'Ažurirana anamneza — testna zamjena dokumenta.',
                     date: new Date().toISOString(),
                 }, userToken);
                 break;
+            }
 
-            case 'tc-20': // Document Cancel
-                result = await clinicalDocumentService.cancelDocument('doc-to-cancel', userToken);
+            case 'tc-20': { // Document Cancel (Storno)
+                // Find the most recent sent document to cancel
+                const lastDoc20 = db.prepare("SELECT id FROM documents WHERE status IN ('sent', 'signed and submitted') ORDER BY sentAt DESC LIMIT 1").get() as any;
+                if (!lastDoc20) throw new Error('TC-20: Nema poslanih dokumenata za storniranje. Pokrenite TC18 prvo.');
+                result = await clinicalDocumentService.cancelDocument(lastDoc20.id, userToken);
                 break;
+            }
 
             case 'tc-21': // Document Search — traži na CEZIH-u (ne lokalno)
                 result = await clinicalDocumentService.searchDocuments({ patientMbo: '999999423' }, userToken);
