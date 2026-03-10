@@ -405,8 +405,11 @@ class Pkcs11Service {
      * We use an ATOMIC SWAP: logout Iden → sign with Sign → restore Iden.
      */
     signWithSignToken(signingInput: string, finalAlg: string, pin?: string): Buffer {
-        const usePin = pin || this.signPinSaved;
-        if (!this.signSlotSaved || !usePin || !this.pkcs11Module) {
+        // For CKU=1 login on Sign slot, use the env SIGN_PIN (not user-provided pin)
+        const cku1Pin = this.signPinSaved;
+        // For CKU=2 (context-specific), use user-provided PIN or fall back to saved
+        const cku2Pin = pin || this.signPinSaved;
+        if (!this.signSlotSaved || !cku1Pin || !this.pkcs11Module) {
             throw new Error('Sign token not initialized — no slot or PIN available');
         }
 
@@ -432,8 +435,8 @@ class Pkcs11Service {
             try { this.pkcs11Module.C_CloseAllSessions(this.signSlotSaved); } catch (_) { }
             signSess = this.pkcs11Module.C_OpenSession(this.signSlotSaved, 0x04 | 0x02);
             try {
-                this.pkcs11Module.C_Login(signSess, 1, usePin);
-                console.log('[Pkcs11Service] Sign: CKU=1 login OK.');
+                this.pkcs11Module.C_Login(signSess, 1, cku1Pin);
+                console.log('[Pkcs11Service] Sign: CKU=1 login OK (using env SIGN_PIN).');
             } catch (loginErr: any) {
                 if (!loginErr.message?.includes('CKR_USER_ALREADY_LOGGED_IN')) throw loginErr;
             }
@@ -467,11 +470,22 @@ class Pkcs11Service {
             }
 
             this.pkcs11Module.C_SignInit(signSess, { mechanism: mechanismBase, parameter: null }, privKey);
-            console.log('[Pkcs11Service] Sign: C_SignInit OK. Attempting C_Sign (skipping CKU=2 — Certilia handles PIN internally)...');
+            console.log('[Pkcs11Service] Sign: C_SignInit OK.');
 
-            // NOTE: Certilia middleware may handle CKA_ALWAYS_AUTHENTICATE PIN internally.
-            // CKU=2 explicit login causes CKR_USER_ANOTHER_ALREADY_LOGGED_IN in Certilia.
-            // Try C_Sign directly after CKU=1.
+            // CKU=2 context-specific login with user-provided PIN
+            // AKD cards require this between SignInit and Sign for non-repudiation
+            if (cku2Pin) {
+                try {
+                    this.pkcs11Module.C_Login(signSess, 2, cku2Pin); // CKU_CONTEXT_SPECIFIC = 2
+                    console.log('[Pkcs11Service] Sign: CKU=2 context-specific login OK (user PIN).');
+                } catch (ctxErr: any) {
+                    if (ctxErr.message?.includes('CKR_USER_ANOTHER_ALREADY_LOGGED_IN') || ctxErr.message?.includes('CKR_USER_ALREADY_LOGGED_IN')) {
+                        console.log('[Pkcs11Service] CKU=2 skipped — already authorized.');
+                    } else {
+                        console.warn('[Pkcs11Service] CKU=2 login failed:', ctxErr.message, '— trying C_Sign directly...');
+                    }
+                }
+            }
 
             const sigBytes = this.pkcs11Module.C_Sign(signSess, dataToSign, Buffer.alloc(4096));
             console.log('[Pkcs11Service] ✅ Sign token signature OK!');

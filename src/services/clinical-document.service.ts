@@ -562,6 +562,7 @@ class ClinicalDocumentService {
             console.warn('[submitMhdBundleRaw] CEZIH send failed:', error.message);
             console.warn('[submitMhdBundleRaw] Response status:', error.response?.status);
             console.warn('[submitMhdBundleRaw] Response data:', JSON.stringify(error.response?.data)?.substring(0, 1000));
+            try { require('fs').writeFileSync('./tmp/cezih-tc18-error.json', JSON.stringify(error.response?.data, null, 2)); } catch (e) { }
             errorMessage = error.message;
 
             const cezihDetail = error.response?.data?.issue?.[0]?.diagnostics

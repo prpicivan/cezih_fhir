@@ -259,16 +259,13 @@ class SignatureService {
 
         const authorRef = signerRef || this.extractAuthorFromBundle(bundle);
 
-        // Sign token: activate when user provides signPin explicitly (frontend PIN input),
-        // or when Sign token is already active and it's a document bundle.
-        // Certilia requires UI authorization for headless Sign — provided PIN may bypass this.
+        // Sign token: activate ONLY for document bundles when signPin is provided.
+        // Message bundles (TC12/TC16) MUST use Iden cert — Sign cert causes ERR_DS_1002!
         const isDocBundle = bundle.type === 'document';
-        const useSignToken = isDocBundle && (!!signPin || false); // false = disabled until Pin provided
+        const useSignToken = isDocBundle && (!!signPin || !!process.env.SIGN_PIN);
         const activeKeyPair = this.keyPair; // always use Iden keyPair for x5c (Sign cert same issuer)
-        if (isDocBundle) {
-            const tokenName = useSignToken ? 'Sign' : 'Iden';
-            console.log(`[SignatureService] signBundle: document bundle — using ${tokenName} token (signPin ${signPin ? 'provided' : 'not provided'}).`);
-        }
+        const tokenName = useSignToken ? 'Sign' : 'Iden';
+        console.log(`[SignatureService] signBundle: ${bundle.type} bundle — using ${tokenName} token.`);
 
         const publicKey = activeKeyPair.publicKey!;
         const jwk = publicKey.export({ format: 'jwk' });
@@ -277,28 +274,39 @@ class SignatureService {
             ? (jwk.crv === 'P-384' ? 'ES384' : (jwk.crv === 'P-521' ? 'ES512' : 'ES256'))
             : 'RS256';
 
-        // For document bundles: signature.who must use { reference: "urn:uuid:..." }
-        // (hr-document profile: who.reference min:1, who.type max:0, who.identifier max:0)
-        // For message bundles: signature.who uses { identifier: {...}, type: "Practitioner" }
-        // (DIGSIG-1: who = MessageHeader.author with identifier)
+        // For document bundles: who must use urn:uuid reference (matching Practitioner in inner bundle)
+        // For message bundles: use identifier-based reference from MessageHeader.author
         let whoRef: any;
         if (bundle.type === 'document' && bundle.signature?.who?.reference) {
-            // Document bundle: preserve the original urn:uuid reference
+            // Document bundle: use the urn:uuid reference passed in the bundle's signature placeholder
             whoRef = { reference: bundle.signature.who.reference };
-            if (bundle.signature.who.display) {
-                whoRef.display = bundle.signature.who.display;
-            }
         } else {
             // Message bundle or fallback: use identifier-based reference
             whoRef = signerRef || this.extractAuthorFromBundle(bundle);
         }
 
         // Signature placeholder — Bundle.signature.data mora biti prazan string pri potpisivanju
+        // when: timezone offset format per CEZIH example (+01:00, not Z)
+        const now = new Date();
+        const tzOffset = -now.getTimezoneOffset();
+        const tzSign = tzOffset >= 0 ? '+' : '-';
+        const tzHours = String(Math.floor(Math.abs(tzOffset) / 60)).padStart(2, '0');
+        const tzMinutes = String(Math.abs(tzOffset) % 60).padStart(2, '0');
+        const whenStr = now.toISOString().replace('Z', `${tzSign}${tzHours}:${tzMinutes}`);
+
+        // For document bundles: use the when already set in the bundle (same +01:00 format)
+        // so signed content matches what's in the Base64 — prevents hash mismatch!
+        // For message bundles: generate fresh when with timezone offset
+        const effectiveWhen = (isDocBundle && bundle.signature?.when)
+            ? bundle.signature.when
+            : whenStr;
+
+        // Signature placeholder — data: '' for ALL bundles (TC12 proven approach)
         const bundleWithSigPlaceholder = {
             ...bundle,
             signature: {
                 type: [{ system: 'urn:iso-astm:E1762-95:2013', code: '1.2.840.10065.1.12.1.1' }],
-                when: new Date().toISOString(),
+                when: effectiveWhen,
                 who: whoRef,
                 data: '',
             },
@@ -355,18 +363,21 @@ class SignatureService {
 
         // Potpisujemo: header.payload (standard JWS signing input)
         const signingInput = `${headerB64url}.${payloadB64url}`;
-        const signatureBytes = await this.performSignature(signingInput, finalAlg, useSignToken, signPin);
+        const effectiveSignPin = signPin || (isDocBundle ? process.env.SIGN_PIN : undefined);
+        const signatureBytes = await this.performSignature(signingInput, finalAlg, useSignToken, effectiveSignPin);
         const signatureB64url = base64urlEncode(signatureBytes);
 
         // DETACHED JWS: header..signature (prazan payload u compact formi)
         // prema CEZIH spec: "JWS payload je opcionalan" — primjer pokazuje ".."
         const jwsCompact = `${headerB64url}..${signatureB64url}`;
 
+        // NO sigFormat — CEZIH official example does NOT include it!
+        const sigObj: any = { ...bundleWithSigPlaceholder.signature, data: base64Encode(jwsCompact) };
+
         return {
             bundle: {
                 ...bundleWithSigPlaceholder,
-                // signature.data = JWS compact string još jednom Base64 enkodiran (per CEZIH spec)
-                signature: { ...bundleWithSigPlaceholder.signature, data: base64Encode(jwsCompact) }
+                signature: sigObj
             },
             jwsCompact
         };

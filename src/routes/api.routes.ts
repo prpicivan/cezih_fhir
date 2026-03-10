@@ -84,13 +84,26 @@ router.post('/test/tc18-full', async (req: Request, res: Response) => {
         try {
             const visitReq: any = { patientMbo: PATIENT_MBO, practitionerId: PRACTITIONER_ID, organizationId: ORG_ID, startDate: new Date().toISOString(), class: 'AMB' };
             const visitRes = await visitService.createVisit(visitReq, '');
+            // DEBUG: dump response structure
+            console.log(`[tc18-full] TC12 response keys:`, Object.keys(visitRes || {}));
+            console.log(`[tc18-full] TC12 visitRes.localVisitId:`, visitRes?.localVisitId);
+            console.log(`[tc18-full] TC12 visitRes.cezihVisitId:`, visitRes?.cezihVisitId);
             // Response can be flat object or wrapped: .result / .result.result
             const inner = visitRes?.result?.result ?? visitRes?.result ?? visitRes;
             localVisitId = inner?.localVisitId || inner?.visitId;
-            // cezihVisitId confirms the encounter was saved on CEZIH
             const cezihVisitId = inner?.cezihVisitId || inner?.cezihEncounterId || inner?.encounterId;
+            // Look for Encounter identifiers in CEZIH response bundle (search nested and root)
+            const respEncounter = visitRes?.entry?.find((e: any) => e.resource?.resourceType === 'Encounter')?.resource
+                || inner?.entry?.find((e: any) => e.resource?.resourceType === 'Encounter')?.resource;
+            if (respEncounter?.identifier) {
+                console.log(`[tc18-full] TC12 Encounter identifiers:`, JSON.stringify(respEncounter.identifier));
+            }
+            // Extract CEZIH technical resource ID (e.g. "1244391") for TC18 reference
+            const encResourceId = respEncounter?.id;
+            if (!encResourceId) console.warn(`[tc18-full] ⚠️ encResourceId is undefined! respEncounter:`, JSON.stringify(respEncounter || 'null'));
+            console.log(`[tc18-full] TC12 extracted: localVisitId=${localVisitId}, cezihVisitId=${cezihVisitId}, encResourceId=${encResourceId}`);
             const ok = !!(localVisitId || cezihVisitId);
-            addStep('tc12', { request: visitReq, response: visitRes, localVisitId, cezihVisitId }, ok);
+            addStep('tc12', { request: visitReq, response: visitRes, localVisitId, cezihVisitId, encResourceId }, ok);
             if (!ok) return res.json({ success: false, steps, error: 'TC12: neither localVisitId nor cezihVisitId returned' });
         } catch (e: any) {
             addStep('tc12', { error: e.message }, false);
@@ -102,37 +115,272 @@ router.post('/test/tc18-full', async (req: Request, res: Response) => {
         try {
             const caseReq: any = { patientMbo: PATIENT_MBO, title: `TC18 test ${new Date().toISOString().slice(0, 10)}`, diagnosisCode: 'J06.9', diagnosisDisplay: 'Akutna infekcija gornjih dišnih putova', practitionerId: PRACTITIONER_ID, organizationId: ORG_ID, startDate: new Date().toISOString() };
             const caseRes = await caseService.createCase(caseReq, '');
+            // DEBUG: dump TC16 response
+            console.log(`[tc18-full] TC16 response keys:`, Object.keys(caseRes || {}));
+            console.log(`[tc18-full] TC16 caseRes.cezihCaseId:`, caseRes?.cezihCaseId);
+            console.log(`[tc18-full] TC16 caseRes.localCaseId:`, caseRes?.localCaseId);
+            // Look for Condition identifiers in CEZIH response
+            const inner = caseRes?.result?.result ?? caseRes?.result ?? caseRes;
+            const respBundle = inner;
+            const respCondition = respBundle?.entry?.find((e: any) => e.resource?.resourceType === 'Condition')?.resource
+                || caseRes?.entry?.find((e: any) => e.resource?.resourceType === 'Condition')?.resource;
+            if (respCondition?.identifier) {
+                console.log(`[tc18-full] TC16 Condition identifiers:`, JSON.stringify(respCondition.identifier));
+            }
+            const condResourceId = respCondition?.id;
+            if (!condResourceId) console.warn(`[tc18-full] ⚠️ condResourceId is undefined! respCondition:`, JSON.stringify(respCondition || 'null'));
             // TC16 response: { success, result: Bundle, localCaseId, cezihCaseId } — IDs at root
             const rootCezihCaseId = caseRes?.cezihCaseId;
             const rootLocalCaseId = caseRes?.localCaseId;
-            const inner = caseRes?.result?.result ?? caseRes?.result ?? caseRes;
             conditionId = rootCezihCaseId || rootLocalCaseId || inner?.cezihCaseId || inner?.conditionId || inner?.cezihConditionId || inner?.localCaseId;
+            console.log(`[tc18-full] TC16 extracted: conditionId=${conditionId}, condResourceId=${condResourceId}`);
             const ok = !!conditionId;
-            addStep('tc16', { request: caseReq, response: caseRes, conditionId }, ok);
+            addStep('tc16', { request: caseReq, response: caseRes, conditionId, condResourceId }, ok);
             if (!ok) return res.json({ success: false, steps, error: 'TC16: no case ID returned' });
         } catch (e: any) {
             addStep('tc16', { error: e.message }, false);
             return res.json({ success: false, steps, error: 'TC16: ' + e.message });
         }
 
-        // ── TC18: Load wrapper.json and submit raw MHD bundle to CEZIH ──
+        // ── Wait for CEZIH to index TC12/TC16 resources ──
+        console.log('⏳ Čekam 5 sekundi da CEZIH indeksira Posjetu i Slučaj...');
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        console.log('🚀 Indeksiranje gotovo — šaljem TC18!');
+
+        // ── TC18: Build inner bundle, sign with Sign token, build outer, submit ──
         try {
             const fs = require('fs');
             const pathMod = require('path');
-            const wrapperPath = pathMod.join(process.cwd(), 'tmp', 'wrapper.json');
-            if (!fs.existsSync(wrapperPath)) {
-                addStep('tc18', { error: 'wrapper.json nije pronađen u tmp/' }, false);
-                return res.json({ success: false, steps, error: 'TC18: wrapper.json not found' });
+            const { v4: uuidv4 } = require('uuid');
+            const axios = require('axios');
+
+            // Extract CEZIH IDs from TC12/TC16 steps
+            const tc12Step = steps.find((s: any) => s.name === 'tc12');
+            const tc16Step = steps.find((s: any) => s.name === 'tc16');
+            // Technical resource IDs (e.g. "1244391") — for reference: "Encounter/1244391"
+            const encResourceId = tc12Step?.encResourceId;
+            const condResourceId = tc16Step?.condResourceId;
+            // Business IDs (e.g. "cmmjoeckj...") — for identifier.value
+            const encCezihId = tc12Step?.cezihVisitId || localVisitId;
+            const condFhirId = tc16Step?.conditionId || conditionId;
+            console.log(`[tc18-full] FINAL mapping: Enc ref=Encounter/${encResourceId}, id=${encCezihId} | Cond ref=Condition/${condResourceId}, id=${condFhirId}`);
+
+            // Generate OID for document
+            const oidRes = await oidService.generateSingleOid();
+            const docOidRaw = oidRes;
+            const docOid = `urn:oid:${docOidRaw}`;
+            // Generate date with local timezone offset (+01:00) — CEZIH rejects Z format in documents
+            const now = new Date();
+            const tzOff = -now.getTimezoneOffset();
+            const tzS = tzOff >= 0 ? '+' : '-';
+            const tzH = String(Math.floor(Math.abs(tzOff) / 60)).padStart(2, '0');
+            const tzM = String(Math.abs(tzOff) % 60).padStart(2, '0');
+            const docDate = now.toISOString().replace(/\.\d{3}Z$/, `${tzS}${tzH}:${tzM}`);
+            const outerDate = docDate;
+
+            // UUIDs for inner bundle resources
+            const U = { comp: uuidv4(), pat: uuidv4(), prac: uuidv4(), org: uuidv4(), enc: uuidv4(), ci: uuidv4(), hcs: uuidv4(), obsAnam: uuidv4(), obsIshod: uuidv4() };
+            const encVisitId = encCezihId!;
+            console.log(`[tc18-full] FINAL IDs: Encounter=${encVisitId}, Condition=${condFhirId}`);
+
+            // ── Build self-contained inner bundle (9 resources) ──
+            const innerBundle = {
+                resourceType: 'Bundle', id: uuidv4(), type: 'document',
+                identifier: { system: 'urn:ietf:rfc:3986', value: docOid },
+                timestamp: docDate,
+                entry: [
+                    {
+                        fullUrl: `urn:uuid:${U.comp}`,
+                        resource: {
+                            resourceType: 'Composition',
+                            meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/izvjesce-nakon-pregleda-u-ambulanti-privatne-zdravstvene-ustanove'] },
+                            identifier: { system: 'urn:ietf:rfc:3986', value: docOid },
+                            language: 'hr',
+                            status: 'final',
+                            confidentiality: 'N',
+                            type: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type', code: '011', display: 'Izvješće nakon pregleda u ambulanti privatne zdravstvene ustanove' }] },
+                            title: 'Izvješće nakon pregleda u ambulanti privatne zdravstvene ustanove',
+                            subject: { reference: `urn:uuid:${U.pat}` },
+                            encounter: { reference: `urn:uuid:${U.enc}` },
+                            date: docDate,
+                            author: [
+                                { reference: `urn:uuid:${U.prac}` },
+                                { reference: `urn:uuid:${U.org}` }
+                            ],
+                            attester: [
+                                { mode: 'professional', party: { reference: `urn:uuid:${U.prac}` } },
+                                { mode: 'official', party: { reference: `urn:uuid:${U.org}` } }
+                            ],
+                            custodian: { reference: `urn:uuid:${U.org}` },
+                            section: [
+                                {
+                                    title: 'Djelatnost',
+                                    code: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-section', code: '12', display: 'Djelatnost' }] },
+                                    entry: [{ reference: `urn:uuid:${U.hcs}` }]
+                                },
+                                {
+                                    title: 'Medicinska informacija',
+                                    code: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-section', code: '18', display: 'Medicinska informacija' }] },
+                                    entry: [
+                                        { reference: `urn:uuid:${U.obsAnam}` },
+                                        { reference: `urn:uuid:${U.ci}` },
+                                        { reference: `urn:uuid:${U.obsIshod}` }
+                                    ]
+                                }
+                            ]
+                        }
+                    },
+                    { fullUrl: `urn:uuid:${U.pat}`, resource: { resourceType: 'Patient', identifier: [{ system: 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO', value: PATIENT_MBO }], name: [{ family: 'PACPRIVATNICI42', given: ['IVAN'] }], gender: 'male', birthDate: '1980-01-01' } },
+                    { fullUrl: `urn:uuid:${U.prac}`, resource: { resourceType: 'Practitioner', identifier: [{ system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika', value: PRACTITIONER_ID }, { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/OIB', value: '30160453873' }], name: [{ family: 'Prpic', given: ['Ivan'] }] } },
+                    { fullUrl: `urn:uuid:${U.org}`, resource: { resourceType: 'Organization', identifier: [{ system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije', value: ORG_ID }] } },
+                    { fullUrl: `urn:uuid:${U.enc}`, resource: { resourceType: 'Encounter', identifier: [{ system: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-posjete', value: encCezihId }], status: 'finished', class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'AMB', display: 'ambulatory' }, subject: { reference: `urn:uuid:${U.pat}` } } },
+                    { fullUrl: `urn:uuid:${U.ci}`, resource: { resourceType: 'Condition', identifier: [{ system: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja', value: condFhirId! }], clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }] }, subject: { reference: `urn:uuid:${U.pat}` }, code: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/icd10-hr', code: 'J06.9' }] } } },
+                    { fullUrl: `urn:uuid:${U.hcs}`, resource: { resourceType: 'HealthcareService', identifier: [{ system: 'http://fhir.cezih.hr/specifikacije/identifikatori/ID-djelatnosti', value: '3030000' }], providedBy: { reference: `urn:uuid:${U.org}` }, name: 'Opca/obiteljska medicina' } },
+                    { fullUrl: `urn:uuid:${U.obsAnam}`, resource: { resourceType: 'Observation', status: 'final', code: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/observations', code: '15', display: 'Anamneza' }] }, subject: { reference: `urn:uuid:${U.pat}` }, valueString: 'Pacijent se javlja radi tegoba.' } },
+                    { fullUrl: `urn:uuid:${U.obsIshod}`, resource: { resourceType: 'Observation', status: 'final', code: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/observations', code: '24', display: 'Ishod pregleda' }] }, valueCodeableConcept: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/sifrarnik-zavrsetaka-pregleda', version: '0.1.0', code: '1', display: 'Pregled zavrsen uspjesno' }] } } }
+                ],
+                signature: {
+                    type: [{ system: 'urn:iso-astm:E1762-95:2013', code: '1.2.840.10065.1.12.1.1' }],
+                    when: docDate,
+                    who: { reference: `urn:uuid:${U.prac}` },
+                    data: ''
+                }
+            };
+
+            console.log('[tc18-full] Inner bundle built: 9 entries (Composition, Patient, Practitioner, Org, Encounter, Condition, HealthcareService, 2xObservation)');
+            // DUMP inner bundle before signing for DOP diagnosis
+            fs.writeFileSync(pathMod.join(__dirname, '../../tmp/tc18-inner.json'), JSON.stringify(innerBundle, null, 2));
+
+            // ── Sign with Sign token (using signPin) ──
+            // signatureService already imported at top
+            const signedResult = await signatureService.signBundle(innerBundle, `urn:uuid:${U.prac}`, '', signPin);
+            const signedBundle = signedResult.bundle;
+            const signedB64 = Buffer.from(JSON.stringify(signedBundle), 'utf8').toString('base64').replace(/\n/g, '').replace(/\r/g, '');
+            console.log(`[tc18-full] Signed with ${signPin ? 'Sign' : 'Iden'} token: ${signedB64.length} chars`);
+
+            // ── Build golden outer wrapper ──
+            const listUuid = uuidv4(), docRefUuid = uuidv4(), binUuid = uuidv4();
+            const subOidRaw = await oidService.generateSingleOid();
+
+            const hybridSubject = {
+                reference: 'Patient/1118065',
+                identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO', value: PATIENT_MBO }
+            };
+
+            const outer: any = {
+                resourceType: 'Bundle', type: 'transaction',
+                meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HRMinimalProvideDocumentBundle'] },
+                entry: [
+                    {
+                        fullUrl: `urn:uuid:${listUuid}`,
+                        resource: {
+                            resourceType: 'List',
+                            meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HRMinimalSubmissionSet'] },
+                            extension: [{ url: 'https://profiles.ihe.net/ITI/MHD/StructureDefinition/ihe-sourceId', valueIdentifier: { system: 'urn:ietf:rfc:3986', value: 'urn:oid:2.16.840.1.113883.2.7.50.2.1' } }],
+                            identifier: [
+                                { use: 'usual', system: 'urn:ietf:rfc:3986', value: `urn:oid:${subOidRaw}` },
+                                { use: 'official', system: 'urn:ietf:rfc:3986', value: `urn:uuid:${listUuid}` }
+                            ],
+                            status: 'current', mode: 'working',
+                            code: { coding: [{ system: 'https://profiles.ihe.net/ITI/MHD/CodeSystem/MHDlistTypes', code: 'submissionset' }] },
+                            date: outerDate,
+                            subject: hybridSubject,
+                            entry: [{ item: { type: 'DocumentReference', reference: `urn:uuid:${docRefUuid}` } }]
+                        },
+                        request: { method: 'POST', url: 'List' }
+                    },
+                    {
+                        fullUrl: `urn:uuid:${docRefUuid}`,
+                        resource: {
+                            resourceType: 'DocumentReference',
+                            meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HR.MinimalDocumentReference'] },
+                            masterIdentifier: { use: 'usual', system: 'urn:ietf:rfc:3986', value: docOid },
+                            identifier: [{ use: 'official', system: 'urn:ietf:rfc:3986', value: `urn:uuid:${docRefUuid}` }],
+                            status: 'current',
+                            type: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type', code: '011' }] },
+                            subject: { reference: 'Patient/1118065', type: 'Patient', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO', value: PATIENT_MBO }, display: 'IVAN PACPRIVATNICI42' },
+                            date: outerDate,
+                            author: [{ type: 'Practitioner', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika', value: PRACTITIONER_ID }, display: 'Ivan Prpic' }],
+                            authenticator: { type: 'Practitioner', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika', value: PRACTITIONER_ID }, display: 'Ivan Prpic' },
+                            custodian: { type: 'Organization', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije', value: ORG_ID }, display: 'WBS privatna ordinacija' },
+                            content: [{ attachment: { contentType: 'application/fhir+json; charset=utf-8', language: 'hr', url: `urn:uuid:${binUuid}` } }],
+                            context: {
+                                encounter: [{ type: 'Encounter', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-posjete', value: encCezihId } }],
+                                period: { start: outerDate },
+                                practiceSetting: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/djelatnosti-zz', code: '1010000', display: 'Opca/obiteljska medicina' }] },
+                                sourcePatientInfo: { identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO', value: PATIENT_MBO } },
+                                related: [{ type: 'Condition', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja', value: condFhirId! } }]
+                            }
+                        },
+                        request: { method: 'POST', url: 'DocumentReference' }
+                    },
+                    {
+                        fullUrl: `urn:uuid:${binUuid}`,
+                        resource: { resourceType: 'Binary', id: binUuid, contentType: 'application/fhir+json; charset=utf-8', data: signedB64 },
+                        request: { method: 'POST', url: 'Binary' }
+                    }
+                ]
+            };
+
+            console.log(`[tc18-full] Outer wrapper built: OID=${docOidRaw}, Enc=${encCezihId}, Cond=${condFhirId}`);
+            console.log(`[tc18-full] CEZIH ID POSJETE (encResourceId):`, encResourceId);
+            console.log(`[tc18-full] CEZIH ID SLUCAJA (condResourceId):`, condResourceId);
+            console.log(`[tc18-full] OUTER BUNDLE KONTROLA:`, JSON.stringify(outer.entry[1].resource.context, null, 2));
+
+            // Full URL references: Encounter/uuid and Condition/uuid — direct SQL lookup, no identifier search
+            // Dump final JSON for debugging
+            const outerJson = JSON.stringify(outer, null, 2);
+            fs.writeFileSync(pathMod.join(__dirname, '../../tmp/tc18-outer.json'), outerJson);
+            console.log(`[tc18-full] Context references: Encounter/${encVisitId}, Condition/${condFhirId}`);
+
+            // ── Submit to CEZIH with full auth (Bearer + Cookie) ──
+            // authService already imported at top
+            let headers: Record<string, string> = {};
+            try { headers = await authService.getSystemAuthHeaders(); } catch (e) { headers = {}; }
+            const gatewayHeaders = authService.hasGatewaySession() ? authService.getGatewayAuthHeaders() : {};
+            const combinedHeaders = {
+                ...headers,
+                ...(gatewayHeaders.Cookie ? { Cookie: gatewayHeaders.Cookie } : {}),
+                'Content-Type': 'application/fhir+json',
+                'Accept': 'application/fhir+json',
+            };
+
+            const { config: appConfig } = await import('../config');
+            const url = `${appConfig.cezih.gatewayBase}${appConfig.cezih.services.document}/iti-65-service`;
+            console.log(`[tc18-full] Submitting to CEZIH: ${url}`);
+
+            // Save outer for debugging
+            try { fs.writeFileSync(pathMod.join(process.cwd(), 'tmp', 'tc18-outer.json'), JSON.stringify(outer, null, 2)); } catch (e) { }
+
+            let submitRes: any;
+            try {
+                const response = await axios.post(url, outer, { headers: combinedHeaders });
+                submitRes = response.data;
+                console.log('[tc18-full] ✅ CEZIH accepted!');
+            } catch (error: any) {
+                console.warn('[tc18-full] CEZIH error:', error.response?.status);
+                const fullResponse = error.response?.data;
+                // Save full error response
+                try { fs.writeFileSync(pathMod.join(process.cwd(), 'tmp', 'cezih-tc18-error.json'), JSON.stringify(fullResponse, null, 2)); } catch (e) { }
+                // Extract ALL issues
+                const issues = fullResponse?.issue?.map((i: any) => ({
+                    severity: i.severity,
+                    code: i.details?.coding?.[0]?.code || i.details?.text || i.code,
+                    diagnostics: i.diagnostics,
+                    location: i.location
+                })) || [];
+                submitRes = {
+                    success: false,
+                    cezihStatus: 'failed',
+                    cezihError: `HTTP ${error.response?.status}`,
+                    issues,
+                    documentOid: docOidRaw,
+                    fullResponse
+                };
             }
-            const wrapper = JSON.parse(fs.readFileSync(wrapperPath, 'utf8'));
-            const { mhdBundle, documentOid } = wrapper;
-            if (!mhdBundle || mhdBundle.resourceType !== 'Bundle') {
-                addStep('tc18', { error: 'wrapper.json ne sadrži validan mhdBundle' }, false);
-                return res.json({ success: false, steps, error: 'TC18: invalid mhdBundle' });
-            }
-            const submitRes = await clinicalDocumentService.submitMhdBundleRaw(mhdBundle, documentOid || 'raw-test', '');
-            const ok = !(submitRes?.cezihStatus === 'failed');
-            addStep('tc18', { request: { source: 'wrapper.json', documentOid }, response: submitRes }, ok);
+
+            const ok = submitRes?.success !== false && !submitRes?.cezihStatus;
+            addStep('tc18', { request: { documentOid: docOidRaw, signToken: !!signPin }, response: submitRes }, ok);
             return res.json({ success: ok, steps });
         } catch (e: any) {
             addStep('tc18', { error: e.message }, false);
@@ -151,7 +399,7 @@ router.post('/test/tc18-full', async (req: Request, res: Response) => {
 router.post('/auth/system-token', async (_req: Request, res: Response) => {
     try {
         const token = await authService.getSystemToken();
-        res.json({ success: true, tokenPreview: token.substring(0, 50) + '...' });
+        res.json({ success: true, token, tokenPreview: token.substring(0, 50) + '...' });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
