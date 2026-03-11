@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import {
     User, Activity, FileText, Send, Save, XCircle, CheckCircle,
     AlertTriangle, Clock, Calendar, ArrowLeft, ArrowRight, Info, Eye, Code,
-    ChevronRight, CheckCircle2, ShieldCheck, Shield, Database,
+    ChevronDown, ChevronRight, CheckCircle2, ShieldCheck, Shield, Database,
     ArrowUpRight, ArrowDownLeft, ClipboardList,
     Smartphone, Loader2, SmartphoneNfc, Bell, Wifi
 } from 'lucide-react';
@@ -251,8 +251,9 @@ function ClinicalWorkspace() {
     const [selectedCaseId, setSelectedCaseId] = useState<string>(caseIdParam || '');
 
     // Audit Inspection
-    const [inspectionLog, setInspectionLog] = useState<any>(null);
     const [isInspectorOpen, setIsInspectorOpen] = useState(false);
+    const [inspectionLog, setInspectionLog] = useState<any>(null);
+    const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
 
     // Signing Flow State
     const [isSigningModalOpen, setIsSigningModalOpen] = useState(false);
@@ -1042,39 +1043,7 @@ function ClinicalWorkspace() {
                         </div>
                     </div>
 
-                    {/* Historical Logs List */}
-                    <div className="bg-slate-900 rounded-xl shadow-lg border border-slate-800 overflow-hidden flex flex-col h-64">
-                        <div className="p-3 border-b border-slate-800 bg-slate-950 font-semibold flex items-center justify-between text-slate-400 text-[10px] uppercase tracking-wider">
-                            <div className="flex items-center gap-2">
-                                <Database className="w-3 h-3 text-blue-400" />
-                                Tehnički zapisnik
-                            </div>
-                            <span>{logs.length} događaja</span>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                            {logs.length === 0 && <p className="text-slate-600 italic text-[10px] text-center mt-8">Čekam događaje...</p>}
-                            {logs.map((log) => (
-                                <div
-                                    key={log.id}
-                                    onClick={() => { setInspectionLog(log); setIsInspectorOpen(true); }}
-                                    className="p-2 rounded bg-slate-800/50 border border-slate-800 hover:border-blue-500/50 transition-colors cursor-pointer group"
-                                >
-                                    <div className="flex justify-between items-start mb-1">
-                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${log.status === 'SUCCESS' ? 'text-emerald-400 bg-emerald-400/10' : 'text-rose-400 bg-rose-400/10'}`}>
-                                            {log.action}
-                                        </span>
-                                        <span className="text-[8px] text-slate-500 font-mono italic">
-                                            {new Date(log.timestamp).toLocaleTimeString()}
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-[9px] text-slate-400 truncate">Status: {log.status}</span>
-                                        <Eye className="w-3 h-3 text-slate-600 group-hover:text-blue-400" />
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
+
 
                     {/* Quick Info */}
                     <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 text-blue-800 text-sm">
@@ -1236,7 +1205,13 @@ function ClinicalWorkspace() {
                         <div className="p-4 border-t flex justify-end">
                             {(stepperPhase === 'done' || stepperPhase === 'error') && (
                                 <button
-                                    onClick={() => { setIsStepperOpen(false); setStepperPhase('idle'); }}
+                                    onClick={() => {
+                                        setIsStepperOpen(false);
+                                        setStepperPhase('idle');
+                                        if (stepperPhase === 'done') {
+                                            router.push(`/dashboard/patients/${effectiveMbo}`);
+                                        }
+                                    }}
                                     className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-medium transition-colors"
                                 >
                                     Zatvori
@@ -1534,7 +1509,10 @@ function ClinicalWorkspace() {
                                         Vaš nalaz je uspješno potpisan i trajno pohranjen u CEZIH repozitorij.
                                     </p>
                                     <button
-                                        onClick={() => setIsSigningModalOpen(false)}
+                                        onClick={() => {
+                                            setIsSigningModalOpen(false);
+                                            router.push(`/dashboard/patients/${effectiveMbo}`);
+                                        }}
                                         style={{ width: '100%', padding: '12px', background: 'linear-gradient(135deg,#14b8a6,#10d9a0)', border: 'none', borderRadius: 12, cursor: 'pointer', fontSize: 14, fontWeight: 700, color: '#fff', boxShadow: '0 4px 16px rgba(20,184,166,0.4)' }}
                                     >
                                         U redu

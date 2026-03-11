@@ -1013,14 +1013,7 @@ export default function PatientChartPage() {
                                                                         <Edit2 className="w-3 h-3 inline mr-1" />
                                                                         Uredi
                                                                     </button>
-                                                                    <button
-                                                                        onClick={(e) => { e.preventDefault(); handleCezihCaseAction(c, '2.5', 'Relaps'); }}
-                                                                        disabled={isLoading}
-                                                                        className="py-1.5 px-3 bg-white border border-orange-200 rounded-lg text-xs font-black text-orange-600 hover:bg-orange-500 hover:text-white hover:border-orange-500 transition-all disabled:opacity-50"
-                                                                    >
-                                                                        {isLoading ? '...' : '🔄 Relaps'}
-                                                                    </button>
-                                                                </div>
+                                                                 </div>
                                                             )}
 
                                                             {/* Action buttons — Finished */}
@@ -1140,30 +1133,7 @@ export default function PatientChartPage() {
 
                                                 {/* Action buttons for active visits */}
                                                 {isActive && (
-                                                    <div className="mt-3 flex gap-2">
-                                                        <button
-                                                            onClick={() => {
-                                                                const reason = prompt('Novi razlog dolaska (MKB-10 šifra, npr. J06.9):');
-                                                                if (!reason) return;
-                                                                openIden('Izmjena posjete (TC 13)', async () => {
-                                                                    setVisitActionInProgress(v.id);
-                                                                    try {
-                                                                        const r = await fetch(`/api/visit/${v.id}`, {
-                                                                            method: 'PUT',
-                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                            body: JSON.stringify({ reasonCode: reason, reasonDisplay: reason, patientMbo: mbo }),
-                                                                        });
-                                                                        const d = await r.json();
-                                                                        if (d.success) { fetchChartData(); return { success: true }; }
-                                                                        return { success: false, error: d.error };
-                                                                    } finally { setVisitActionInProgress(null); }
-                                                                });
-                                                            }}
-                                                            disabled={visitActionInProgress === v.id}
-                                                            className="flex-1 py-1.5 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-600 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all disabled:opacity-50"
-                                                        >
-                                                            <Edit2 className="w-3 h-3 inline mr-1" /> Ažuriraj
-                                                        </button>
+                                                    <div className="mt-3 flex gap-2 justify-center">
                                                         <button
                                                             onClick={() => {
                                                                 if (!confirm('Zatvori posjet? Ova akcija šalje TC14 na CEZIH.')) return;
@@ -1182,7 +1152,7 @@ export default function PatientChartPage() {
                                                                 });
                                                             }}
                                                             disabled={visitActionInProgress === v.id}
-                                                            className="py-1.5 px-3 bg-white border border-rose-200 rounded-lg text-xs font-black text-rose-500 hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all disabled:opacity-50"
+                                                            className="py-1.5 px-6 bg-white border border-rose-200 rounded-lg text-xs font-black text-rose-500 hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all disabled:opacity-50"
                                                         >
                                                             Zatvori
                                                         </button>

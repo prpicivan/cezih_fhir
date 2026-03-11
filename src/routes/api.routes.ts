@@ -922,10 +922,40 @@ router.get('/terminology/local-value-sets', (req: Request, res: Response) => {
     }
 });
 
-router.post('/terminology/sync', async (req: Request, res: Response) => {
+router.get('/terminology/local-concepts', async (req: Request, res: Response) => {
     try {
-        const result = await terminologyService.syncAll();
-        res.json({ success: true, codeSystems: result.codeSystems.length, valueSets: result.valueSets.length });
+        const system = req.query.system as string;
+        if (!system) return res.status(400).json({ error: 'Missing system parameter' });
+        const concepts = await terminologyService.getLocalConcepts(system);
+        res.json({ success: true, count: concepts.length, concepts });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.get('/terminology/debug', (req: Request, res: Response) => {
+    try {
+        const syncCount = db.prepare('SELECT count(*) as c FROM terminology_sync').get() as any;
+        const conceptCount = db.prepare('SELECT count(*) as c FROM terminology_concepts').get() as any;
+        const vsCount = db.prepare('SELECT count(*) as c FROM terminology_valuesets').get() as any;
+        const vsWithResource = db.prepare('SELECT count(*) as c FROM terminology_valuesets WHERE fullResource IS NOT NULL').get() as any;
+        
+        const sampleSync = db.prepare('SELECT * FROM terminology_sync LIMIT 5').all();
+        const sampleVs = db.prepare('SELECT url, (fullResource IS NOT NULL) as hasRes FROM terminology_valuesets LIMIT 5').all();
+
+        res.json({
+            success: true,
+            counts: {
+                sync: syncCount.c,
+                concepts: conceptCount.c,
+                valueSets: vsCount.c,
+                vsWithResource: vsWithResource.c
+            },
+            samples: {
+                sync: sampleSync,
+                valueSets: sampleVs
+            }
+        });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }

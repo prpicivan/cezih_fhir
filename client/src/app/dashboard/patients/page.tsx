@@ -33,24 +33,25 @@ export default function PatientsPage() {
 
     const [isRegModalOpen, setIsRegModalOpen] = useState(false);
     const [regMbo, setRegMbo] = useState('');
+    const [searchType, setSearchType] = useState<'mbo' | 'passport' | 'euCard'>('mbo');
     const [remotePatient, setRemotePatient] = useState<any>(null);
     const [regLoading, setRegLoading] = useState(false);
     const [regError, setRegError] = useState<string | null>(null);
 
     const handleRemoteLookup = async () => {
-        if (!regMbo || regMbo.length !== 9) {
-            setRegError('Molim unesite ispravan MBO (9 znamenki)');
+        if (!regMbo) {
+            setRegError('Molim unesite identifikator');
             return;
         }
         setRegLoading(true);
         setRegError(null);
         try {
-            const res = await fetch(`/api/patient/search-remote?mbo=${regMbo}`);
+            const res = await fetch(`/api/patient/search?${searchType}=${regMbo}`);
             const data = await res.json();
             if (data.success && data.patients.length > 0) {
                 setRemotePatient(data.patients[0]);
             } else {
-                setRegError('Pacijent nije pronađen na CEZIH-u.');
+                setRegError('Pacijent nije pronađen na CEZIH-u niti u lokalnoj bazi.');
             }
         } catch (err) {
             setRegError('Greška pri dohvaćanju podataka.');
@@ -148,26 +149,44 @@ export default function PatientsPage() {
                         <div className="p-6 space-y-4">
                             {!remotePatient ? (
                                 <>
-                                    <p className="text-sm text-slate-600">Unesite MBO pacijenta za provjeru u centralnom CEZIH registru.</p>
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-bold text-slate-500 uppercase">MBO (9 znamenki)</label>
-                                        <div className="flex gap-2">
-                                            <input
-                                                type="text"
-                                                maxLength={9}
-                                                className="flex-1 border rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono"
-                                                placeholder="npr. 123456789"
-                                                value={regMbo}
-                                                onChange={(e) => setRegMbo(e.target.value.replace(/\D/g, ''))}
-                                            />
-                                            <button
-                                                onClick={handleRemoteLookup}
-                                                disabled={regLoading || regMbo.length !== 9}
-                                                className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-                                            >
-                                                {regLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                                                Dohvati
-                                            </button>
+                                    <div className="space-y-4">
+                                        <div className="flex gap-2 p-1 bg-slate-100 rounded-xl">
+                                            {(['mbo', 'passport', 'euCard'] as const).map((type) => (
+                                                <button
+                                                    key={type}
+                                                    onClick={() => setSearchType(type)}
+                                                    className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                                                        searchType === type 
+                                                        ? 'bg-white text-blue-600 shadow-sm' 
+                                                        : 'text-slate-500 hover:text-slate-700'
+                                                    }`}
+                                                >
+                                                    {type === 'mbo' ? 'MBO' : type === 'passport' ? 'PUTOVNICA' : 'EKZO'}
+                                                </button>
+                                            ))}
+                                        </div>
+                                        
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-bold text-slate-500 uppercase">
+                                                {searchType === 'mbo' ? 'MBO (9 znamenki)' : searchType === 'passport' ? 'Broj putovnice' : 'Broj EKZO kartice'}
+                                            </label>
+                                            <div className="flex gap-2">
+                                                <input
+                                                    type="text"
+                                                    className="flex-1 border rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono"
+                                                    placeholder={searchType === 'mbo' ? 'npr. 123456789' : 'Unesite broj...'}
+                                                    value={regMbo}
+                                                    onChange={(e) => setRegMbo(searchType === 'mbo' ? e.target.value.replace(/\D/g, '') : e.target.value)}
+                                                />
+                                                <button
+                                                    onClick={handleRemoteLookup}
+                                                    disabled={regLoading || !regMbo}
+                                                    className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                                                >
+                                                    {regLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                                                    Dohvati
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                     {regError && <div className="p-3 bg-red-50 text-red-700 text-xs rounded-lg border border-red-100">{regError}</div>}

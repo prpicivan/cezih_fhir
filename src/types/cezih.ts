@@ -14,7 +14,7 @@ export const CEZIH_IDENTIFIERS = {
     // Visit/Case Identifiers
     VISIT_ID: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-posjete',
     LOCAL_VISIT_ID: 'http://fhir.cezih.hr/specifikacije/identifikatori/lokalni-identifikator-posjete',
-    CASE_ID: 'http://fhir.cezih.hr/specifikacije/identifikatori/slucaj',
+    CASE_ID: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja',
     LOCAL_CASE_ID: 'http://fhir.cezih.hr/specifikacije/identifikatori/lokalni-identifikator-slucaja',
     REFERRAL_ID: 'http://fhir.cezih.hr/specifikacije/identifikatori/ID-uputnice',
     EMERGENCY_ADMISSION_NUMBER: 'http://fhir.cezih.hr/specifikacije/identifikatori/evidencijski-broj-hitnog-prijema',

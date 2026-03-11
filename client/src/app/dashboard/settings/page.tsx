@@ -39,6 +39,7 @@ export default function SettingsPage() {
     const [syncing, setSyncing] = useState(false);
     const [menuConfig, setMenuConfig] = useState<any[]>([]);
     const [savingMenu, setSavingMenu] = useState(false);
+    const [skipIdenModal, setSkipIdenModal] = useState(false);
 
     // Document type labels
     const DEFAULT_DOC_LABELS: Record<string, string> = {
@@ -87,7 +88,17 @@ export default function SettingsPage() {
         fetchSettings();
         fetchMenu();
         fetchDocTypeLabels();
+        
+        // Load development settings
+        const skip = localStorage.getItem('skip_iden_modal') === 'true';
+        setSkipIdenModal(skip);
     }, []);
+
+    const handleToggleIdenModal = (checked: boolean) => {
+        setSkipIdenModal(checked);
+        localStorage.setItem('skip_iden_modal', checked ? 'true' : 'false');
+        showToast('success', checked ? 'IDEN modali onemogućeni.' : 'IDEN modali omogućeni.');
+    };
 
     const handleSync = async () => {
         setSyncing(true);
@@ -257,6 +268,30 @@ export default function SettingsPage() {
                                 <div className="flex justify-between">
                                     <span className="text-gray-500">VPN Tunel:</span>
                                     <span className="font-medium text-gray-400">Nije spojen (Demo Mode)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Development Settings */}
+                        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
+                            <div className="flex items-center gap-3 text-amber-600 mb-2">
+                                <Activity className="w-6 h-6" />
+                                <h2 className="text-lg font-semibold text-gray-900">Razvojne postavke</h2>
+                            </div>
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <div className="space-y-0.5">
+                                        <label className="text-sm font-medium text-gray-800">Onemogući IDEN modale</label>
+                                        <p className="text-xs text-gray-500">Preskoči vizualni potpis kod TC akcija</p>
+                                    </div>
+                                    <button
+                                        onClick={() => handleToggleIdenModal(!skipIdenModal)}
+                                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${skipIdenModal ? 'bg-amber-600' : 'bg-gray-200'}`}
+                                    >
+                                        <span
+                                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${skipIdenModal ? 'translate-x-6' : 'translate-x-1'}`}
+                                        />
+                                    </button>
                                 </div>
                             </div>
                         </div>

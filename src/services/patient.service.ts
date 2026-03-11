@@ -16,6 +16,7 @@ export interface PatientDemographics {
     id: string;
     mbo?: string;
     oib?: string;
+    cezihId?: string; // MPI ID from CEZIH
     name: {
         text: string;
         family: string;
@@ -33,6 +34,12 @@ export interface PatientDemographics {
 export interface ForeignerRegistrationData {
     passportNumber?: string;
     euCardNumber?: string;
+    // Legacy mapping support
+    idNumber?: string;
+    idType?: string;
+    firstName?: string;
+    lastName?: string;
+
     name: {
         family: string;
         given: string[];
@@ -76,6 +83,26 @@ class PatientService {
             .map(mbo => `${CEZIH_IDENTIFIERS.MBO}|${mbo}`)
             .join(',');
         return this.searchPatients(`identifier=${identifiers}`, userToken);
+    }
+
+    /**
+     * Search for patient demographics by Passport.
+     */
+    async searchByPassport(passport: string, userToken: string): Promise<PatientDemographics[]> {
+        return this.searchPatients(
+            `identifier=${CEZIH_IDENTIFIERS.PASSPORT}|${passport}`,
+            userToken
+        );
+    }
+
+    /**
+     * Search for patient demographics by EU Card / EKZO.
+     */
+    async searchByEuCard(euCard: string, userToken: string): Promise<PatientDemographics[]> {
+        return this.searchPatients(
+            `identifier=${CEZIH_IDENTIFIERS.EU_CARD}|${euCard}`,
+            userToken
+        );
     }
 
     async searchRemoteByMbo(mbo: string, userToken: string): Promise<PatientDemographics[]> {
@@ -124,11 +151,20 @@ class PatientService {
 
         try {
             // 1. Try Local DB first (Mock Mode / Hybrid) unless explicitly searching remote
-            const idMatch = query.match(/\|([A-Za-z0-9]+)/);
+            const idMatch = query.match(/\|([A-Za-z0-9-]+)/);
             if (idMatch && autoSave) {
                 const idValue = idMatch[1];
-                const stmt = db.prepare('SELECT * FROM patients WHERE mbo = ? OR oib = ?');
-                const localPatient = stmt.get(idValue, idValue) as any;
+                const stmt = db.prepare(`
+                    SELECT * FROM patients 
+                    WHERE mbo = ? OR oib = ? OR cezihId = ? 
+                    OR mbo IN (SELECT mbo FROM patients WHERE mbo = ?)
+                `);
+                // For passport/ekzo we might need a better local mapping if they are not stored as MBO
+                // But typically for registered foreigners, MBO is the temp ID or assigned MBO.
+                const localPatient = db.prepare(`
+                    SELECT * FROM patients 
+                    WHERE mbo = ? OR oib = ? OR cezihId = ?
+                `).get(idValue, idValue, idValue) as any;
 
                 if (localPatient) {
                     console.log('[PatientService] Found patient in local DB:', idValue);
@@ -190,10 +226,11 @@ class PatientService {
         try {
             const now = new Date().toISOString();
             const stmt = db.prepare(`
-                INSERT INTO patients (mbo, oib, firstName, lastName, dateOfBirth, gender, lastSyncAt)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO patients (mbo, oib, cezihId, firstName, lastName, dateOfBirth, gender, lastSyncAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mbo) DO UPDATE SET
                     oib = excluded.oib,
+                    cezihId = COALESCE(excluded.cezihId, patients.cezihId),
                     firstName = excluded.firstName,
                     lastName = excluded.lastName,
                     dateOfBirth = excluded.dateOfBirth,
@@ -203,6 +240,7 @@ class PatientService {
             stmt.run(
                 patient.mbo,
                 patient.oib || null,
+                patient.cezihId || null,
                 patient.name.given[0] || '',
                 patient.name.family || '',
                 patient.birthDate || null,
@@ -418,17 +456,20 @@ class PatientService {
             };
         }
         // Map documentType/documentNumber to passportNumber/euCardNumber
-        if (!data.passportNumber && !data.euCardNumber && rawData.documentNumber) {
-            if (rawData.documentType === 'euCard' || rawData.documentType === 'EKZO') {
-                data.euCardNumber = rawData.documentNumber;
+        const idNumber = rawData.idNumber || rawData.documentNumber;
+        const idType = rawData.idType || rawData.documentType;
+
+        if (!data.passportNumber && !data.euCardNumber && idNumber) {
+            if (idType === 'eu_card' || idType === 'euCard' || idType === 'EKZO') {
+                data.euCardNumber = idNumber;
             } else {
                 // Default to passport
-                data.passportNumber = rawData.documentNumber;
+                data.passportNumber = idNumber;
             }
         }
         if (!data.gender && rawData.gender) data.gender = rawData.gender;
         if (!data.birthDate && rawData.birthDate) data.birthDate = rawData.birthDate;
-        if (!data.nationality && rawData.nationality) data.nationality = rawData.nationality;
+        if (!data.nationality && (rawData.nationality || rawData.country)) data.nationality = rawData.nationality || rawData.country;
 
         console.log('[PatientService] registerForeigner normalized data.name:', JSON.stringify(data.name));
 
@@ -457,7 +498,7 @@ class PatientService {
             // 3. Sign the bundle
             let signedBundle = pmirBundle;
             try {
-                const { signatureService } = require('./index');
+                const { signatureService } = await import('./signature.service');
                 const { bundle: signed } = await signatureService.signBundle(
                     pmirBundle,
                     undefined, // signerRef extracted from bundle.signature.who
@@ -497,11 +538,15 @@ class PatientService {
                         const assignedMbo = patientEntry.resource.identifier?.find(
                             (id: any) => id.system === CEZIH_IDENTIFIERS.MBO
                         );
-                        if (assignedMbo) {
-                            // Update local DB with real MBO
-                            db.prepare('UPDATE patients SET mbo = ? WHERE mbo = ?')
-                                .run(assignedMbo.value, tempId);
-                            console.log('[PatientService] Updated local DB with assigned MBO:', assignedMbo.value);
+                        const assignedCezihId = patientEntry.resource.id;
+                        
+                        console.log(`[PatientService] CEZIH Registration SUCCESS. MPI ID: ${assignedCezihId}, MBO: ${assignedMbo?.value}`);
+
+                        if (assignedMbo || assignedCezihId) {
+                            // Update local DB with real MBO and MPI ID
+                            db.prepare('UPDATE patients SET mbo = COALESCE(?, mbo), cezihId = ? WHERE mbo = ?')
+                                .run(assignedMbo?.value || null, assignedCezihId, tempId);
+                            console.log('[PatientService] Updated local DB with CEZIH identifiers.');
                         }
                         return this.mapPatient(patientEntry.resource);
                     }

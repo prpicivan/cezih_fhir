@@ -16,6 +16,7 @@ export function initDatabase() {
     CREATE TABLE IF NOT EXISTS patients (
       mbo TEXT PRIMARY KEY,
       oib TEXT,
+      cezihId TEXT,
       firstName TEXT,
       lastName TEXT,
       dateOfBirth TEXT,
@@ -27,6 +28,12 @@ export function initDatabase() {
   `);
 
   // Ensure columns exist for existing databases
+  try {
+    db.exec('ALTER TABLE patients ADD COLUMN cezihId TEXT');
+  } catch (e) {
+    // Column might already exist
+  }
+
   try {
     db.exec('ALTER TABLE patients ADD COLUMN lastSyncAt TEXT');
   } catch (e) {
@@ -229,7 +236,8 @@ export function initDatabase() {
         title    TEXT,
         version  TEXT,
         status   TEXT,
-        lastSync TEXT
+        lastSync TEXT,
+        fullResource TEXT
     );
   `);
 

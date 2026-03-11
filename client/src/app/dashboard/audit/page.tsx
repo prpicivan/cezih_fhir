@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     Search,
     ShieldCheck,
@@ -14,7 +14,9 @@ import {
     ClipboardList,
     Download,
     Copy,
-    Check
+    Check,
+    ChevronRight,
+    ChevronDown
 } from 'lucide-react';
 
 export default function AuditLogsPage() {
@@ -242,45 +244,48 @@ export default function AuditLogsPage() {
                                     filteredLogs.map((log) => (
                                         <tr
                                             key={log.id}
-                                            className={`hover:bg-slate-50 transition-colors cursor-pointer ${selectedLog?.id === log.id ? 'bg-blue-50/50' : ''}`}
+                                            className={`hover:bg-slate-50 transition-colors cursor-pointer ${selectedLog?.id === log.id ? 'bg-blue-50/10 border-l-2 border-l-blue-500' : ''}`}
                                             onClick={() => setSelectedLog(log)}
                                         >
                                             <td className="px-6 py-4 whitespace-nowrap">
-                                                <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${selectedLog?.id === log.id ? 'border-blue-600 bg-blue-600' : 'border-slate-300'}`}>
+                                                <div 
+                                                    className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all ${selectedLog?.id === log.id ? 'border-blue-600 bg-blue-600' : 'border-slate-300 hover:border-blue-300'}`}
+                                                >
                                                     {selectedLog?.id === log.id && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
                                                 </div>
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <div className="text-sm font-bold text-slate-700">
-                                                    {formatDate(log.timestamp).date}
-                                                </div>
-                                                <div className="text-[10px] text-slate-400 font-mono">
-                                                    {formatDate(log.timestamp).time}
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <div className="text-sm font-bold text-slate-900">
-                                                    {log.firstName ? `${log.firstName} ${log.lastName}` : <span className="text-slate-400 italic font-normal">Sustavna akcija</span>}
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                {log.patientMbo ? (
-                                                    <div className="text-[10px] font-mono text-slate-500">
-                                                        MBO: {log.patientMbo} <br /> OIB: {log.oib || '---'}
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <div className="text-sm font-bold text-slate-700">
+                                                        {formatDate(log.timestamp).date}
                                                     </div>
-                                                ) : (
-                                                    <span className="text-slate-300">---</span>
-                                                )}
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <div className="text-sm font-bold text-slate-800">{log.action}</div>
-                                                {log.visitId && <div className="text-[10px] text-slate-400 font-mono">Visit: {log.visitId.substring(0, 8)}...</div>}
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                {getStatusBadge(log.status)}
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-right">
+                                                    <div className="text-[10px] text-slate-400 font-mono">
+                                                        {formatDate(log.timestamp).time}
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <div className="text-sm font-bold text-slate-900">
+                                                        {log.firstName ? `${log.firstName} ${log.lastName}` : <span className="text-slate-400 italic font-normal">Sustavna akcija</span>}
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    {log.patientMbo ? (
+                                                        <div className="text-[10px] font-mono text-slate-500">
+                                                            MBO: {log.patientMbo} <br /> OIB: {log.oib || '---'}
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-slate-300">---</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <div className="text-sm font-bold text-slate-800">{log.action}</div>
+                                                    {log.visitId && <div className="text-[10px] text-slate-400 font-mono">Visit: {log.visitId.substring(0, 8)}...</div>}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    {getStatusBadge(log.status)}
+                                                </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-right flex items-center justify-end gap-3">
                                                 {getDirectionBadge(log.direction)}
+                                                <ChevronRight className={`w-4 h-4 text-slate-400 transition-transform ${selectedLog?.id === log.id ? 'rotate-90 text-blue-500' : ''}`} />
                                             </td>
                                         </tr>
                                     ))
@@ -354,7 +359,7 @@ export default function AuditLogsPage() {
                                     )}
                                     <span className="text-slate-400">JSON</span>
                                 </label>
-                                <pre className={`bg-slate-900 p-4 rounded-lg text-xs overflow-x-auto font-mono max-h-[300px] ${selectedLog.direction === 'INCOMING_G9' ? 'text-purple-300' :
+                                <pre className={`bg-slate-900 p-4 rounded-lg text-xs overflow-x-auto whitespace-pre-wrap break-all font-mono max-h-[400px] ${selectedLog.direction === 'INCOMING_G9' ? 'text-purple-300' :
                                     selectedLog.direction === 'INCOMING_CEZIH' ? 'text-blue-300' :
                                         'text-blue-300'
                                     }`}>
@@ -368,7 +373,7 @@ export default function AuditLogsPage() {
                                     {selectedLog.direction === 'INCOMING_G9' ? 'Odgovor prema G9' : 'CEZIH Response'}
                                     <span className="text-emerald-500">JSON</span>
                                 </label>
-                                <pre className="bg-slate-900 text-emerald-300 p-4 rounded-lg text-xs overflow-x-auto font-mono max-h-[300px]">
+                                <pre className="bg-slate-900 text-emerald-300 p-4 rounded-lg text-xs overflow-x-auto whitespace-pre-wrap break-all font-mono max-h-[400px]">
                                     {selectedLog.payload_res || '// Čekam odgovor...'}
                                 </pre>
                             </div>

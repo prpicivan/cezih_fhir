@@ -101,13 +101,20 @@ router.get('/search', async (req: Request, res: Response) => {
         const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
         const mbo = req.query.mbo as string | undefined;
         const oib = req.query.oib as string | undefined;
+        const passport = req.query.passport as string | undefined;
+        const euCard = req.query.euCard as string | undefined;
+
         let patients;
         if (mbo) {
             patients = await patientService.searchByMbo(mbo, userToken);
         } else if (oib) {
             patients = await patientService.searchByOib(oib, userToken);
+        } else if (passport) {
+            patients = await patientService.searchByPassport(passport, userToken);
+        } else if (euCard) {
+            patients = await patientService.searchByEuCard(euCard, userToken);
         } else {
-            return res.status(400).json({ error: 'Provide mbo or oib' });
+            return res.status(400).json({ error: 'Provide mbo, oib, passport or euCard' });
         }
         res.json({ success: true, count: patients.length, patients });
     } catch (error: any) {

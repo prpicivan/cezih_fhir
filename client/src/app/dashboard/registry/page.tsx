@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { Search, Building2, User, BookOpen, Tag, RefreshCw, AlertCircle, CheckCircle, Clock, Hash, Copy } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Search, Building2, User, BookOpen, Tag, RefreshCw, AlertCircle, CheckCircle, Clock, Hash, Copy, ChevronDown, ChevronRight, ArrowRight } from 'lucide-react';
 
 type Tab = 'organizations' | 'practitioners' | 'codeSystems' | 'valueSets' | 'oid';
 
@@ -43,6 +43,9 @@ function CodeSystemsTab() {
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [expandedRow, setExpandedRow] = useState<string | null>(null);
+    const [concepts, setConcepts] = useState<Record<string, any[]>>({});
+    const [loadingConcepts, setLoadingConcepts] = useState<Record<string, boolean>>({});
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -58,6 +61,31 @@ function CodeSystemsTab() {
             setLoading(false);
         }
     }, []);
+
+    const fetchConcepts = async (system: string) => {
+        if (concepts[system]) return;
+        setLoadingConcepts(prev => ({ ...prev, [system]: true }));
+        try {
+            const res = await fetch(`/api/terminology/local-concepts?system=${encodeURIComponent(system)}`);
+            const data = await res.json();
+            if (data.success) {
+                setConcepts(prev => ({ ...prev, [system]: data.concepts }));
+            }
+        } catch (e) {
+            console.error('Failed to fetch concepts', e);
+        } finally {
+            setLoadingConcepts(prev => ({ ...prev, [system]: false }));
+        }
+    };
+
+    const toggleRow = (system: string) => {
+        if (expandedRow === system) {
+            setExpandedRow(null);
+        } else {
+            setExpandedRow(system);
+            fetchConcepts(system);
+        }
+    };
 
     const syncAndReload = async () => {
         setSyncing(true);
@@ -103,6 +131,7 @@ function CodeSystemsTab() {
                     <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 text-slate-500 text-xs font-semibold border-b border-slate-200">
                             <tr>
+                                <th className="px-5 py-3 w-10"></th>
                                 <th className="px-5 py-3">Šifrarnik (URL)</th>
                                 <th className="px-5 py-3 text-center">Br. koncepata</th>
                                 <th className="px-5 py-3">Zadnja sinkronizacija</th>
@@ -111,28 +140,70 @@ function CodeSystemsTab() {
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {rows.map((cs, i) => (
-                                <tr key={i} className="hover:bg-slate-50 transition-colors">
-                                    <td className="px-5 py-3">
-                                        <span className="font-mono text-xs text-slate-700 block">{shortUrl(cs.system)}</span>
-                                        <span className="text-[10px] text-slate-400 block truncate max-w-xs" title={cs.system}>{cs.system}</span>
-                                    </td>
-                                    <td className="px-5 py-3 text-center">
-                                        <span className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-bold ${cs.conceptCount > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                                            {cs.conceptCount}
-                                        </span>
-                                    </td>
-                                    <td className="px-5 py-3 text-xs text-slate-500 whitespace-nowrap">
-                                        <span className="flex items-center gap-1">
-                                            <Clock className="w-3 h-3 opacity-50" />
-                                            {formatDate(cs.lastSync)}
-                                        </span>
-                                    </td>
-                                    <td className="px-5 py-3">
-                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">
-                                            <CheckCircle className="w-3 h-3" /> Sinkronizirano
-                                        </span>
-                                    </td>
-                                </tr>
+                                <React.Fragment key={i}>
+                                    <tr 
+                                        className={`hover:bg-slate-50 transition-colors cursor-pointer ${expandedRow === cs.system ? 'bg-blue-50/30' : ''}`}
+                                        onClick={() => toggleRow(cs.system)}
+                                    >
+                                        <td className="px-5 py-3 text-slate-400">
+                                            {expandedRow === cs.system ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                                        </td>
+                                        <td className="px-5 py-3">
+                                            <span className="font-mono text-xs text-slate-700 block">{shortUrl(cs.system)}</span>
+                                            <span className="text-[10px] text-slate-400 block truncate max-w-xs" title={cs.system}>{cs.system}</span>
+                                        </td>
+                                        <td className="px-5 py-3 text-center">
+                                            <span className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-bold ${cs.conceptCount > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                                                {cs.conceptCount}
+                                            </span>
+                                        </td>
+                                        <td className="px-5 py-3 text-xs text-slate-500 whitespace-nowrap">
+                                            <span className="flex items-center gap-1">
+                                                <Clock className="w-3 h-3 opacity-50" />
+                                                {formatDate(cs.lastSync)}
+                                            </span>
+                                        </td>
+                                        <td className="px-5 py-3">
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">
+                                                <CheckCircle className="w-3 h-3" /> Sinkronizirano
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    {expandedRow === cs.system && (
+                                        <tr>
+                                            <td colSpan={5} className="px-5 py-4 bg-slate-50/50 border-y border-slate-100">
+                                                <div className="max-h-[400px] overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-inner">
+                                                    {loadingConcepts[cs.system] ? (
+                                                        <div className="p-8 text-center text-xs text-slate-400 animate-pulse flex items-center justify-center gap-2">
+                                                            <RefreshCw className="w-4 h-4 animate-spin" /> Dohvaćam koncepte...
+                                                        </div>
+                                                    ) : !concepts[cs.system] || concepts[cs.system].length === 0 ? (
+                                                        <div className="p-8 text-center text-xs text-slate-400 italic">Nema dostupnih koncepata za ovaj šifrarnik.</div>
+                                                    ) : (
+                                                        <table className="w-full text-left text-xs border-collapse">
+                                                            <thead className="sticky top-0 bg-slate-100 text-slate-500 border-b border-slate-200">
+                                                                <tr>
+                                                                    <th className="px-4 py-2 font-bold uppercase tracking-wider w-1/3">Kod</th>
+                                                                    <th className="px-4 py-2 font-bold uppercase tracking-wider text-center w-8"></th>
+                                                                    <th className="px-4 py-2 font-bold uppercase tracking-wider">Naziv (Display)</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody className="divide-y divide-slate-100">
+                                                                {concepts[cs.system].map((c, idx) => (
+                                                                    <tr key={idx} className="hover:bg-slate-50">
+                                                                        <td className="px-4 py-2 font-mono text-blue-600 bg-blue-50/10">{c.code}</td>
+                                                                        <td className="px-4 py-2 text-slate-300 text-center"><ArrowRight className="w-3 h-3 mx-auto" /></td>
+                                                                        <td className="px-4 py-2 text-slate-700 font-medium">{c.display}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    )}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )}
+                                </React.Fragment>
                             ))}
                         </tbody>
                     </table>
@@ -148,6 +219,9 @@ function ValueSetsTab() {
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [expandedRow, setExpandedRow] = useState<string | null>(null);
+    const [concepts, setConcepts] = useState<Record<string, any[]>>({});
+    const [loadingConcepts, setLoadingConcepts] = useState<Record<string, boolean>>({});
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -163,6 +237,33 @@ function ValueSetsTab() {
             setLoading(false);
         }
     }, []);
+
+    const fetchConcepts = async (url: string) => {
+        if (concepts[url]) return;
+        setLoadingConcepts(prev => ({ ...prev, [url]: true }));
+        try {
+            // ValueSets refer to CodeSystems. For simple demo, we fetch concepts associated with this ValueSet URL
+            // (In a real scenario, we might need to look up the Compose part, but here we reuse the same concepts table)
+            const res = await fetch(`/api/terminology/local-concepts?system=${encodeURIComponent(url)}`);
+            const data = await res.json();
+            if (data.success) {
+                setConcepts(prev => ({ ...prev, [url]: data.concepts }));
+            }
+        } catch (e) {
+            console.error('Failed to fetch concepts', e);
+        } finally {
+            setLoadingConcepts(prev => ({ ...prev, [url]: false }));
+        }
+    };
+
+    const toggleRow = (url: string) => {
+        if (expandedRow === url) {
+            setExpandedRow(null);
+        } else {
+            setExpandedRow(url);
+            fetchConcepts(url);
+        }
+    };
 
     const syncAndReload = async () => {
         setSyncing(true);
@@ -208,6 +309,7 @@ function ValueSetsTab() {
                     <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 text-slate-500 text-xs font-semibold border-b border-slate-200">
                             <tr>
+                                <th className="px-5 py-3 w-10"></th>
                                 <th className="px-5 py-3">Naziv</th>
                                 <th className="px-5 py-3">URL</th>
                                 <th className="px-5 py-3">Verzija</th>
@@ -217,32 +319,74 @@ function ValueSetsTab() {
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {rows.map((vs, i) => (
-                                <tr key={i} className="hover:bg-slate-50 transition-colors">
-                                    <td className="px-5 py-3">
-                                        <span className="font-medium text-slate-800 text-xs block">{vs.title || vs.name || '—'}</span>
-                                        {vs.title && vs.name && vs.title !== vs.name && (
-                                            <span className="text-[10px] text-slate-400">{vs.name}</span>
-                                        )}
-                                    </td>
-                                    <td className="px-5 py-3">
-                                        <span className="font-mono text-[10px] text-slate-500 block truncate max-w-[220px]" title={vs.url}>
-                                            {shortUrl(vs.url)}
-                                        </span>
-                                    </td>
-                                    <td className="px-5 py-3 text-xs text-slate-500">{vs.version || '—'}</td>
-                                    <td className="px-5 py-3">
-                                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${vs.status === 'active' ? 'bg-emerald-100 text-emerald-700' : vs.status === 'draft' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
-                                            {vs.status === 'active' ? <CheckCircle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
-                                            {vs.status || '—'}
-                                        </span>
-                                    </td>
-                                    <td className="px-5 py-3 text-xs text-slate-500 whitespace-nowrap">
-                                        <span className="flex items-center gap-1">
-                                            <Clock className="w-3 h-3 opacity-50" />
-                                            {formatDate(vs.lastSync)}
-                                        </span>
-                                    </td>
-                                </tr>
+                                <React.Fragment key={i}>
+                                    <tr 
+                                        className={`hover:bg-slate-50 transition-colors cursor-pointer ${expandedRow === vs.url ? 'bg-blue-50/30' : ''}`}
+                                        onClick={() => toggleRow(vs.url)}
+                                    >
+                                        <td className="px-5 py-3 text-slate-400">
+                                            {expandedRow === vs.url ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                                        </td>
+                                        <td className="px-5 py-3">
+                                            <span className="font-medium text-slate-800 text-xs block">{vs.title || vs.name || '—'}</span>
+                                            {vs.title && vs.name && vs.title !== vs.name && (
+                                                <span className="text-[10px] text-slate-400">{vs.name}</span>
+                                            )}
+                                        </td>
+                                        <td className="px-5 py-3">
+                                            <span className="font-mono text-[10px] text-slate-500 block truncate max-w-[220px]" title={vs.url}>
+                                                {shortUrl(vs.url)}
+                                            </span>
+                                        </td>
+                                        <td className="px-5 py-3 text-xs text-slate-500">{vs.version || '—'}</td>
+                                        <td className="px-5 py-3">
+                                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${vs.status === 'active' ? 'bg-emerald-100 text-emerald-700' : vs.status === 'draft' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
+                                                {vs.status === 'active' ? <CheckCircle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                                                {vs.status || '—'}
+                                            </span>
+                                        </td>
+                                        <td className="px-5 py-3 text-xs text-slate-500 whitespace-nowrap">
+                                            <span className="flex items-center gap-1">
+                                                <Clock className="w-3 h-3 opacity-50" />
+                                                {formatDate(vs.lastSync)}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    {expandedRow === vs.url && (
+                                        <tr>
+                                            <td colSpan={6} className="px-5 py-4 bg-slate-50/50 border-y border-slate-100">
+                                                <div className="max-h-[400px] overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-inner">
+                                                    {loadingConcepts[vs.url] ? (
+                                                        <div className="p-8 text-center text-xs text-slate-400 animate-pulse flex items-center justify-center gap-2">
+                                                            <RefreshCw className="w-4 h-4 animate-spin" /> Dohvaćam koncepte...
+                                                        </div>
+                                                    ) : !concepts[vs.url] || concepts[vs.url].length === 0 ? (
+                                                        <div className="p-8 text-center text-xs text-slate-400 italic">Nema dostupnih koncepata za ovaj skup vrijednosti.</div>
+                                                    ) : (
+                                                        <table className="w-full text-left text-xs border-collapse">
+                                                            <thead className="sticky top-0 bg-slate-100 text-slate-500 border-b border-slate-200">
+                                                                <tr>
+                                                                    <th className="px-4 py-2 font-bold uppercase tracking-wider w-1/3">Kod</th>
+                                                                    <th className="px-4 py-2 font-bold uppercase tracking-wider text-center w-8"></th>
+                                                                    <th className="px-4 py-2 font-bold uppercase tracking-wider">Naziv (Display)</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody className="divide-y divide-slate-100">
+                                                                {concepts[vs.url].map((c, idx) => (
+                                                                    <tr key={idx} className="hover:bg-slate-50">
+                                                                        <td className="px-4 py-2 font-mono text-blue-600 bg-blue-50/10">{c.code}</td>
+                                                                        <td className="px-4 py-2 text-slate-300 text-center"><ArrowRight className="w-3 h-3 mx-auto" /></td>
+                                                                        <td className="px-4 py-2 text-slate-700 font-medium">{c.display}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    )}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )}
+                                </React.Fragment>
                             ))}
                         </tbody>
                     </table>

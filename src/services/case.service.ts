@@ -549,21 +549,21 @@ class CaseService {
             // 2.3: Remisija — puts active case into remission (disease in remission)
             '2.3': {
                 eventCode: '2.3',
-                profile: 'hr-update-health-issue-clinical-status-message',
+                profile: 'hr-health-issue-remission-message',
                 clinicalStatus: 'remission',
                 auditAction: 'CASE_REMISSION',
             },
             // 2.4: Zatvori (Izliječen / Resolved) — closes active case as resolved/healed
             '2.4': {
                 eventCode: '2.4',
-                profile: 'hr-update-health-issue-clinical-status-message',
+                profile: 'hr-health-issue-resolve-message', // distinct resolve profile, not clinical-status
                 clinicalStatus: 'resolved',
                 auditAction: 'CASE_CLOSE',
             },
             // 2.5: Relaps — revives case from remission back to active
             '2.5': {
                 eventCode: '2.5',
-                profile: 'hr-update-health-issue-clinical-status-message',
+                profile: 'hr-health-issue-relapse-message',
                 clinicalStatus: 'active',
                 auditAction: 'CASE_RELAPSE',
             },
@@ -684,13 +684,16 @@ class CaseService {
                 text: data?.reason || 'Brisanje slučaja (administrativna greška)',
             }];
         } else {
-            // Clinical status updates (2.4, 2.5, 2.8): minimal Condition
-            // Docs: asserter, code, onsetDateTime "zanemariti" for these messages; profile may enforce max=0
-            // clinicalStatus: docs say CEZIH sets automatically, but we send it as the profile name suggests it
-            if (actionDef.clinicalStatus) {
+            // Clinical status updates (2.3=Remisija, 2.4=Zatvori, 2.5=Relaps, 2.8=Reopen)
+            // CEZIH profiles for 2.3 and 2.5 FORBID clinicalStatus (max=0)
+            if (actionDef.clinicalStatus && action !== '2.3' && action !== '2.5') {
                 conditionResource.clinicalStatus = {
                     coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: actionDef.clinicalStatus }],
                 };
+            }
+            // 2.4 (Zatvori/Resolved): abatementDateTime is required by hr-health-issue-resolve-message
+            if (action === '2.4') {
+                conditionResource.abatementDateTime = new Date().toISOString();
             }
         }
 

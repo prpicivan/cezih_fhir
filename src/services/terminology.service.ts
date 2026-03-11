@@ -102,19 +102,49 @@ class TerminologyService {
 
             const valueSets = response.data.entry?.map(e => e.resource) || [];
 
-            // Cache and persist the value sets
-            const upsertStmt = db.prepare(
-                'INSERT OR REPLACE INTO terminology_valuesets (url, name, title, version, status, lastSync) VALUES (?, ?, ?, ?, ?, ?)'
-            );
-            const now = new Date().toISOString();
-            for (const vs of valueSets) {
-                if (vs.url) {
-                    this.cachedValueSets.set(vs.url, vs);
-                    upsertStmt.run(vs.url, vs.name || null, vs.title || null, vs.version || null, vs.status || null, now);
+            // CEZIH sometimes omits its own ValueSets from the main list. 
+            // We'll add some essential ones if they are missing.
+            const essentialUrls = [
+                'http://fhir.cezih.hr/specifikacije/ValueSet/document-type',
+                'http://fhir.cezih.hr/specifikacije/ValueSet/djelatnosti-zz',
+                'http://ent.hr/fhir/ValueSet/ehe-message-types',
+                'http://fhir.cezih.hr/specifikacije/ValueSet/icd10-hr',
+                'http://fhir.cezih.hr/specifikacije/ValueSet/atc-hr',
+                'http://fhir.cezih.hr/specifikacije/ValueSet/mtp-hr'
+            ];
+
+            for (const url of essentialUrls) {
+                if (!valueSets.find(vs => vs && vs.url === url)) {
+                    try {
+                        console.log(`[TerminologyService] Fetching essential ValueSet: ${url}`);
+                        const vsRes = await axios.get(`${config.cezih.gatewaySystem}${config.cezih.services.terminology}/ValueSet?url=${encodeURIComponent(url)}`, { headers });
+                        const vs = vsRes.data.entry?.[0]?.resource;
+                        if (vs) valueSets.push(vs);
+                    } catch (e) { /* ignore */ }
                 }
             }
 
-            console.log(`[TerminologyService] Synced and persisted ${valueSets.length} ValueSets`);
+            // Cache and persist the value sets
+            const upsertStmt = db.prepare(
+                'INSERT OR REPLACE INTO terminology_valuesets (url, name, title, version, status, lastSync, fullResource) VALUES (?, ?, ?, ?, ?, ?, ?)'
+            );
+            const now = new Date().toISOString();
+            for (const vs of valueSets) {
+                if (vs && vs.url) {
+                    this.cachedValueSets.set(vs.url, vs);
+                    upsertStmt.run(
+                        vs.url, 
+                        vs.name || null, 
+                        vs.title || null, 
+                        vs.version || null, 
+                        vs.status || null, 
+                        now,
+                        JSON.stringify(vs)
+                    );
+                }
+            }
+
+            console.log(`[TerminologyService] Synced and persisted ${valueSets.length} ValueSets (with fullResource)`);
             return valueSets;
         } catch (error: any) {
             console.error('[TerminologyService] Failed to sync ValueSets:', error.message);
@@ -124,11 +154,16 @@ class TerminologyService {
 
     /**
      * Full synchronization of all terminologies.
+     * @param force - If true, ignores lastSyncDate and fetches everything
      */
-    async syncAll(): Promise<{ codeSystems: any[]; valueSets: any[] }> {
-        const codeSystems = await this.syncCodeSystems(this.lastSyncDate || undefined);
-        const valueSets = await this.syncValueSets(this.lastSyncDate || undefined);
-        this.lastSyncDate = new Date();
+    async syncAll(force = true): Promise<{ codeSystems: any[]; valueSets: any[] }> {
+        const lastUpdated = force ? undefined : (this.lastSyncDate || undefined);
+        const codeSystems = await this.syncCodeSystems(lastUpdated);
+        const valueSets = await this.syncValueSets(lastUpdated);
+        
+        if (codeSystems.length > 0 || valueSets.length > 0) {
+            this.lastSyncDate = new Date();
+        }
 
         return { codeSystems, valueSets };
     }
@@ -224,6 +259,148 @@ class TerminologyService {
         };
 
         return findConcept(cs.concept);
+    }
+
+    /**
+     * Get all concepts for a specific CodeSystem or ValueSet from the local database.
+     */
+    async getLocalConcepts(id: string): Promise<{ code: string; display: string }[]> {
+        if (!id) return [];
+
+        // 1. Try if it's a CodeSystem first (Exact Match)
+        const csSqlExact = `
+            SELECT code, display 
+            FROM terminology_concepts 
+            WHERE system = ?
+            ORDER BY code ASC
+        `;
+        let csConcepts = db.prepare(csSqlExact).all(id) as { code: string; display: string }[];
+        
+        // 2. Try Partial Match for CodeSystem
+        if (csConcepts.length === 0) {
+            const csSqlPartial = `
+                SELECT code, display 
+                FROM terminology_concepts 
+                WHERE system LIKE ? OR system LIKE ?
+                ORDER BY code ASC
+            `;
+            csConcepts = db.prepare(csSqlPartial).all(`%/CodeSystem/${id}`, `%/${id}%`) as { code: string; display: string }[];
+        }
+
+        if (csConcepts.length > 0) return csConcepts;
+
+        // 3. Try if it's a ValueSet
+        try {
+            const vsSql = 'SELECT fullResource FROM terminology_valuesets WHERE url = ? OR url LIKE ? OR url LIKE ?';
+            const vsRow = db.prepare(vsSql).get(id, `%/ValueSet/${id}`, `%/${id}%`) as any;
+            
+            if (vsRow?.fullResource) {
+                const vs = JSON.parse(vsRow.fullResource);
+                
+                // A) Resolution via Expansion if already present
+                if (vs.expansion?.contains) {
+                    return vs.expansion.contains.map((c: any) => ({ code: c.code, display: c.display || c.code }));
+                }
+
+                // B) Resolution via Compose: if it includes a system, fetch concepts for that system locally
+                const include = vs.compose?.include?.[0];
+                if (include?.system) {
+                    const localConcepts = await this.getLocalConcepts(include.system);
+                    if (localConcepts.length > 0) return localConcepts;
+                }
+            }
+        } catch (err: any) {
+            console.error('[TerminologyService] Local ValueSet check failed:', err.message);
+        }
+
+        // 4. ON-DEMAND REMOTE EXPAND (If all local attempts failed)
+        console.log(`[TerminologyService] 🚀 On-demand remote expand for: ${id}`);
+        try {
+            return await this.remoteExpand(id);
+        } catch (e: any) {
+            console.error(`[TerminologyService] Remote expand failed for ${id}:`, e.message);
+            return [];
+        }
+    }
+
+    /**
+     * Remote $expand operation for CodeSystem or ValueSet.
+     */
+    private async remoteExpand(id: string): Promise<{ code: string; display: string }[]> {
+        const headers = await authService.getSystemAuthHeaders();
+        
+        // 1. Try ValueSet $expand first
+        try {
+            let url = `${config.cezih.gatewaySystem}${config.cezih.services.terminology}/ValueSet/$expand?url=${encodeURIComponent(id)}`;
+            const response = await axios.get(url, { headers, timeout: 15000 });
+            if (response.data.expansion?.contains) {
+                const concepts = response.data.expansion.contains.map((c: any) => ({
+                    code: c.code,
+                    display: c.display || c.code
+                }));
+                
+                if (concepts.length > 0) {
+                    db.prepare('UPDATE terminology_valuesets SET fullResource = ? WHERE url = ?').run(
+                        JSON.stringify(response.data), id
+                    );
+                }
+                return concepts;
+            }
+        } catch (e: any) {
+            console.log(`[TerminologyService] remoteExpand: $expand failed for ${id}, falling back to metadata fetch.`);
+        }
+
+        // 2. Fallback: Fetch ValueSet Metadata and try to resolve via CodeSystem
+        try {
+            const url = `${config.cezih.gatewaySystem}${config.cezih.services.terminology}/ValueSet?url=${encodeURIComponent(id)}`;
+            const response = await axios.get(url, { headers, timeout: 10000 });
+            const vs = response.data.entry?.[0]?.resource;
+            
+            if (vs) {
+                // Save it for next time
+                db.prepare('UPDATE terminology_valuesets SET fullResource = ? WHERE url = ?').run(
+                    JSON.stringify(vs), id
+                );
+                
+                // Try to resolve concepts via include system
+                const includeSystem = vs.compose?.include?.[0]?.system;
+                if (includeSystem) {
+                    console.log(`[TerminologyService] Resolving ValueSet concepts via CodeSystem: ${includeSystem}`);
+                    return this.getLocalConcepts(includeSystem);
+                }
+            }
+        } catch (e) {
+            console.log(`[TerminologyService] remoteExpand: Metadata fetch failed for ${id}.`);
+        }
+
+        // 3. Try CodeSystem lookup directly (maybe it's a CodeSystem URL being expanded?)
+        try {
+            let url = `${config.cezih.gatewaySystem}${config.cezih.services.terminology}/CodeSystem?url=${encodeURIComponent(id)}`;
+            const response = await axios.get(url, { headers, timeout: 10000 });
+            const cs = response.data.entry?.[0]?.resource;
+            
+            if (cs?.concept) {
+                const concepts = cs.concept.map((c: any) => ({ code: c.code, display: c.display || c.code }));
+                
+                // Persist concepts locally
+                const insertStmt = db.prepare('INSERT OR REPLACE INTO terminology_concepts (system, code, display, version) VALUES (?, ?, ?, ?)');
+                const syncStmt = db.prepare('INSERT OR REPLACE INTO terminology_sync (system, lastSync) VALUES (?, ?)');
+                
+                const transaction = db.transaction((concepts: any[]) => {
+                    for (const concept of concepts) {
+                        insertStmt.run(id, concept.code, concept.display, cs.version || '1.0');
+                    }
+                    syncStmt.run(id, new Date().toISOString());
+                });
+                transaction(concepts);
+                
+                return concepts;
+            }
+        } catch (e: any) {
+            console.error(`[TerminologyService] Remote search for CodeSystem failed for ${id}:`, e.message);
+        }
+
+        return [];
     }
 
     /**
