@@ -14,6 +14,7 @@ import {
 import { getDocumentTypeShortLabel } from '@/lib/documentTypeLabels';
 import ChangeDocumentModal from './ChangeDocumentModal';
 import CaseModal from './CaseModal';
+import IdenSigningModal from '@/components/IdenSigningModal';
 
 export default function PatientChartPage() {
     const params = useParams();
@@ -44,6 +45,11 @@ export default function PatientChartPage() {
     const [actionInProgress, setActionInProgress] = useState<string | null>(null);
     const [visitsCollapsed, setVisitsCollapsed] = useState(true);
     const [visitActionInProgress, setVisitActionInProgress] = useState<string | null>(null);
+
+    // IDEN Modal state
+    const [idenModal, setIdenModal] = useState<{ open: boolean; label: string; fn: (() => Promise<{ success: boolean; error?: string }>) | null }>({ open: false, label: '', fn: null });
+    const openIden = (label: string, fn: () => Promise<{ success: boolean; error?: string }>) =>
+        setIdenModal({ open: true, label, fn });
 
     const fetchChartData = async (refresh: boolean = false) => {
         setLoading(!refresh); // Only show full loading if not a background refresh
@@ -133,9 +139,9 @@ export default function PatientChartPage() {
     const handleCezihCaseAction = async (c: any, action: string, label: string) => {
         if (action === '2.2') return; // CEZIH RBAC: never delete another practitioner's case
 
-        // Mirror local handleCaseAction logic: require reason for 2.7 (close), confirm for others
+        // Mirror local handleCaseAction logic: require reason for 2.4 (Zatvori/Izliječen), confirm for others
         let reason: string | undefined;
-        if (action === '2.7') {
+        if (action === '2.4') {
             const input = prompt(`${label}\n\nUnesite razlog zatvaranja:`);
             if (input === null) return; // user cancelled
             reason = input || label;
@@ -184,7 +190,7 @@ export default function PatientChartPage() {
     };
 
     const handleCloseCase = async (caseId: string) => {
-        await handleCaseAction(caseId, '2.7', 'Zatvaranje slučaja');
+        await handleCaseAction(caseId, '2.4', 'Zatvaranje slučaja (Izliječen)');
     };
 
     const fetchCezihCases = async () => {
@@ -802,8 +808,8 @@ export default function PatientChartPage() {
                                                             )}
                                                         </div>
 
-                                                        {/* Action buttons — Active / Remission cases */}
-                                                        {isActive && (
+                                                        {/* Action buttons — Active (NOT remission) */}
+                                                        {isActive && !isRemission && (
                                                             <div className="mt-3 flex gap-2">
                                                                 <button
                                                                     onClick={(e) => { e.preventDefault(); handleStartVisit(c.id, c.diagnosisCode, c.diagnosisDisplay); }}
@@ -819,11 +825,52 @@ export default function PatientChartPage() {
                                                                     Uredi
                                                                 </button>
                                                                 <button
+                                                                    onClick={(e) => { e.preventDefault(); handleCaseAction(c.id, '2.3', 'Remisija'); }}
+                                                                    disabled={actionInProgress === c.id}
+                                                                    className="py-1.5 px-3 bg-white border border-blue-200 rounded-lg text-xs font-black text-blue-600 hover:bg-blue-500 hover:text-white hover:border-blue-500 transition-all disabled:opacity-50"
+                                                                >
+                                                                    🌙 Remisija
+                                                                </button>
+                                                                <button
                                                                     onClick={(e) => { e.preventDefault(); handleCloseCase(c.id); }}
                                                                     disabled={actionInProgress === c.id}
                                                                     className="py-1.5 px-3 bg-white border border-rose-200 rounded-lg text-xs font-black text-rose-500 hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all disabled:opacity-50"
                                                                 >
                                                                     Zatvori
+                                                                </button>
+                                                                <button
+                                                                    onClick={(e) => { e.preventDefault(); handleCaseAction(c.id, '2.7', 'Brisanje slučaja'); }}
+                                                                    disabled={actionInProgress === c.id}
+                                                                    className="py-1.5 px-2 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-400 hover:bg-slate-600 hover:text-white hover:border-slate-600 transition-all disabled:opacity-50"
+                                                                    title="Obriši (admin greška)"
+                                                                >
+                                                                    🗑️
+                                                                </button>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Action buttons — Remission */}
+                                                        {isActive && isRemission && (
+                                                            <div className="mt-3 flex gap-2">
+                                                                <button
+                                                                    onClick={(e) => { e.preventDefault(); handleStartVisit(c.id, c.diagnosisCode, c.diagnosisDisplay); }}
+                                                                    className="flex-1 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all"
+                                                                >
+                                                                    📅 Nova posjeta
+                                                                </button>
+                                                                <button
+                                                                    onClick={(e) => { e.preventDefault(); setCaseModal(c); }}
+                                                                    className="py-1.5 px-3 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-600 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all"
+                                                                >
+                                                                    <Edit2 className="w-3 h-3 inline mr-1" />
+                                                                    Uredi
+                                                                </button>
+                                                                <button
+                                                                    onClick={(e) => { e.preventDefault(); handleCaseAction(c.id, '2.5', 'Relaps'); }}
+                                                                    disabled={actionInProgress === c.id}
+                                                                    className="py-1.5 px-3 bg-white border border-orange-200 rounded-lg text-xs font-black text-orange-600 hover:bg-orange-500 hover:text-white hover:border-orange-500 transition-all disabled:opacity-50"
+                                                                >
+                                                                    🔄 Relaps
                                                                 </button>
                                                             </div>
                                                         )}
@@ -839,7 +886,7 @@ export default function PatientChartPage() {
                                                                     ♻️ Ponovno otvori
                                                                 </button>
                                                                 <button
-                                                                    onClick={(e) => { e.preventDefault(); handleCaseAction(c.id, '2.3', 'Ponovljeni slučaj'); }}
+                                                                    onClick={(e) => { e.preventDefault(); handleCaseAction(c.id, '2.2', 'Ponovljeni slučaj'); }}
                                                                     disabled={actionInProgress === c.id}
                                                                     className="flex-1 py-1.5 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-600 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all disabled:opacity-50"
                                                                 >
@@ -913,8 +960,8 @@ export default function PatientChartPage() {
                                                                 )}
                                                             </div>
 
-                                                            {/* Action buttons — Active / Remission */}
-                                                            {(isActive || isRemission) && (
+                                                            {/* Action buttons — Active (NOT remission) */}
+                                                            {isActive && !isRemission && (
                                                                 <div className="mt-3 flex gap-2">
                                                                     <button
                                                                         onClick={(e) => { e.preventDefault(); handleStartVisit(undefined, c.diagnosisCode, c.diagnosisDisplay, c.cezihCaseId || c.id); }}
@@ -931,24 +978,48 @@ export default function PatientChartPage() {
                                                                         <Edit2 className="w-3 h-3 inline mr-1" />
                                                                         Uredi
                                                                     </button>
-                                                                    {isActive && (
-                                                                        <button
-                                                                            onClick={(e) => { e.preventDefault(); handleCezihCaseAction(c, '2.7', 'Zatvaranje slučaja'); }}
-                                                                            disabled={isLoading}
-                                                                            className="py-1.5 px-3 bg-white border border-rose-200 rounded-lg text-xs font-black text-rose-500 hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all disabled:opacity-50"
-                                                                        >
-                                                                            {isLoading ? '...' : 'Zatvori'}
-                                                                        </button>
-                                                                    )}
-                                                                    {isRemission && (
-                                                                        <button
-                                                                            onClick={(e) => { e.preventDefault(); handleCezihCaseAction(c, '2.5', 'Relaps'); }}
-                                                                            disabled={isLoading}
-                                                                            className="py-1.5 px-3 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-600 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all disabled:opacity-50"
-                                                                        >
-                                                                            {isLoading ? '...' : '🔁 Relaps'}
-                                                                        </button>
-                                                                    )}
+                                                                    <button
+                                                                        onClick={(e) => { e.preventDefault(); handleCezihCaseAction(c, '2.3', 'Remisija'); }}
+                                                                        disabled={isLoading}
+                                                                        className="py-1.5 px-3 bg-white border border-blue-200 rounded-lg text-xs font-black text-blue-600 hover:bg-blue-500 hover:text-white hover:border-blue-500 transition-all disabled:opacity-50"
+                                                                    >
+                                                                        {isLoading ? '...' : '🌙 Remisija'}
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={(e) => { e.preventDefault(); handleCezihCaseAction(c, '2.4', 'Zatvaranje slučaja (Izliječen)'); }}
+                                                                        disabled={isLoading}
+                                                                        className="py-1.5 px-3 bg-white border border-rose-200 rounded-lg text-xs font-black text-rose-500 hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all disabled:opacity-50"
+                                                                    >
+                                                                        {isLoading ? '...' : 'Zatvori'}
+                                                                    </button>
+                                                                </div>
+                                                            )}
+
+                                                            {/* Action buttons — Remission */}
+                                                            {isActive && isRemission && (
+                                                                <div className="mt-3 flex gap-2">
+                                                                    <button
+                                                                        onClick={(e) => { e.preventDefault(); handleStartVisit(undefined, c.diagnosisCode, c.diagnosisDisplay, c.cezihCaseId || c.id); }}
+                                                                        disabled={isLoading}
+                                                                        className="flex-1 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all disabled:opacity-50"
+                                                                    >
+                                                                        📅 Nova posjeta
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={(e) => { e.preventDefault(); setCaseModal({ ...c, isExternal: true }); }}
+                                                                        disabled={isLoading}
+                                                                        className="py-1.5 px-3 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-600 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all disabled:opacity-50"
+                                                                    >
+                                                                        <Edit2 className="w-3 h-3 inline mr-1" />
+                                                                        Uredi
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={(e) => { e.preventDefault(); handleCezihCaseAction(c, '2.5', 'Relaps'); }}
+                                                                        disabled={isLoading}
+                                                                        className="py-1.5 px-3 bg-white border border-orange-200 rounded-lg text-xs font-black text-orange-600 hover:bg-orange-500 hover:text-white hover:border-orange-500 transition-all disabled:opacity-50"
+                                                                    >
+                                                                        {isLoading ? '...' : '🔄 Relaps'}
+                                                                    </button>
                                                                 </div>
                                                             )}
 
@@ -963,7 +1034,7 @@ export default function PatientChartPage() {
                                                                         {isLoading ? '...' : '♻️ Ponovno otvori'}
                                                                     </button>
                                                                     <button
-                                                                        onClick={(e) => { e.preventDefault(); handleCezihCaseAction(c, '2.3', 'Ponovljeni slučaj'); }}
+                                                                        onClick={(e) => { e.preventDefault(); handleCezihCaseAction(c, '2.2', 'Ponovljeni slučaj'); }}
                                                                         disabled={isLoading}
                                                                         className="flex-1 py-1.5 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-600 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all disabled:opacity-50"
                                                                     >
@@ -1074,16 +1145,19 @@ export default function PatientChartPage() {
                                                             onClick={() => {
                                                                 const reason = prompt('Novi razlog dolaska (MKB-10 šifra, npr. J06.9):');
                                                                 if (!reason) return;
-                                                                setVisitActionInProgress(v.id);
-                                                                fetch(`/api/visit/${v.id}`, {
-                                                                    method: 'PUT',
-                                                                    headers: { 'Content-Type': 'application/json' },
-                                                                    body: JSON.stringify({ reasonCode: reason, reasonDisplay: reason, patientMbo: mbo }),
-                                                                })
-                                                                    .then(r => r.json())
-                                                                    .then(d => { if (d.success) { showToast('success', 'TC13: Posjet ažuriran!'); fetchChartData(); } else showToast('error', d.error || 'Greška'); })
-                                                                    .catch(() => showToast('error', 'Greška komunikacije'))
-                                                                    .finally(() => setVisitActionInProgress(null));
+                                                                openIden('Izmjena posjete (TC 13)', async () => {
+                                                                    setVisitActionInProgress(v.id);
+                                                                    try {
+                                                                        const r = await fetch(`/api/visit/${v.id}`, {
+                                                                            method: 'PUT',
+                                                                            headers: { 'Content-Type': 'application/json' },
+                                                                            body: JSON.stringify({ reasonCode: reason, reasonDisplay: reason, patientMbo: mbo }),
+                                                                        });
+                                                                        const d = await r.json();
+                                                                        if (d.success) { fetchChartData(); return { success: true }; }
+                                                                        return { success: false, error: d.error };
+                                                                    } finally { setVisitActionInProgress(null); }
+                                                                });
                                                             }}
                                                             disabled={visitActionInProgress === v.id}
                                                             className="flex-1 py-1.5 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-600 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all disabled:opacity-50"
@@ -1093,16 +1167,19 @@ export default function PatientChartPage() {
                                                         <button
                                                             onClick={() => {
                                                                 if (!confirm('Zatvori posjet? Ova akcija šalje TC14 na CEZIH.')) return;
-                                                                setVisitActionInProgress(v.id);
-                                                                fetch(`/api/visit/${v.id}/close`, {
-                                                                    method: 'POST',
-                                                                    headers: { 'Content-Type': 'application/json' },
-                                                                    body: JSON.stringify({ endDate: new Date().toISOString(), patientMbo: mbo }),
-                                                                })
-                                                                    .then(r => r.json())
-                                                                    .then(d => { if (d.success) { showToast('success', 'TC14: Posjet zatvoren!'); fetchChartData(); } else showToast('error', d.error || 'Greška'); })
-                                                                    .catch(() => showToast('error', 'Greška komunikacije'))
-                                                                    .finally(() => setVisitActionInProgress(null));
+                                                                openIden('Zatvaranje posjete (TC 14)', async () => {
+                                                                    setVisitActionInProgress(v.id);
+                                                                    try {
+                                                                        const r = await fetch(`/api/visit/${v.id}/close`, {
+                                                                            method: 'POST',
+                                                                            headers: { 'Content-Type': 'application/json' },
+                                                                            body: JSON.stringify({ endDate: new Date().toISOString(), patientMbo: mbo }),
+                                                                        });
+                                                                        const d = await r.json();
+                                                                        if (d.success) { fetchChartData(); return { success: true }; }
+                                                                        return { success: false, error: d.error };
+                                                                    } finally { setVisitActionInProgress(null); }
+                                                                });
                                                             }}
                                                             disabled={visitActionInProgress === v.id}
                                                             className="py-1.5 px-3 bg-white border border-rose-200 rounded-lg text-xs font-black text-rose-500 hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all disabled:opacity-50"
@@ -1182,6 +1259,18 @@ export default function PatientChartPage() {
                     }
                 />
             )}
+            {/* IDEN Signing Modal */}
+            <IdenSigningModal
+                open={idenModal.open}
+                actionLabel={idenModal.label}
+                signingFn={idenModal.fn || (() => Promise.resolve({ success: false }))}
+                onDone={(success) => {
+                    setIdenModal(m => ({ ...m, open: false }));
+                    if (success) showToast('success', `${idenModal.label} — uspješno!`);
+                    else showToast('error', `${idenModal.label} — neuspješno.`);
+                }}
+                onCancel={() => setIdenModal(m => ({ ...m, open: false }))}
+            />
         </div>
     );
 }

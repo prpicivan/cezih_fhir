@@ -5,12 +5,14 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { UserPlus, ArrowLeft, Save, AlertCircle } from 'lucide-react';
 import { useToast, Toast } from '@/components/Toast';
+import IdenSigningModal from '@/components/IdenSigningModal';
 
 export default function RegisterForeignerPage() {
     const router = useRouter();
     const { toast, showToast, hideToast } = useToast();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [idenOpen, setIdenOpen] = useState(false);
 
     const [formData, setFormData] = useState({
         firstName: '',
@@ -27,11 +29,9 @@ export default function RegisterForeignerPage() {
         setFormData(prev => ({ ...prev, [name]: value }));
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const submitForeigner = async (): Promise<{ success: boolean; error?: string }> => {
         setLoading(true);
         setError(null);
-
         try {
             const res = await fetch('/api/patient/foreigner/register', {
                 method: 'POST',
@@ -39,21 +39,26 @@ export default function RegisterForeignerPage() {
                 body: JSON.stringify(formData)
             });
             const data = await res.json();
-
-            if (data.success) {
-                showToast('success', 'Stranac uspješno registriran u CEZIH sustav (PMIR).');
-                router.push('/dashboard/patients');
-            } else {
-                setError(data.error || 'Registracija nije uspjela.');
-            }
+            if (data.success) return { success: true };
+            const msg = data.error || 'Registracija nije uspjela.';
+            setError(msg);
+            return { success: false, error: msg };
         } catch (err: any) {
-            setError(err.message || 'Greška u komunikaciji.');
+            const msg = err.message || 'Greška u komunikaciji.';
+            setError(msg);
+            return { success: false, error: msg };
         } finally {
             setLoading(false);
         }
     };
 
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        setIdenOpen(true);
+    };
+
     return (
+        <>
         <div className="max-w-2xl mx-auto space-y-6">
             <Toast toast={toast} onClose={hideToast} />
             <div className="flex items-center gap-4 mb-8">
@@ -210,5 +215,20 @@ export default function RegisterForeignerPage() {
                 </div>
             </div>
         </div>
+
+        <IdenSigningModal
+            open={idenOpen}
+            actionLabel="Registracija stranog pacijenta (TC 11)"
+            signingFn={submitForeigner}
+            onDone={(success) => {
+                setIdenOpen(false);
+                if (success) {
+                    showToast('success', 'Stranac uspješno registriran!');
+                    router.push('/dashboard/patients');
+                }
+            }}
+            onCancel={() => setIdenOpen(false)}
+        />
+        </>
     );
 }

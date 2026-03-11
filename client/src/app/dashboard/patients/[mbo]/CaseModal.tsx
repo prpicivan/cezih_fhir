@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Search, AlertCircle, CheckCircle2, Loader2, ClipboardList } from 'lucide-react';
+import IdenSigningModal from '@/components/IdenSigningModal';
 
 interface DiagnosisSuggestion {
     code: string;
@@ -43,6 +44,7 @@ export default function CaseModal({ existingCase, patientMbo, onClose, onSuccess
 
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [idenOpen, setIdenOpen] = useState(false);
 
     const diagSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const suggestionsRef = useRef<HTMLDivElement>(null);
@@ -89,20 +91,17 @@ export default function CaseModal({ existingCase, patientMbo, onClose, onSuccess
         return () => document.removeEventListener('mousedown', handler);
     }, []);
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
+    /** Core API call — used by IdenSigningModal as signingFn */
+    const submitCase = async (): Promise<{ success: boolean; error?: string }> => {
         if (!diagnosisSelected || !form.diagnosisCode) {
             setError('Morate odabrati MKB-10 dijagnozu iz ponuđenog popisa.');
-            return;
+            return { success: false, error: 'Nije odabrana dijagnoza.' };
         }
         setSubmitting(true);
         setError(null);
-
         try {
             let res: Response;
-
             if (isEditMode) {
-                // TC17 – Update existing case
                 res = await fetch(`/api/case/${existingCase.id}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
@@ -115,7 +114,6 @@ export default function CaseModal({ existingCase, patientMbo, onClose, onSuccess
                     }),
                 });
             } else {
-                // TC16 – Create new case
                 res = await fetch('/api/case/create', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -128,21 +126,30 @@ export default function CaseModal({ existingCase, patientMbo, onClose, onSuccess
                     }),
                 });
             }
-
             const data = await res.json();
-            if (data.success) {
-                onSuccess();
-            } else {
-                setError(data.error || 'Nepoznata pogreška.');
-            }
-        } catch {
-            setError('Greška u komunikaciji s poslužiteljem.');
+            if (data.success) return { success: true };
+            setError(data.error || 'Nepoznata pogreška.');
+            return { success: false, error: data.error };
+        } catch (e: any) {
+            const msg = 'Greška u komunikaciji s poslužiteljem.';
+            setError(msg);
+            return { success: false, error: msg };
         } finally {
             setSubmitting(false);
         }
     };
 
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!diagnosisSelected || !form.diagnosisCode) {
+            setError('Morate odabrati MKB-10 dijagnozu iz ponuđenog popisa.');
+            return;
+        }
+        setIdenOpen(true);
+    };
+
     return (
+        <>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
             <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden">
                 {/* Header */}
@@ -327,5 +334,18 @@ export default function CaseModal({ existingCase, patientMbo, onClose, onSuccess
                 </div>
             </div>
         </div>
+
+        {/* IDEN Signing Modal */}
+        <IdenSigningModal
+            open={idenOpen}
+            actionLabel={isEditMode ? 'Uređivanje slučaja (TC 17)' : 'Otvaranje slučaja (TC 16)'}
+            signingFn={submitCase}
+            onDone={(success) => {
+                setIdenOpen(false);
+                if (success) onSuccess();
+            }}
+            onCancel={() => setIdenOpen(false)}
+        />
+        </>
     );
 }

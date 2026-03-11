@@ -539,35 +539,42 @@ class CaseService {
         clinicalStatus?: string;
         auditAction: string;
     }> = {
+            // 2.2: Ponovljeni / Recidiv — creates NEW case referencing old closed case
             '2.2': {
                 eventCode: '2.2',
-                profile: 'hr-delete-health-issue-message',
-                auditAction: 'CASE_DELETE',
-            },
-            '2.3': {
-                eventCode: '2.3',
                 profile: 'hr-create-recurrent-health-issue-message',
                 clinicalStatus: 'recurrence',
                 auditAction: 'CASE_RECURRENT',
             },
-            '2.4': {
-                eventCode: '2.4',
-                profile: 'hr-update-health-issue-clinical-status-message',
-                clinicalStatus: 'relapse', // NOT recurrence — per hr-condition docs
-                auditAction: 'CASE_RECIDIV',
-            },
-            '2.5': {
-                eventCode: '2.5',
+            // 2.3: Remisija — puts active case into remission (disease in remission)
+            '2.3': {
+                eventCode: '2.3',
                 profile: 'hr-update-health-issue-clinical-status-message',
                 clinicalStatus: 'remission',
                 auditAction: 'CASE_REMISSION',
             },
-            '2.7': {
-                eventCode: '2.7',
-                profile: 'hr-delete-health-issue-message', // CEZIH internally maps 2.7 to this profile
-                // No clinicalStatus — profile forbids it (max=0)
+            // 2.4: Zatvori (Izliječen / Resolved) — closes active case as resolved/healed
+            '2.4': {
+                eventCode: '2.4',
+                profile: 'hr-update-health-issue-clinical-status-message',
+                clinicalStatus: 'resolved',
                 auditAction: 'CASE_CLOSE',
             },
+            // 2.5: Relaps — revives case from remission back to active
+            '2.5': {
+                eventCode: '2.5',
+                profile: 'hr-update-health-issue-clinical-status-message',
+                clinicalStatus: 'active',
+                auditAction: 'CASE_RELAPSE',
+            },
+            // 2.7: Obriši (administrativna greška) — entered-in-error, uses delete profile
+            '2.7': {
+                eventCode: '2.7',
+                profile: 'hr-delete-health-issue-message',
+                // clinicalStatus omitted — hr-delete profile forbids it (max=0)
+                auditAction: 'CASE_DELETE',
+            },
+            // 2.8: Ponovno otvori — reopens incorrectly closed case back to active
             '2.8': {
                 eventCode: '2.8',
                 profile: 'hr-update-health-issue-clinical-status-message',
@@ -586,8 +593,8 @@ class CaseService {
         data: Partial<CaseData> & { previousCaseId?: string; reason?: string; externalCaseData?: any } | undefined,
         userToken: string
     ): Promise<any> {
-        // Action 2.3 (recurrent case) is a special create — delegates to createCase with reference
-        if (action === '2.3') {
+        // Action 2.2 (Ponovljeni/Recidiv) is a special create — delegates to createRecurrentCase
+        if (action === '2.2') {
             return this.createRecurrentCase(caseId, data || {}, userToken);
         }
 
@@ -617,19 +624,19 @@ class CaseService {
 
         // Update local DB based on action
         try {
-            if (action === '2.2') {
-                // Delete — mark as entered-in-error
-                db.prepare('UPDATE cases SET status = ? WHERE id = ?').run('entered-in-error', caseId);
-            } else if (action === '2.7') {
-                // Close — resolved + endDate
+            if (action === '2.4') {
+                // Zatvori (Izliječen/Resolved) — finished + resolved + endDate
                 db.prepare('UPDATE cases SET status = ?, end = ?, clinicalStatus = ? WHERE id = ?')
                     .run('finished', new Date().toISOString(), 'resolved', caseId);
+            } else if (action === '2.7') {
+                // Obriši (admin greška) — entered-in-error
+                db.prepare('UPDATE cases SET status = ? WHERE id = ?').run('entered-in-error', caseId);
             } else if (action === '2.8') {
-                // Reopen — active, clear endDate
+                // Ponovno otvori — active, clear endDate
                 db.prepare('UPDATE cases SET status = ?, end = NULL, clinicalStatus = ? WHERE id = ?')
                     .run('active', 'active', caseId);
-            } else if (action === '2.4' || action === '2.5') {
-                // Recidiv / Remission — keep active but change clinicalStatus
+            } else if (action === '2.3' || action === '2.5') {
+                // 2.3=Remisija, 2.5=Relaps — update clinicalStatus only, case stays active
                 db.prepare('UPDATE cases SET clinicalStatus = ? WHERE id = ?')
                     .run(actionDef.clinicalStatus, caseId);
             }
@@ -638,9 +645,9 @@ class CaseService {
         }
 
         // Build FHIR Condition resource
-        // hr-delete-health-issue-message profile (used for 2.2/2.7) is very restrictive:
+        // hr-delete-health-issue-message profile (2.7 only) is very restrictive:
         // only identifier, subject, note are allowed (code, asserter, onsetDateTime etc. are max=0)
-        const isDeleteProfile = (action === '2.2' || action === '2.7');
+        const isDeleteProfile = (action === '2.7');
 
         const conditionResource: any = {
             resourceType: 'Condition',
@@ -662,10 +669,9 @@ class CaseService {
         };
 
         if (isDeleteProfile) {
-            // Delete (2.2) / Close (2.7): minimal Condition — only identifier + subject + note
-            // Profile hr-delete-health-issue-message forbids: code, clinicalStatus, onsetDateTime, asserter, etc.
-            // For 2.2: CEZIH automatically sets verificationStatus=entered-in-error (docs: "zanemaruje")
-            // note with annotation-type (himgmt-1 rule)
+            // 2.7 (Obriši/admin greška): minimal Condition — only identifier + subject + note
+            // hr-delete-health-issue-message forbids: code, clinicalStatus, onsetDateTime, asserter, etc.
+            // note with annotation-type extension required by himgmt-1 rule
             conditionResource.note = [{
                 extension: [{
                     url: CEZIH_EXTENSIONS.ANNOTATION_TYPE,
@@ -675,7 +681,7 @@ class CaseService {
                         display: 'Razlog brisanja podatka',
                     },
                 }],
-                text: data?.reason || (action === '2.7' ? 'Zatvaranje slučaja' : 'Brisanje slučaja'),
+                text: data?.reason || 'Brisanje slučaja (administrativna greška)',
             }];
         } else {
             // Clinical status updates (2.4, 2.5, 2.8): minimal Condition
