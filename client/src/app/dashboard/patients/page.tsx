@@ -101,7 +101,7 @@ export default function PatientsPage() {
                         className="flex items-center justify-center gap-2 bg-white border border-blue-600 text-blue-600 hover:bg-blue-50 px-4 py-2.5 rounded-xl font-medium transition-all shadow-sm"
                     >
                         <Search className="w-4 h-4" />
-                        Registracija pacijenta (TC 10)
+                        Dohvat pacijenata (TC 10)
                     </button>
                     <Link
                         href="/dashboard/patients/register-foreigner"

@@ -30,7 +30,8 @@ export interface VisitData {
     diagnosisCode?: string;
     diagnosisDisplay?: string;
     class: 'AMB' | 'IMP' | 'EMER';
-    caseId?: string;
+    caseId?: string;       // local or CEZIH case ID for locally-created cases
+    cezihCaseId?: string;  // TC15-fetched CEZIH case identifikator-slucaja (cmmm...)
     orgIdentifierSystem?: string;
     orgIdentifierValue?: string;
     skipServiceProvider?: boolean;
@@ -92,7 +93,8 @@ class VisitService {
             reasonCode?: string;
             reasonDisplay?: string;
             class?: 'AMB' | 'IMP' | 'EMER';
-            caseId?: string;
+            caseId?: string;        // local/CEZIH case ID for own cases (CASE_ID system)
+            cezihCaseId?: string;   // TC15-fetched case identifikator-slucaja (identifikator-slucaja system)
             patientFhirId?: string;
             skipServiceProvider?: boolean;
             orgIdentifierSystem?: string;
@@ -259,7 +261,18 @@ class VisitService {
             encounterResource.reasonCode = [{ text: data.reasonDisplay || data.reasonCode }];
         }
 
-        if (data.caseId) {
+        if (data.cezihCaseId) {
+            // TC15-fetched external case: use identifikator-slucaja system (no contained Condition needed)
+            encounterResource.diagnosis = [{
+                condition: {
+                    type: 'Condition',
+                    identifier: {
+                        system: CEZIH_IDENTIFIERS.CASE_ID, // http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja
+                        value: data.cezihCaseId,
+                    },
+                },
+            }];
+        } else if (data.caseId) {
             const conditionContainedId = uuidv4();
             // Add contained Condition so HAPI can resolve the reference locally
             encounterResource.contained = [{
@@ -379,6 +392,7 @@ class VisitService {
             reasonDisplay: data.reasonDisplay,
             class: data.class,
             caseId: data.caseId,
+            cezihCaseId: (data as any).cezihCaseId,
             patientFhirId: data.patientFhirId,
             skipServiceProvider: data.skipServiceProvider,
             orgIdentifierSystem: data.orgIdentifierSystem,

@@ -886,156 +886,73 @@ class ClinicalDocumentService {
         };
         const docTypeDisplay = DOC_TYPE_DISPLAY[docType] || docType;
 
-        // Build TC20 cancel bundle — EXACT match of official CEZIH example JSON.
-        // NO meta.profile on any resource. NO signature. Real values substituted.
+        // TC20: Storno = ITI-65 Bundle prema CEZIH specifikaciji!
+        // - DocumentReference.masterIdentifier = OID dokumenta koji se stornira (ISTI!)
+        // - DocumentReference.status = 'entered-in-error'
+        // - meta.profile na List i DocumentReference (slicing is CLOSED)
+        // - Oba entry-ja koriste POST (standardni ITI-65)
         const cancelBundle: any = {
             resourceType: 'Bundle',
             type: 'transaction',
+            meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HRMinimalProvideDocumentBundle'] },
             entry: [
-                // Entry 0: List (SubmissionSet) — NO meta.profile, two identifiers, source field
+                // Entry 0: List (SubmissionSet)
                 {
                     fullUrl: `urn:uuid:${listUuid}`,
                     resource: {
                         resourceType: 'List',
-                        extension: [{
-                            url: 'https://profiles.ihe.net/ITI/MHD/StructureDefinition/ihe-sourceId',
-                            valueIdentifier: {
-                                system: 'urn:ietf:rfc:3986',
-                                value: `urn:uuid:${uuidv4()}`,
-                            }
-                        }],
+                        id: listUuid,
+                        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-document-submissionset'] },
+                        extension: [{ url: 'https://profiles.ihe.net/ITI/MHD/StructureDefinition/ihe-sourceId', valueIdentifier: { system: 'urn:ietf:rfc:3986', value: 'urn:oid:2.16.840.1.113883.2.7.50.2.1' } }],
                         identifier: [
                             { use: 'official', system: 'urn:ietf:rfc:3986', value: `urn:uuid:${listUuid}` },
                             { use: 'usual', system: 'urn:ietf:rfc:3986', value: `urn:uuid:${uuidv4()}` },
                         ],
                         status: 'current',
                         mode: 'working',
-                        code: {
-                            coding: [{
-                                system: 'https://profiles.ihe.net/ITI/MHD/CodeSystem/MHDlistTypes',
-                                code: 'submissionset',
-                            }]
-                        },
+                        code: { coding: [{ system: 'https://profiles.ihe.net/ITI/MHD/CodeSystem/MHDlistTypes', code: 'submissionset' }] },
                         subject: {
                             type: 'Patient',
-                            identifier: {
-                                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO',
-                                value: patientMbo,
-                            }
+                            identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO', value: patientMbo },
+                            ...(patientDisplay ? { display: patientDisplay } : {})
                         },
                         date: nowIso,
-                        source: {
-                            type: 'Practitioner',
-                            identifier: {
-                                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
-                                value: practHzjz,
-                            }
-                        },
+                        source: { type: 'Practitioner', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika', value: practHzjz } },
                         entry: [{ item: { reference: `urn:uuid:${docRefUuid}` } }]
                     },
                     request: { method: 'POST', url: 'List' }
                 },
-                // Entry 1: DocumentReference — NO meta.profile, full fields per official CEZIH example
+                // Entry 1: DocumentReference — status=entered-in-error, masterIdentifier=ISTI OID
                 {
                     fullUrl: `urn:uuid:${docRefUuid}`,
                     resource: {
                         resourceType: 'DocumentReference',
-                        masterIdentifier: {
-                            use: 'usual',
-                            system: 'urn:ietf:rfc:3986',
-                            value: oidValue,
-                        },
-                        identifier: [
-                            { use: 'official', system: 'urn:ietf:rfc:3986', value: `urn:uuid:${docRefUuid}` }
-                        ],
+                        id: docRefUuid,
+                        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-document-reference'] },
+                        masterIdentifier: { use: 'usual', system: 'urn:ietf:rfc:3986', value: oidValue },
+                        identifier: [{ use: 'official', system: 'urn:ietf:rfc:3986', value: `urn:uuid:${docRefUuid}` }],
                         status: 'entered-in-error',
-                        type: {
-                            coding: [{
-                                system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type',
-                                code: docType,
-                                display: docTypeDisplay,
-                            }]
-                        },
+                        type: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type', code: docType, display: docTypeDisplay }] },
                         subject: {
                             type: 'Patient',
-                            identifier: {
-                                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO',
-                                value: patientMbo,
-                            },
+                            identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO', value: patientMbo },
                             ...(patientDisplay ? { display: patientDisplay } : {})
                         },
                         date: docDate,
                         author: [
-                            {
-                                type: 'Practitioner',
-                                identifier: {
-                                    system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
-                                    value: practHzjz,
-                                },
-                                display: practDisplay,
-                            },
-                            {
-                                type: 'Organization',
-                                identifier: {
-                                    system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije',
-                                    value: orgId,
-                                },
-                                display: orgDisplay,
-                            }
+                            { type: 'Practitioner', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika', value: practHzjz }, display: practDisplay },
+                            { type: 'Organization', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije', value: orgId }, display: orgDisplay }
                         ],
-                        authenticator: {
-                            type: 'Practitioner',
-                            identifier: {
-                                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
-                                value: practHzjz,
-                            },
-                            display: practDisplay,
-                        },
-                        custodian: {
-                            type: 'Organization',
-                            identifier: {
-                                system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije',
-                                value: orgId,
-                            },
-                            display: orgDisplay,
-                        },
+                        authenticator: { type: 'Practitioner', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika', value: practHzjz }, display: practDisplay },
+                        custodian: { type: 'Organization', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije', value: orgId }, display: orgDisplay },
                         description: docTypeDisplay,
-                        content: [{
-                            attachment: {
-                                contentType: 'application/fhir+json',
-                                language: 'hr',
-                                url: `urn:uuid:${uuidv4()}`,
-                            }
-                        }],
+                        content: [{ attachment: { contentType: 'application/fhir+json', language: 'hr', url: `urn:uuid:${uuidv4()}` } }],
                         ...(encId ? {
                             context: {
-                                encounter: [{
-                                    type: 'Encounter',
-                                    identifier: {
-                                        system: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-posjete',
-                                        value: encId,
-                                    }
-                                }],
-                                period: {
-                                    start: encounterStart,
-                                    end: encounterEnd,
-                                },
-                                practiceSetting: {
-                                    coding: [{
-                                        system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/djelatnosti-zz',
-                                        code: '1010000',
-                                        display: 'Opca/obiteljska medicina',
-                                    }]
-                                },
-                                ...(condFhirId ? {
-                                    related: [{
-                                        type: 'Condition',
-                                        identifier: {
-                                            system: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja',
-                                            value: condFhirId,
-                                        }
-                                    }]
-                                } : {})
+                                encounter: [{ type: 'Encounter', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-posjete', value: encId } }],
+                                period: { start: encounterStart, end: encounterEnd },
+                                practiceSetting: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/djelatnosti-zz', code: '1010000', display: 'Opca/obiteljska medicina' }] },
+                                ...(condFhirId ? { related: [{ type: 'Condition', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja', value: condFhirId } }] } : {})
                             }
                         } : {})
                     },
@@ -1044,38 +961,33 @@ class ClinicalDocumentService {
             ],
         };
 
-        // NO meta.profile, NO signature — exact match of official CEZIH example
-        const finalCancelBundle = cancelBundle;
-        console.log('[ClinicalDocumentService] TC20: official CEZIH example structure (no meta.profile, no signature)');
-
-        // Debug: save final bundle
+        // Debug: save bundle
         try {
-            const fs = require('fs');
-            const path = require('path');
-            fs.writeFileSync(path.join(process.cwd(), 'tmp', 'tc20-cancel.json'), JSON.stringify(finalCancelBundle, null, 2));
+            const fs2 = require('fs');
+            const path2 = require('path');
+            fs2.writeFileSync(path2.join(process.cwd(), 'tmp', 'tc20-cancel.json'), JSON.stringify(cancelBundle, null, 2));
         } catch (e) { }
+
+        console.log('[ClinicalDocumentService] TC20: ITI-65 Bundle, meta.profile on List+DocRef, masterIdentifier=originalOID, status=entered-in-error');
 
         let responseData: any = null;
         let errorMessage: string | undefined;
 
         try {
-            // Send to /iti-65-service (same endpoint as TC18) via submitMhdToGateway
             const { submitMhdToGateway } = await import('./mhd-bundle.builder');
-            const result = await submitMhdToGateway(finalCancelBundle);
+            const result = await submitMhdToGateway(cancelBundle);
             responseData = result;
             if (result.success) {
                 console.log('[ClinicalDocumentService] ✅ TC20 Cancel accepted by CEZIH!');
             } else {
-                // submitMhdToGateway catches HTTP errors internally and returns { success: false }
                 errorMessage = result.error || result.data?.cezihError || 'CEZIH rejected cancel';
                 console.warn(`[ClinicalDocumentService] TC20 Cancel rejected: ${errorMessage}`);
-                console.warn(`[ClinicalDocumentService] TC20 issues:`, JSON.stringify(result.data?.issues)?.slice(0, 2000));
+                console.warn('[ClinicalDocumentService] TC20 CEZIH response:', JSON.stringify(result.data)?.slice(0, 2000));
             }
         } catch (error: any) {
-            // Unexpected error (e.g. network failure before response)
             const errStatus = error.response?.status;
             const errBody = error.response?.data;
-            console.warn(`[ClinicalDocumentService] TC20 Cancel unexpected error: HTTP ${errStatus || '?'}: ${error.message}`);
+            console.warn(`[ClinicalDocumentService] TC20 Cancel failed: HTTP ${errStatus || '?'}: ${error.message}`);
             errorMessage = error.message;
             responseData = {
                 success: false,
@@ -1087,13 +999,14 @@ class ClinicalDocumentService {
                 id: documentOid,
                 status: 'cancelled',
             };
+            try { require('fs').writeFileSync(require('path').join(process.cwd(), 'tmp', 'tc20-error.json'), JSON.stringify(errBody, null, 2)); } catch (e) { }
         } finally {
             auditService.log({
                 patientMbo,
                 action: 'CANCEL_DOCUMENT',
                 direction: 'OUTGOING_CEZIH',
                 status: errorMessage ? 'ERROR' : 'SUCCESS',
-                payload_req: finalCancelBundle,
+                payload_req: cancelBundle,
                 payload_res: responseData,
                 error_msg: errorMessage,
             });

@@ -10,6 +10,7 @@ import {
     Smartphone, Loader2, SmartphoneNfc, Bell, Wifi
 } from 'lucide-react';
 import { useToast, Toast } from '@/components/Toast';
+import IdenSigningModal from '@/components/IdenSigningModal';
 
 // ── Circular SVG countdown timer (same as login page) ─────────────────────────
 function CircleTimer({ seconds }: { seconds: number }) {
@@ -214,6 +215,7 @@ function ClinicalWorkspace() {
     const mbo = searchParams.get('mbo');
     const patientMbo = searchParams.get('patientMbo');
     const caseIdParam = searchParams.get('caseId');
+    const cezihCaseIdParam = searchParams.get('cezihCaseId'); // TC15-fetched external case ID
     const mkbParam = searchParams.get('mkb');
     const mkbDisplayParam = searchParams.get('mkbDisplay');
 
@@ -240,6 +242,7 @@ function ClinicalWorkspace() {
     const [showSuggestions, setShowSuggestions] = useState(false);
 
     const [startDate, setStartDate] = useState<string>('');
+    const [docType, setDocType] = useState<'011' | '012' | '013'>('011');
     const [logs, setLogs] = useState<any[]>([]);
     const [visitType, setVisitType] = useState<'AMB' | 'IMP' | 'EMER'>('AMB');
 
@@ -258,6 +261,17 @@ function ClinicalWorkspace() {
     const [signingError, setSigningError] = useState<string | null>(null);
     const [transactionCode, setTransactionCode] = useState<string | null>(null);
     const [currentDocOid, setCurrentDocOid] = useState<string | null>(null);
+
+    // IDEN Modal State (TC12, TC13, TC14)
+    const [idenModalOpen, setIdenModalOpen] = useState(false);
+    const [idenModalLabel, setIdenModalLabel] = useState('');
+    const [idenModalFn, setIdenModalFn] = useState<(() => Promise<{ success: boolean; error?: string }>) | null>(null);
+
+    const openIdenModal = (label: string, fn: () => Promise<{ success: boolean; error?: string }>) => {
+        setIdenModalLabel(label);
+        setIdenModalFn(() => fn);
+        setIdenModalOpen(true);
+    };
 
     // TC18 Stepper Flow State
     const [isStepperOpen, setIsStepperOpen] = useState(false);
@@ -362,11 +376,9 @@ function ClinicalWorkspace() {
 
     const addLog = (msg: string) => { }; // Legacy no-op, we use database-backed Audit Logs
 
-    // TC 12: Create Visit (Encounter)
+    // TC 12: Create Visit — opens IDEN modal
     const startVisit = async () => {
-        setLoading(true);
-        try {
-            addLog('Započinjem posjet (TC 12)...');
+        openIdenModal('Otvaranje posjete (TC 12)', async () => {
             const res = await fetch('/api/visit/create', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -377,29 +389,22 @@ function ClinicalWorkspace() {
                     startDate: new Date(startDate).toISOString(),
                     class: visitType,
                     caseId: selectedCaseId || undefined,
+                    cezihCaseId: cezihCaseIdParam || undefined,
                     reasonCode: visitReasonCode || undefined,
                     reasonDisplay: visitReasonDisplay || undefined,
                 })
             });
             const data = await res.json();
-
             if (data.success) {
                 const localId = data.result?.localVisitId || 'fallback-id';
                 const cezihId = data.result?.cezihVisitId;
                 setVisitId(localId);
                 setCezihVisitId(cezihId || localId);
                 setVisitStatus('active');
-                addLog(`Posjet uspješno kreiran. CEZIH ID: ${cezihId || 'lokalni'}`);
-            } else {
-                addLog(`Greška: ${data.error}`);
-                showToast('error', `TC12 greška: ${data.error}`);
+                return { success: true };
             }
-        } catch (err: any) {
-            addLog(`Greška komunikacije: ${err.message}`);
-            showToast('error', `Greška: ${err.message}`);
-        } finally {
-            setLoading(false);
-        }
+            return { success: false, error: data.error };
+        });
     };
 
     // TC 18: Full Send Flow — Stepper (TC16 → wait → sign → submit)
@@ -471,7 +476,7 @@ function ClinicalWorkspace() {
                     finding: findingText,
                     status: physicalStatus,
                     recommendation,
-                    type: '011',
+                    type: docType,
                 })
             });
             const sendData = await sendRes.json();
@@ -608,40 +613,28 @@ function ClinicalWorkspace() {
         }
     };
 
-    // TC 14: Close Visit
+    // TC 14: Close Visit — opens IDEN modal
     const closeVisit = async () => {
         if (!confirm('Jeste li sigurni da želite završiti posjet?')) return;
-
-        setLoading(true);
-        try {
-            addLog('Zatvaram posjet (TC 14)...');
+        openIdenModal('Zatvaranje posjete (TC 14)', async () => {
             const res = await fetch(`/api/visit/${visitId}/close`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    endDate: new Date().toISOString(),
-                })
+                body: JSON.stringify({ endDate: new Date().toISOString() })
             });
             const data = await res.json();
-
             if (data.success) {
                 setVisitStatus('finished');
-                addLog('Posjet uspješno zatvoren.');
-            } else {
-                addLog(`Greška: ${data.error}`);
+                return { success: true };
             }
-        } catch (err: any) {
-            addLog(`Greška komunikacije: ${err.message}`);
-        } finally {
-            setLoading(false);
-        }
+            return { success: false, error: data.error };
+        });
     };
 
+    // TC 13: Update Visit — opens IDEN modal
     const updateVisit = async () => {
         if (!visitId) return;
-        setLoading(true);
-        try {
-            addLog('Ažuriram posjet (TC 13)...');
+        openIdenModal('Izmjena posjete (TC 13)', async () => {
             const res = await fetch(`/api/visit/${visitId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -651,22 +644,26 @@ function ClinicalWorkspace() {
                 })
             });
             const data = await res.json();
-
-            if (data.success) {
-                addLog('Posjet uspješno ažuriran (dodana dijagnoza).');
-            } else {
-                addLog(`Greška: ${data.error}`);
-            }
-        } catch (err: any) {
-            addLog(`Greška komunikacije: ${err.message}`);
-        } finally {
-            setLoading(false);
-        }
+            if (data.success) return { success: true };
+            return { success: false, error: data.error };
+        });
     };
 
     return (
         <div className="space-y-6">
             <Toast toast={toast} onClose={hideToast} />
+            {/* IDEN Signing Modal — TC12, TC13, TC14 */}
+            <IdenSigningModal
+                open={idenModalOpen}
+                actionLabel={idenModalLabel}
+                signingFn={idenModalFn || (() => Promise.resolve({ success: false }))}
+                onDone={(success) => {
+                    setIdenModalOpen(false);
+                    if (success) showToast('success', `${idenModalLabel} — uspješno potpisano!`);
+                    else showToast('error', `${idenModalLabel} — potpisivanje nije uspjelo.`);
+                }}
+                onCancel={() => setIdenModalOpen(false)}
+            />
             {/* Header */}
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
@@ -684,15 +681,7 @@ function ClinicalWorkspace() {
                 <div className="flex flex-wrap items-center justify-end gap-3">
                     {visitStatus === 'idle' && (
                         <>
-                            <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-slate-200">
-                                <Calendar className="w-4 h-4 text-slate-400" />
-                                <input
-                                    type="datetime-local"
-                                    value={startDate}
-                                    onChange={(e) => setStartDate(e.target.value)}
-                                    className="text-sm text-slate-700 outline-none bg-transparent font-medium"
-                                />
-                            </div>
+
                             <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-slate-200">
                                 <Activity className="w-4 h-4 text-slate-400" />
                                 <select
@@ -700,67 +689,65 @@ function ClinicalWorkspace() {
                                     onChange={(e) => setVisitType(e.target.value as any)}
                                     className="text-sm text-slate-700 outline-none bg-transparent font-medium"
                                 >
-                                    <option value="AMB">Ambulantno (AMB)</option>
-                                    <option value="IMP">Bolničko (IMP)</option>
-                                    <option value="EMER">Hitna (EMER)</option>
+                                    <option value="AMB">Izvješće nakon pregleda u ambulanti privatne zdravstvene ustanove</option>
+                                    <option value="IMP">Nalazi iz specijalističke ordinacije privatne zdravstvene ustanove</option>
+                                    <option value="EMER">Otpusno pismo iz privatne zdravstvene ustanove</option>
                                 </select>
                             </div>
                             {/* Case selector (TC 15-17) */}
                             <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-slate-200">
                                 <ClipboardList className="w-4 h-4 text-amber-500" />
-                                <div className="flex items-center gap-2">
-                                    <select
-                                        value={selectedCaseId}
-                                        onChange={(e) => setSelectedCaseId(e.target.value)}
-                                        className="text-sm text-slate-700 outline-none bg-transparent font-medium max-w-[150px]"
-                                    >
-                                        <option value="">Bez slučaja</option>
-                                        {patientCases.map((c: any) => (
-                                            <option key={c.id} value={c.id}>
-                                                {c.diagnosisCode ? `${c.diagnosisCode} — ` : ''}{c.title || c.diagnosisDisplay || 'Slučaj'}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <button
-                                        onClick={() => refreshCases(true)}
-                                        className="p-1 hover:bg-amber-50 rounded text-amber-600"
-                                        title="Osvježi slučajeve s CEZIH-a"
-                                    >
-                                        <Database className="w-3.5 h-3.5" />
-                                    </button>
-                                </div>
+                                {cezihCaseIdParam ? (
+                                    /* CEZIH case — show read-only badge instead of dropdown */
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200">🌐 CEZIH</span>
+                                        <span className="text-sm text-slate-700 font-medium">
+                                            {mkbParam && <span className="font-black text-slate-900">{mkbParam}</span>}
+                                            {mkbParam && mkbDisplayParam && ' — '}
+                                            {mkbDisplayParam
+                                                ? (mkbDisplayParam.length > 40 ? mkbDisplayParam.slice(0, 40) + '…' : mkbDisplayParam)
+                                                : 'Vanjski CEZIH slučaj'}
+                                        </span>
+                                    </div>
+                                ) : (
+                                    /* Local case — standard dropdown */
+                                    <div className="flex items-center gap-2">
+                                        <select
+                                            value={selectedCaseId}
+                                            onChange={(e) => {
+                                                const id = e.target.value;
+                                                setSelectedCaseId(id);
+                                                if (id) {
+                                                    const c = patientCases.find((c: any) => c.id === id);
+                                                    if (c) {
+                                                        setDiagnosisCode(c.diagnosisCode || '');
+                                                        setDiagnosisDisplay(c.diagnosisDisplay || c.title || '');
+                                                    }
+                                                } else {
+                                                    setDiagnosisCode('');
+                                                    setDiagnosisDisplay('');
+                                                }
+                                            }}
+                                            className="text-sm text-slate-700 outline-none bg-transparent font-medium max-w-[150px]"
+                                        >
+                                            <option value="">Bez slučaja</option>
+                                            {patientCases.map((c: any) => (
+                                                <option key={c.id} value={c.id}>
+                                                    {c.diagnosisCode ? `${c.diagnosisCode} — ` : ''}{c.title || c.diagnosisDisplay || 'Slučaj'}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            onClick={() => refreshCases(true)}
+                                            className="p-1 hover:bg-amber-50 rounded text-amber-600"
+                                            title="Osvježi slučajeve s CEZIH-a"
+                                        >
+                                            <Database className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+                                )}
                             </div>
-                            {/* Razlog dolaska / Reason Code (MKB-10) */}
-                            <div className="flex items-center gap-2 bg-violet-50/50 px-3 py-2 rounded-lg border border-violet-200">
-                                <span className="text-sm">💊</span>
-                                <select
-                                    value={visitReasonCode}
-                                    onChange={(e) => {
-                                        const val = e.target.value;
-                                        setVisitReasonCode(val);
-                                        const opts: Record<string, string> = {
-                                            'Z00.0': 'Opći medicinski pregled',
-                                            'J06.9': 'Akutna infekcija gornjeg dišnog sustava',
-                                            'I10': 'Esencijalna hipertenzija',
-                                            'M54.5': 'Križobolja',
-                                            'R51': 'Glavobolja',
-                                            'R05': 'Kašalj',
-                                            'N39.0': 'Infekcija mokraćnog sustava',
-                                        };
-                                        setVisitReasonDisplay(opts[val] || val);
-                                    }}
-                                    className="text-sm text-violet-700 outline-none bg-transparent font-medium max-w-[200px]"
-                                >
-                                    <option value="">Razlog dolaska</option>
-                                    <option value="Z00.0">Z00.0 — Sistematski</option>
-                                    <option value="J06.9">J06.9 — Prehlada</option>
-                                    <option value="I10">I10 — Hipertenzija</option>
-                                    <option value="M54.5">M54.5 — Križobolja</option>
-                                    <option value="R51">R51 — Glavobolja</option>
-                                    <option value="R05">R05 — Kašalj</option>
-                                    <option value="N39.0">N39.0 — Urinarna inf.</option>
-                                </select>
-                            </div>
+
                             <button
                                 onClick={startVisit}
                                 disabled={loading}

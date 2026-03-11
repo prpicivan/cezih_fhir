@@ -31,18 +31,18 @@ export default function PatientChartPage() {
     const [syncingCases, setSyncingCases] = useState(false);
     const [retrieving, setRetrieving] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [docsCollapsed, setDocsCollapsed] = useState(false);
+    const [docsCollapsed, setDocsCollapsed] = useState(true);
     const [docTab, setDocTab] = useState<'local' | 'cezih'>('local');
     const [cezihDocs, setCezihDocs] = useState<any[]>([]);
     const [cezihLoading, setCezihLoading] = useState(false);
     const [cezihLoaded, setCezihLoaded] = useState(false);
-    const [casesCollapsed, setCasesCollapsed] = useState(false);
+    const [casesCollapsed, setCasesCollapsed] = useState(true);
     const [caseTab, setCaseTab] = useState<'local' | 'cezih'>('local');
     const [cezihCases, setCezihCases] = useState<any[]>([]);
     const [cezihCasesLoading, setCezihCasesLoading] = useState(false);
     const [cezihCasesLoaded, setCezihCasesLoaded] = useState(false);
     const [actionInProgress, setActionInProgress] = useState<string | null>(null);
-    const [visitsCollapsed, setVisitsCollapsed] = useState(false);
+    const [visitsCollapsed, setVisitsCollapsed] = useState(true);
     const [visitActionInProgress, setVisitActionInProgress] = useState<string | null>(null);
 
     const fetchChartData = async (refresh: boolean = false) => {
@@ -87,11 +87,12 @@ export default function PatientChartPage() {
         }
     };
 
-    const handleStartVisit = (caseId?: string, diagnosisCode?: string, diagnosisDisplay?: string) => {
+    const handleStartVisit = (caseId?: string, diagnosisCode?: string, diagnosisDisplay?: string, cezihCaseId?: string) => {
         const query = new URLSearchParams({
             patientMbo: mbo,
-            patientId: patient?.id || '', // Include FHIR technical ID
+            patientId: patient?.id || '',
             ...(caseId && { caseId }),
+            ...(cezihCaseId && { cezihCaseId }),
             ...(diagnosisCode && { mkb: diagnosisCode }),
             ...(diagnosisDisplay && { mkbDisplay: diagnosisDisplay }),
         });
@@ -119,6 +120,59 @@ export default function PatientChartPage() {
             if (data.success) {
                 showToast('success', `${label} — uspješno!`);
                 fetchChartData();
+            } else {
+                showToast('error', data.error || 'Greška pri izvršavanju akcije.');
+            }
+        } catch (err) {
+            showToast('error', 'Greška u komunikaciji s poslužiteljem.');
+        } finally {
+            setActionInProgress(null);
+        }
+    };
+
+    const handleCezihCaseAction = async (c: any, action: string, label: string) => {
+        if (action === '2.2') return; // CEZIH RBAC: never delete another practitioner's case
+
+        // Mirror local handleCaseAction logic: require reason for 2.7 (close), confirm for others
+        let reason: string | undefined;
+        if (action === '2.7') {
+            const input = prompt(`${label}\n\nUnesite razlog zatvaranja:`);
+            if (input === null) return; // user cancelled
+            reason = input || label;
+        } else {
+            if (!confirm(`Jeste li sigurni da želite izvršiti akciju: ${label}?`)) return;
+        }
+
+        const caseId = c.cezihCaseId || c.id;
+        setActionInProgress(caseId);
+        try {
+            const res = await fetch(`/api/case/${encodeURIComponent(caseId)}/action`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action,
+                    patientMbo: mbo,
+                    ...(reason && { reason }),
+                    externalCaseData: {
+                        id: caseId,
+                        cezihCaseId: c.cezihCaseId,
+                        cezihCaseOid: c.cezihCaseOid,
+                        patientMbo: mbo,
+                        title: c.title,
+                        status: c.status,
+                        clinicalStatus: c.clinicalStatus,
+                        start: c.start,
+                        end: c.end,
+                        diagnosisCode: c.diagnosisCode,
+                        diagnosisDisplay: c.diagnosisDisplay,
+                        practitionerName: c.practitionerName,
+                    },
+                }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast('success', `${label} — uspješno!`);
+                fetchCezihCases();
             } else {
                 showToast('error', data.error || 'Greška pri izvršavanju akcije.');
             }
@@ -276,15 +330,6 @@ export default function PatientChartPage() {
                     </div>
 
                     <div className="flex items-center gap-3">
-                        <button
-                            onClick={handleSync}
-                            disabled={syncing}
-                            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold transition-all ${syncing ? 'bg-slate-100 text-slate-400' : 'bg-white border border-slate-200 text-slate-700 hover:border-blue-400 hover:text-blue-600'
-                                }`}
-                        >
-                            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-                            Sinkroniziraj
-                        </button>
                         <button
                             onClick={() => setCaseModal(undefined)}
                             className="bg-white border border-emerald-200 text-emerald-700 px-5 py-2.5 rounded-xl font-bold hover:bg-emerald-50 hover:border-emerald-400 transition-all flex items-center gap-2"
@@ -638,13 +683,6 @@ export default function PatientChartPage() {
                             <div className="flex items-center gap-2">
                                 <ClipboardList className="w-5 h-5 text-amber-500" />
                                 <h3 className="font-black text-slate-800">Zdravstveni slučajevi</h3>
-                                <button
-                                    onClick={handleSyncCases}
-                                    disabled={syncingCases}
-                                    className={`p-1 hover:bg-slate-200 rounded-md transition-colors ${syncingCases ? 'animate-spin text-amber-500' : 'text-slate-400'}`}
-                                >
-                                    <RefreshCw className="w-3.5 h-3.5" />
-                                </button>
                             </div>
                             <div className="flex items-center gap-2">
                                 <button
@@ -826,23 +864,116 @@ export default function PatientChartPage() {
                                             </div>
                                         ) : cezihCases.length > 0 ? (
                                             <div className="space-y-2">
-                                                {cezihCases.map((c: any) => (
-                                                    <div key={c.id} className="p-3 rounded-xl border border-slate-100 bg-slate-50/50">
-                                                        <div className="flex items-center gap-2 mb-1">
-                                                            {c.diagnosisCode && (
-                                                                <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-slate-200 text-slate-500">{c.diagnosisCode}</span>
+                                                {cezihCases.map((c: any) => {
+                                                    const isActive = c.status === 'active' && (c.clinicalStatus === 'active' || c.clinicalStatus === 'recurrence' || c.clinicalStatus === 'relapse' || !c.clinicalStatus);
+                                                    const isRemission = c.clinicalStatus === 'remission';
+                                                    const isFinished = c.status === 'finished' || c.clinicalStatus === 'inactive' || c.clinicalStatus === 'resolved';
+                                                    const isLoading = actionInProgress === (c.cezihCaseId || c.id);
+
+                                                    let statusLabel = 'aktivan';
+                                                    let statusBadgeClass = 'bg-emerald-500 text-white';
+                                                    if (isRemission) { statusLabel = 'remisija'; statusBadgeClass = 'bg-blue-500 text-white'; }
+                                                    else if (isFinished) { statusLabel = 'završen'; statusBadgeClass = 'bg-slate-300 text-white'; }
+
+                                                    const cardBorder = isActive
+                                                        ? (isRemission ? 'border-blue-100 bg-blue-50/30 hover:border-blue-300' : 'border-emerald-100 bg-emerald-50/30 hover:border-emerald-300')
+                                                        : 'border-slate-100 bg-slate-50/30 hover:border-slate-200';
+
+                                                    return (
+                                                        <div key={c.id} className={`p-4 rounded-2xl border transition-all group ${cardBorder} ${isFinished ? 'opacity-75' : ''}`}>
+                                                            <div className="flex justify-between items-start gap-2">
+                                                                <div className="min-w-0">
+                                                                    <div className="flex items-center gap-2 mb-1">
+                                                                        {c.diagnosisCode && (
+                                                                            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
+                                                                                {c.diagnosisCode}
+                                                                            </span>
+                                                                        )}
+                                                                        <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${statusBadgeClass}`}>
+                                                                            {statusLabel}
+                                                                        </span>
+                                                                    </div>
+                                                                    <p className={`font-bold text-sm tracking-tight ${isActive ? 'text-slate-900' : 'text-slate-500'}`}>
+                                                                        {c.title || c.diagnosisDisplay || 'Zdravstveni slučaj'}
+                                                                    </p>
+                                                                    <div className="flex items-center gap-3 mt-1.5">
+                                                                        <p className="text-[10px] font-bold text-slate-400 uppercase">
+                                                                            Od: {c.start ? new Date(c.start).toLocaleDateString('hr-HR') : '—'}
+                                                                            {c.end && ` — Do: ${new Date(c.end).toLocaleDateString('hr-HR')}`}
+                                                                        </p>
+                                                                    </div>
+                                                                    {c.practitionerName && (
+                                                                        <p className="text-[10px] font-medium text-slate-400 mt-0.5">
+                                                                            {c.practitionerName}
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                                {isActive && !isRemission && (
+                                                                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse flex-shrink-0 mt-2"></div>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Action buttons — Active / Remission */}
+                                                            {(isActive || isRemission) && (
+                                                                <div className="mt-3 flex gap-2">
+                                                                    <button
+                                                                        onClick={(e) => { e.preventDefault(); handleStartVisit(undefined, c.diagnosisCode, c.diagnosisDisplay, c.cezihCaseId || c.id); }}
+                                                                        disabled={isLoading}
+                                                                        className="flex-1 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all disabled:opacity-50"
+                                                                    >
+                                                                        📅 Nova posjeta
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={(e) => { e.preventDefault(); setCaseModal({ ...c, isExternal: true }); }}
+                                                                        disabled={isLoading}
+                                                                        className="py-1.5 px-3 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-600 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all disabled:opacity-50"
+                                                                    >
+                                                                        <Edit2 className="w-3 h-3 inline mr-1" />
+                                                                        Uredi
+                                                                    </button>
+                                                                    {isActive && (
+                                                                        <button
+                                                                            onClick={(e) => { e.preventDefault(); handleCezihCaseAction(c, '2.7', 'Zatvaranje slučaja'); }}
+                                                                            disabled={isLoading}
+                                                                            className="py-1.5 px-3 bg-white border border-rose-200 rounded-lg text-xs font-black text-rose-500 hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all disabled:opacity-50"
+                                                                        >
+                                                                            {isLoading ? '...' : 'Zatvori'}
+                                                                        </button>
+                                                                    )}
+                                                                    {isRemission && (
+                                                                        <button
+                                                                            onClick={(e) => { e.preventDefault(); handleCezihCaseAction(c, '2.5', 'Relaps'); }}
+                                                                            disabled={isLoading}
+                                                                            className="py-1.5 px-3 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-600 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all disabled:opacity-50"
+                                                                        >
+                                                                            {isLoading ? '...' : '🔁 Relaps'}
+                                                                        </button>
+                                                                    )}
+                                                                </div>
                                                             )}
-                                                            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${c.status === 'active' ? 'bg-emerald-500 text-white' : 'bg-slate-300 text-white'}`}>
-                                                                {c.status === 'active' ? 'aktivan' : c.status === 'finished' ? 'završen' : c.status}
-                                                            </span>
+
+                                                            {/* Action buttons — Finished */}
+                                                            {isFinished && (
+                                                                <div className="mt-3 flex gap-2">
+                                                                    <button
+                                                                        onClick={(e) => { e.preventDefault(); handleCezihCaseAction(c, '2.8', 'Ponovno otvaranje'); }}
+                                                                        disabled={isLoading}
+                                                                        className="flex-1 py-1.5 bg-white border border-emerald-200 rounded-lg text-xs font-black text-emerald-600 hover:bg-emerald-500 hover:text-white hover:border-emerald-500 transition-all disabled:opacity-50"
+                                                                    >
+                                                                        {isLoading ? '...' : '♻️ Ponovno otvori'}
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={(e) => { e.preventDefault(); handleCezihCaseAction(c, '2.3', 'Ponovljeni slučaj'); }}
+                                                                        disabled={isLoading}
+                                                                        className="flex-1 py-1.5 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-600 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all disabled:opacity-50"
+                                                                    >
+                                                                        {isLoading ? '...' : '🔄 Ponovljeni'}
+                                                                    </button>
+                                                                </div>
+                                                            )}
                                                         </div>
-                                                        <p className="font-bold text-xs text-slate-700">{c.title || c.diagnosisDisplay || 'Slučaj'}</p>
-                                                        <p className="text-[10px] text-slate-400 mt-1">
-                                                            {c.start && new Date(c.start).toLocaleDateString('hr-HR')}
-                                                            {c.end && ` — ${new Date(c.end).toLocaleDateString('hr-HR')}`}
-                                                        </p>
-                                                    </div>
-                                                ))}
+                                                    );
+                                                })}
                                             </div>
                                         ) : (
                                             <p className="text-center py-4 text-xs text-slate-400 italic">Nema slučajeva na CEZIH-u.</p>
@@ -1030,17 +1161,25 @@ export default function PatientChartPage() {
                 />
             )}
 
-            {/* Case Modal: Novi slučaj (TC16) or Uredi slučaj (TC17) */}
+            {/* Case Modal: Novi slučaj (TC16) or Uredi slučaj (TC17) — local or CEZIH external */}
             {caseModal !== null && (
                 <CaseModal
                     existingCase={caseModal === undefined ? null : caseModal}
                     patientMbo={mbo}
+                    isExternal={caseModal?.isExternal === true}
                     onClose={() => setCaseModal(null)}
                     onSuccess={() => {
                         setCaseModal(null);
-                        fetchChartData();
+                        if (caseModal?.isExternal) {
+                            fetchCezihCases();
+                        } else {
+                            fetchChartData();
+                        }
                     }}
-                    onCaseAction={handleCaseAction}
+                    onCaseAction={caseModal?.isExternal
+                        ? (caseId: string, action: string, label: string) => handleCezihCaseAction(caseModal, action, label)
+                        : handleCaseAction
+                    }
                 />
             )}
         </div>

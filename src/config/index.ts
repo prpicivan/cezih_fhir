@@ -18,6 +18,7 @@ export const config = {
             patient: '/patient-registry-services/api/v1',
             document: '/doc-mhd-svc/api/v1',
             healthIssue: '/health-issue-services/api/v1',
+            qedm: '/ihe-qedm-services/api/v1',  // IHE QEDm — TC15 dohvat kliničkih podataka (Condition)
             visit: '/encounter-services/api/v1',
             terminology: '/terminology-services/api/v1',
             notification: '/notification-pull-service/api/v1',

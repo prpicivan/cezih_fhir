@@ -15,9 +15,11 @@ interface CaseModalProps {
     onClose: () => void;
     onSuccess: () => void;
     onCaseAction?: (caseId: string, action: string, label: string) => Promise<void>;
+    /** true when acting on a TC15-fetched CEZIH case from another practitioner */
+    isExternal?: boolean;
 }
 
-export default function CaseModal({ existingCase, patientMbo, onClose, onSuccess, onCaseAction }: CaseModalProps) {
+export default function CaseModal({ existingCase, patientMbo, onClose, onSuccess, onCaseAction, isExternal = false }: CaseModalProps) {
     const isEditMode = !!existingCase;
 
     const [form, setForm] = useState({

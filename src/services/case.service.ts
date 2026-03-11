@@ -70,64 +70,150 @@ class CaseService {
         console.log(`[CaseService] No cases found for MBO: ${patientMbo} (local or remote)`);
         return [];
     }
-
     private async searchRemoteCases(patientMbo: string, userToken: string): Promise<any[]> {
-        const headers = authService.getUserAuthHeaders(userToken);
-        const url = `${config.cezih.gatewayBase}${config.cezih.services.healthIssue}/EpisodeOfCare`;
-        const params = {
-            'patient.identifier': `${CEZIH_IDENTIFIERS.MBO}|${patientMbo}`,
-            _sort: '-date',
-            _count: 50
+        // TC15 uses IHE QEDm profile — Condition resources via qedm-svc (NOT health-issue-services)
+        const url = `${config.cezih.gatewayBase}${config.cezih.services.qedm}/Condition`;
+        const params: Record<string, string | number> = {
+            'patient:identifier': `${CEZIH_IDENTIFIERS.MBO}|${patientMbo}`,
+            _sort: '-onset-date',
+            _count: 50,
         };
+
+        // Use gateway session (Cookie auth) like all other CEZIH service calls
+        let headers: Record<string, string>;
+        if (authService.hasGatewaySession()) {
+            const gatewayHeaders = authService.getGatewayAuthHeaders();
+            headers = {
+                ...(gatewayHeaders.Cookie ? { Cookie: gatewayHeaders.Cookie } : {}),
+                'Content-Type': 'application/fhir+json',
+                'Accept': 'application/fhir+json',
+            };
+        } else {
+            headers = {
+                ...authService.getUserAuthHeaders(userToken),
+                'Content-Type': 'application/fhir+json',
+                'Accept': 'application/fhir+json',
+            };
+        }
+
+        console.log(`[CaseService] TC15 QEDm Condition search: ${url}`);
+        console.log(`[CaseService] Params:`, JSON.stringify(params));
 
         try {
             const response = await axios.get(url, { headers, params });
             const entries = response.data.entry || [];
+            console.log(`[CaseService] TC15 found ${entries.length} Condition entries`);
             return entries.map((e: any) => this.mapRemoteCase(e.resource));
         } catch (err: any) {
-            throw new Error(`CEZIH EpisodeOfCare search failed: ${err.message}`);
+            const status = err.response?.status;
+            const body = err.response?.data ? JSON.stringify(err.response.data).slice(0, 800) : '';
+            console.error(`[CaseService] TC15 QEDm failed: HTTP ${status} — ${err.message}`);
+            if (body) console.error(`[CaseService] TC15 response body:`, body);
+            throw new Error(`CEZIH Condition search failed: ${err.message}`);
         }
     }
 
     private mapRemoteCase(resource: any): any {
-        const patientMbo = resource.patient?.identifier?.value || '';
-        const diagnosis = resource.diagnosis?.[0];
-        const period = resource.period || {};
+        // resource is a FHIR Condition (IHE QEDm)
+        const patientIdentifier = resource.subject?.identifier;
+        const patientMbo = Array.isArray(patientIdentifier)
+            ? patientIdentifier.find((id: any) => id.system === CEZIH_IDENTIFIERS.MBO)?.value
+            : patientIdentifier?.value || '';
+
+        // cezihCaseId = identifikator-slucaja (cmmm... string)
+        const identifiers: any[] = resource.identifier || [];
+        const cezihCaseId = identifiers.find(
+            (id: any) => id.system === CEZIH_IDENTIFIERS.CASE_ID ||
+                         id.system === 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja'
+        )?.value || resource.id;
+
+        // cezihCaseOid = urn:oid:... global OID
+        const cezihCaseOid = identifiers.find(
+            (id: any) => id.system === 'urn:ietf:rfc:3986'
+        )?.value || null;
+
+        // MKB-10 diagnosis code from Condition.code
+        const codingArr: any[] = resource.code?.coding || [];
+        const diagnosisCode = codingArr[0]?.code || '';
+        const diagnosisDisplay = resource.code?.text || codingArr[0]?.display || '';
+
+        // clinicalStatus (active, remission, recurrence, inactive, resolved)
+        const clinicalStatusCode = resource.clinicalStatus?.coding?.[0]?.code
+            || resource.clinicalStatus?.text
+            || null;
+
+        // Map Condition status → our case status
+        // FHIR Condition clinicalStatus: active/recurrence/relapse → active; remission/inactive/resolved → finished
+        let status: string;
+        if (['active', 'recurrence', 'relapse'].includes(clinicalStatusCode)) {
+            status = 'active';
+        } else if (['remission'].includes(clinicalStatusCode)) {
+            status = 'active'; // remission is still active but with clinicalStatus
+        } else if (['inactive', 'resolved'].includes(clinicalStatusCode)) {
+            status = 'finished';
+        } else {
+            status = resource.verificationStatus?.coding?.[0]?.code === 'unconfirmed' ? 'active' : (clinicalStatusCode || 'active');
+        }
+
+        // Dates — Condition uses onset/abatement instead of period
+        const start = resource.onsetDateTime
+            || resource.onsetPeriod?.start
+            || resource.recordedDate
+            || null;
+        const end = resource.abatementDateTime
+            || resource.abatementPeriod?.end
+            || null;
+
+        // Practitioner who asserted the condition
+        const practitionerName = resource.asserter?.display
+            || resource.recorder?.display
+            || null;
+
+        console.log(`[CaseService] Mapped Condition: ${cezihCaseId} (${diagnosisCode}) clinical=${clinicalStatusCode} status=${status}`);
 
         return {
-            id: resource.id, // Using CEZIH ID as the primary ID
+            id: cezihCaseId,
+            cezihCaseId,
+            cezihCaseOid,
             patientMbo,
-            title: diagnosis?.condition?.display || 'Health Case',
-            status: resource.status,
-            start: period.start,
-            end: period.end || null,
-            diagnosisCode: diagnosis?.role?.coding?.[0]?.code || '',
-            diagnosisDisplay: diagnosis?.role?.coding?.[0]?.display || diagnosis?.condition?.display || '',
-            practitionerName: resource.careManager?.display || 'Unknown Practitioner',
+            title: diagnosisDisplay || diagnosisCode || 'Zdravstveni slučaj',
+            status,
+            clinicalStatus: clinicalStatusCode,
+            start,
+            end,
+            diagnosisCode,
+            diagnosisDisplay,
+            practitionerName,
         };
     }
 
     private saveOrUpdateCase(data: any) {
         try {
             db.prepare(`
-                INSERT INTO cases (id, patientMbo, title, status, start, end, diagnosisCode, diagnosisDisplay, practitionerName)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO cases (id, patientMbo, title, status, clinicalStatus, start, end, diagnosisCode, diagnosisDisplay, practitionerName, cezihCaseId, cezihCaseOid)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     status = excluded.status,
+                    clinicalStatus = excluded.clinicalStatus,
                     end = excluded.end,
                     title = excluded.title,
                     diagnosisCode = excluded.diagnosisCode,
-                    diagnosisDisplay = excluded.diagnosisDisplay
+                    diagnosisDisplay = excluded.diagnosisDisplay,
+                    cezihCaseId = excluded.cezihCaseId,
+                    cezihCaseOid = excluded.cezihCaseOid
             `).run(
                 data.id,
                 data.patientMbo,
                 data.title,
                 data.status,
+                data.clinicalStatus || null,
                 data.start,
                 data.end,
                 data.diagnosisCode,
                 data.diagnosisDisplay,
-                data.practitionerName
+                data.practitionerName,
+                data.cezihCaseId || null,
+                data.cezihCaseOid || null
             );
         } catch (err: any) {
             console.error('[CaseService] DB Sync failed:', err.message);
@@ -497,7 +583,7 @@ class CaseService {
     async performCaseAction(
         caseId: string,
         action: string,
-        data: Partial<CaseData> & { previousCaseId?: string; reason?: string } | undefined,
+        data: Partial<CaseData> & { previousCaseId?: string; reason?: string; externalCaseData?: any } | undefined,
         userToken: string
     ): Promise<any> {
         // Action 2.3 (recurrent case) is a special create — delegates to createCase with reference
@@ -513,8 +599,16 @@ class CaseService {
         const messageId = uuidv4();
         const conditionUuid = uuidv4();
 
-        // Resolve CEZIH case ID
-        const localCase = db.prepare('SELECT * FROM cases WHERE id = ?').get(caseId) as any;
+        // Resolve CEZIH case ID — check local DB first, fallback to externalCaseData (lazy sync)
+        let localCase = db.prepare('SELECT * FROM cases WHERE id = ?').get(caseId) as any;
+
+        if (!localCase && data?.externalCaseData) {
+            // Lazy sync: CEZIH case not yet in local DB — insert it now
+            console.log(`[CaseService] Lazy sync for ${caseId} from externalCaseData before action ${action}`);
+            this.saveOrUpdateCase(data.externalCaseData);
+            localCase = db.prepare('SELECT * FROM cases WHERE id = ?').get(caseId) as any;
+        }
+
         if (!localCase) throw new Error(`Slučaj ${caseId} nije pronađen u lokalnoj bazi.`);
         const cezihCaseId = localCase.cezihCaseId || caseId;
         const patientMbo = data?.patientMbo || localCase.patientMbo;
