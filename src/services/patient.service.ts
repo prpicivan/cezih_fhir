@@ -342,7 +342,7 @@ class PatientService {
             });
         }
         if (patientIdentifiers.length === 0) {
-            throw new Error('Registracija stranca zahtijeva barem jedan identifikator: broj putovnice ili EU kartica.');
+            throw new Error('Registracija stranca zahtijeva barem jedan identifikator (TC11 Fix V2): broj putovnice ili EU kartica.');
         }
 
         const orgHzzoCode = config.organization.hzzoCode;
@@ -459,19 +459,28 @@ class PatientService {
         const idNumber = rawData.idNumber || rawData.documentNumber;
         const idType = rawData.idType || rawData.documentType;
 
+        console.log(`[PatientService] registerForeigner: idNumber=${idNumber}, idType=${idType}`);
+
         if (!data.passportNumber && !data.euCardNumber && idNumber) {
             if (idType === 'eu_card' || idType === 'euCard' || idType === 'EKZO') {
                 data.euCardNumber = idNumber;
+                console.log(`[PatientService] Mapped EU Card: ${idNumber}`);
             } else {
-                // Default to passport
                 data.passportNumber = idNumber;
+                console.log(`[PatientService] Mapped Passport: ${idNumber}`);
             }
         }
         if (!data.gender && rawData.gender) data.gender = rawData.gender;
         if (!data.birthDate && rawData.birthDate) data.birthDate = rawData.birthDate;
         if (!data.nationality && (rawData.nationality || rawData.country)) data.nationality = rawData.nationality || rawData.country;
 
-        console.log('[PatientService] registerForeigner normalized data.name:', JSON.stringify(data.name));
+        console.log('[PatientService] registerForeigner normalized data:', JSON.stringify({
+            name: data.name,
+            passportNumber: data.passportNumber,
+            euCardNumber: data.euCardNumber,
+            gender: data.gender,
+            birthDate: data.birthDate
+        }));
 
         try {
             // 1. Save to local DB first
