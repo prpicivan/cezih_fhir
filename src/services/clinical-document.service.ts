@@ -236,18 +236,32 @@ class ClinicalDocumentService {
                 console.log(`[sendDocumentFull] Resolved local case ${data.condFhirId} → CEZIH ID: ${localCase.cezihCaseId}`);
                 resolvedCondFhirId = localCase.cezihCaseId;
             } else {
-                console.log(`[sendDocumentFull] condFhirId ${data.condFhirId} — no cezihCaseId in DB, using as-is (may already be CEZIH ID)`);
+                console.log(`[sendDocumentFull] condFhirId ${data.condFhirId} — no cezihCaseId in DB, using as-is`);
             }
         } catch (e) {
             console.warn('[sendDocumentFull] Case ID lookup failed, using as-is');
         }
 
-        // Step 3: Generate OID for new document
+        // Step 3: Resolve CEZIH Visit ID — frontend may pass local UUID, we need cmmm... ID (TC12)
+        let resolvedEncCezihId = data.encCezihId;
+        try {
+            const localVisit = db.prepare('SELECT cezihVisitId FROM visits WHERE id = ?').get(data.encCezihId) as any;
+            if (localVisit?.cezihVisitId) {
+                console.log(`[sendDocumentFull] Resolved local visit ${data.encCezihId} → CEZIH ID: ${localVisit.cezihVisitId}`);
+                resolvedEncCezihId = localVisit.cezihVisitId;
+            } else {
+                console.log(`[sendDocumentFull] encCezihId ${data.encCezihId} — no cezihVisitId in DB, using as-is`);
+            }
+        } catch (e) {
+            console.warn('[sendDocumentFull] Visit ID lookup failed, using as-is');
+        }
+
+        // Step 4: Generate OID for new document
         const docOidRaw = await oidService.generateSingleOid();
         const docOid = `urn:oid:${docOidRaw}`;
         console.log('[sendDocumentFull] Generated OID:', docOid);
 
-        // Step 4: Build + sign inner bundle, build outer MHD, submit
+        // Step 5: Build + sign inner bundle, build outer MHD, submit
         const { buildMhdBundle, submitMhdToGateway } = await import('./mhd-bundle.builder');
 
         const { outer, innerBundle } = await buildMhdBundle({
@@ -265,7 +279,7 @@ class ClinicalDocumentService {
             practitionerName: { family: 'Prpic', given: ['Ivan'] },
             orgId: process.env.ORG_ID || '999001425',
             orgDisplay: 'WBS privatna ordinacija',
-            encCezihId: data.encCezihId,
+            encCezihId: resolvedEncCezihId,
             condFhirId: resolvedCondFhirId,
             diagnosisCode: data.diagnosisCode,
             anamnesis: data.anamnesis,
@@ -860,62 +874,160 @@ class ClinicalDocumentService {
     // ============================================================
 
     async cancelDocument(documentOid: string, userToken: string): Promise<any> {
+        const { v4: uuidv4 } = require('uuid');
+        const listUuid = uuidv4();
+        const docRefUuid = uuidv4();
         const oidValue = documentOid.startsWith('urn:oid:') ? documentOid : `urn:oid:${documentOid}`;
 
-        // 1. Update Local DB
+        // Update Local DB
         try {
             db.prepare('UPDATE documents SET status = ? WHERE id = ?').run('cancelled', documentOid);
         } catch (dbError) {
             console.error('[ClinicalDocumentService] DB Cancel Error', dbError);
         }
 
-        // 2. Fetch original document metadata from DB
+        // Lookup from original document
         const fullDoc = db.prepare('SELECT * FROM documents WHERE id = ?').get(documentOid) as any;
         const patientMbo = fullDoc?.patientMbo || '999999423';
         const docType = fullDoc?.type || '011';
-        const nowIso = new Date().toISOString();
-        const docDate = fullDoc?.sentAt || fullDoc?.createdAt || nowIso;
+        const visitId = fullDoc?.visitId;
+        const caseId = fullDoc?.caseId;
+
+        const visit = visitId ? db.prepare('SELECT * FROM visits WHERE id = ?').get(visitId) as any : null;
+        const caseRow = caseId ? db.prepare('SELECT * FROM cases WHERE id = ?').get(caseId) as any : null;
+
+        const docDate = fullDoc?.sentAt || fullDoc?.createdAt || new Date().toISOString();
+        const encId = visit?.cezihId || visit?.cezihVisitId || visitId || '';
+        const encounterStart = visit?.startTime || docDate;
+        const encounterEnd = visit?.endTime || docDate;
+        const condFhirId = caseRow?.id || caseRow?.cezihCaseId || caseId || '';
 
         const practHzjz = config.practitioner.hzjzId || config.practitioner.oib;
         const orgId = config.organization.hzzoCode;
 
-        // 3. GRADIMO SAMO DOCUMENT REFERENCE (NEMA BUNDLEA!)
-        const docRef = {
-            resourceType: 'DocumentReference',
-            meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-document-reference'] },
-            masterIdentifier: { use: 'usual', system: 'urn:ietf:rfc:3986', value: oidValue },
-            status: 'entered-in-error', // KLJUČNO ZA STORNO
-            type: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type', code: docType }] },
-            subject: {
-                type: 'Patient',
-                identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO', value: patientMbo }
-            },
-            date: docDate,
-            author: [
-                { type: 'Practitioner', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika', value: practHzjz } },
-                { type: 'Organization', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije', value: orgId } }
-            ],
-            content: [{ attachment: { contentType: 'application/fhir+json', language: 'hr', url: `urn:uuid:${uuidv4()}` } }]
+        // Build TC20 cancel bundle — ČISTA STU3 KOMPATIBILNOST
+        const cancelBundle: any = {
+            resourceType: 'Bundle',
+            type: 'transaction',
+            entry: [
+                // Entry 0: List (SubmissionSet)
+                {
+                    fullUrl: `urn:uuid:${listUuid}`,
+                    resource: {
+                        resourceType: 'List',
+                        extension: [{
+                            url: 'https://profiles.ihe.net/ITI/MHD/StructureDefinition/ihe-sourceId',
+                            valueIdentifier: {
+                                system: 'urn:ietf:rfc:3986',
+                                value: `urn:uuid:${uuidv4()}`,
+                            }
+                        }],
+                        identifier: [
+                            { use: 'official', system: 'urn:ietf:rfc:3986', value: `urn:uuid:${listUuid}` },
+                            { use: 'usual', system: 'urn:ietf:rfc:3986', value: `urn:uuid:${uuidv4()}` },
+                        ],
+                        status: 'current',
+                        mode: 'working',
+                        code: {
+                            coding: [{
+                                system: 'https://profiles.ihe.net/ITI/MHD/CodeSystem/MHDlistTypes',
+                                code: 'submissionset',
+                            }]
+                        },
+                        // SAMO IDENTIFIER (bez type, bez display)
+                        subject: {
+                            identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO', value: patientMbo }
+                        },
+                        date: docDate,
+                        // SAMO IDENTIFIER
+                        source: {
+                            identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika', value: practHzjz }
+                        },
+                        entry: [{ item: { reference: `urn:uuid:${docRefUuid}` } }]
+                    },
+                    request: { method: 'POST', url: 'List' }
+                },
+                // Entry 1: DocumentReference
+                {
+                    fullUrl: `urn:uuid:${docRefUuid}`,
+                    resource: {
+                        resourceType: 'DocumentReference',
+                        masterIdentifier: {
+                            use: 'usual',
+                            system: 'urn:ietf:rfc:3986',
+                            value: oidValue,
+                        },
+                        identifier: [
+                            { use: 'official', system: 'urn:ietf:rfc:3986', value: `urn:uuid:${docRefUuid}` }
+                        ],
+                        status: 'entered-in-error', 
+                        type: {
+                            coding: [{
+                                system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type',
+                                code: docType,
+                            }]
+                        },
+                        // SAMO IDENTIFIER (bez display, bez type)
+                        subject: {
+                            identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO', value: patientMbo }
+                        },
+                        date: docDate,
+                        // SAMO IDENTIFIERS (bez display, bez type)
+                        author: [
+                            { identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika', value: practHzjz } },
+                            { identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije', value: orgId } }
+                        ],
+                        // SAMO IDENTIFIER
+                        authenticator: {
+                            identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika', value: practHzjz }
+                        },
+                        // SAMO IDENTIFIER
+                        custodian: {
+                            identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije', value: orgId }
+                        },
+                        content: [{
+                            attachment: {
+                                contentType: 'application/fhir+json',
+                                language: 'hr',
+                                url: `urn:uuid:${uuidv4()}`,
+                            }
+                        }],
+                        ...(encId ? {
+                            context: {
+                                // SAMO IDENTIFIER U ENCOUNTERU
+                                encounter: [{
+                                    identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-posjete', value: encId }
+                                }],
+                                period: { start: encounterStart, end: encounterEnd },
+                                practiceSetting: {
+                                    coding: [{
+                                        system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/djelatnosti-zz',
+                                        code: '1010000',
+                                        display: 'Opca/obiteljska medicina',
+                                    }]
+                                },
+                                ...(condFhirId ? {
+                                    // SAMO IDENTIFIER U RELATED
+                                    related: [{
+                                        identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja', value: condFhirId }
+                                    }]
+                                } : {})
+                            }
+                        } : {})
+                    },
+                    // KORISTIMO POST, KAO U VAŠEM ORIGINALNOM RADNOM COMMITU
+                    request: { method: 'POST', url: 'DocumentReference' }
+                }
+            ]
         };
-
-        // 4. URL SA IDENTIFIKATOROM ZA CONDITIONAL UPDATE (Mora imati ?identifier=...)
-        const url = `${config.cezih.gatewayBase}${config.cezih.services.document}/DocumentReference?identifier=urn:ietf:rfc:3986|${oidValue}`;
-        console.log('[ClinicalDocumentService] Saljem STORNO PUT na URL:', url);
-
-        // DEBUG: Spremamo payload koji šaljemo na CEZIH
-        try { require('fs').writeFileSync('./tmp/mhd-sent-to-cezih.json', JSON.stringify(docRef, null, 2)); } catch (e) { }
 
         let responseData: any = null;
         let errorMessage: string | undefined;
 
         try {
-            // 5. OBAVEZNO HTTP PUT METODA!
             let headers: Record<string, string>;
-            try {
-                headers = await authService.getSystemAuthHeaders();
-            } catch (e) {
-                headers = authService.getUserAuthHeaders(userToken);
-            }
+            try { headers = await authService.getSystemAuthHeaders(); } 
+            catch (e) { headers = authService.getUserAuthHeaders(userToken); }
             
             const gatewayHeaders = authService.hasGatewaySession() ? authService.getGatewayAuthHeaders() : {};
             const combinedHeaders = {
@@ -925,21 +1037,24 @@ class ClinicalDocumentService {
                 'Accept': 'application/fhir+json',
             };
 
-            const response = await axios.put(url, docRef, { headers: combinedHeaders });
+            const url = `${config.cezih.gatewayBase}${config.cezih.services.document}/iti-65-service`;
+            console.log('[ClinicalDocumentService] Saljem STU3 cisti STORNO POST na URL:', url);
+
+            const response = await axios.post(url, cancelBundle, { headers: combinedHeaders });
             responseData = { success: true, data: response.data, documentOid };
             console.log('[ClinicalDocumentService] ✅ TC20 Cancel accepted by CEZIH!');
         } catch (error: any) {
             const errStatus = error.response?.status;
             const errBody = error.response?.data;
-            console.warn(`[ClinicalDocumentService] TC20 Cancel failed: HTTP ${errStatus || '?'}: ${error.message}`);
-            errorMessage = error.message;
+            const fhirDiag = errBody?.issue?.[0]?.diagnostics || errBody?.issue?.[0]?.details?.text || '';
+            console.warn(`[ClinicalDocumentService] TC20 Cancel failed: HTTP ${errStatus || '?'}: ${fhirDiag}`);
+            
+            errorMessage = fhirDiag || error.message;
             responseData = {
                 success: false,
                 localOnly: true,
                 cezihStatus: 'failed',
-                cezihError: errStatus
-                    ? `HTTP ${errStatus}: ${errBody?.issue?.[0]?.diagnostics || JSON.stringify(errBody?.issue || errBody)?.slice(0, 1000) || error.message}`
-                    : error.message,
+                cezihError: `HTTP ${errStatus}: ${errorMessage}`,
                 id: documentOid,
                 status: 'cancelled',
             };
@@ -949,13 +1064,14 @@ class ClinicalDocumentService {
                 action: 'CANCEL_DOCUMENT',
                 direction: 'OUTGOING_CEZIH',
                 status: errorMessage ? 'ERROR' : 'SUCCESS',
-                payload_req: docRef,
+                payload_req: cancelBundle,
                 payload_res: responseData,
                 error_msg: errorMessage,
             });
         }
         return responseData;
     }
+
 
 
     // ============================================================

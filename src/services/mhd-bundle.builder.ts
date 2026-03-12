@@ -260,7 +260,13 @@ export async function buildMhdBundle(p: MhdDocumentParams): Promise<{ outer: any
             },
             {
                 fullUrl: `urn:uuid:${binUuid}`,
-                resource: { resourceType: 'Binary', id: binUuid, contentType: 'application/fhir+json; charset=utf-8', data: signedB64 },
+                resource: { 
+                    resourceType: 'Binary', 
+                    id: binUuid, 
+                    meta: { profile: ['http://hl7.org/fhir/StructureDefinition/Binary'] },
+                    contentType: 'application/fhir+json; charset=utf-8', 
+                    data: signedB64 
+                },
                 request: { method: 'POST', url: 'Binary' }
             }
         ]

@@ -463,32 +463,67 @@ router.get('/registry/:resourceType/:id', async (req: Request, res: Response) =>
     }
 });
 
-// Generic registry search
+// Generic registry search (IHE ITI-90 mCSD)
 router.get('/registry/:resourceType', async (req: Request, res: Response) => {
     try {
         const resourceType = req.params.resourceType as string;
-        const validTypes = ['Organization', 'Location', 'Practitioner', 'PractitionerRole', 'HealthcareService', 'Endpoint', 'OrganizationAffiliation'];
-        
-        if (!validTypes.includes(resourceType)) {
-            return res.status(400).json({ error: `Invalid resource type: ${resourceType}` });
+        const rawParams = { ...req.query };
+        const cleanParams: Record<string, any> = {};
+
+        // IHE ITI-90 / CEZIH supported params per resource type
+        const SUPPORTED_PARAMS: Record<string, string[]> = {
+            'Organization': ['active', 'identifier', 'name', 'partof', 'type', '_include', '_revInclude'],
+            'Location': ['identifier', 'name', 'organization', 'partof', 'status', 'type', '_include', 'near'],
+            'Practitioner': ['active', 'identifier', 'name', 'given', 'family'],
+            'PractitionerRole': ['active', 'location', 'organization', 'practitioner', 'role', 'service', 'specialty', '_include'],
+            'HealthcareService': ['active', 'identifier', 'location', 'name', 'organization', 'service-type'],
+            'Endpoint': ['identifier', 'organization', 'status'],
+            'OrganizationAffiliation': ['active', 'date', 'identifier', 'participating-organization', 'primary-organization', 'role', '_include']
+        };
+
+        const supported = SUPPORTED_PARAMS[resourceType] || [];
+
+        // 1. Handle 'name' mapping
+        if (rawParams.name && String(rawParams.name).trim() !== '') {
+            if (supported.includes('name')) {
+                cleanParams['name:contains'] = rawParams.name;
+            }
         }
 
-        const params: any = { ...req.query };
-        // Support common aliases for search
-        if (req.query.name && !req.query['name:contains']) params['name:contains'] = req.query.name as string;
+        // 2. Handle 'active' -> 'status' translation
+        if (rawParams.active === 'true') {
+            if (supported.includes('status')) {
+                cleanParams.status = 'active';
+            } else if (supported.includes('active')) {
+                cleanParams.active = 'true';
+            }
+        }
 
-        const result = await registryService.searchResources(resourceType, params);
+        // 3. Forward other supported params
+        for (const [key, val] of Object.entries(rawParams)) {
+            if (['name', 'active'].includes(key)) continue;
+            if (supported.includes(key) && val && String(val).trim() !== '') {
+                cleanParams[key] = val;
+            }
+        }
+
+        console.log(`[API] mCSD ${resourceType} Final Params:`, cleanParams);
+        const result = await registryService.searchResources(resourceType, cleanParams);
         
-        // Return format that matches what frontend expects for Orgs/Practitioners
-        const key = resourceType.toLowerCase() + (resourceType.endsWith('y') ? 'ies' : 's');
+        // Return format that matches what frontend expects
+        const key = resourceType.charAt(0).toLowerCase() + resourceType.slice(1);
+        const pluralKey = key.endsWith('y') ? key.slice(0, -1) + 'ies' : key + 's';
+        
         res.json({ 
             success: true,
             total: result.total, 
-            [key]: result.resources,
+            count: result.total,
+            [pluralKey]: result.resources,
             bundle: result.bundle 
         });
     } catch (error: any) {
-        res.status(500).json({ success: false, error: error.message });
+        console.error(`[API] mCSD ${req.params.resourceType} failed:`, error.message);
+        res.status(error.response?.status || 500).json({ success: false, error: error.message });
     }
 });
 
@@ -1047,59 +1082,6 @@ router.get('/audit/logs/:visitId', (req: Request, res: Response) => {
         res.json({ success: true, count: logs.length, logs });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
-    }
-});
-
-// ============================================================
-// Registry Routes (Test Case 9)
-// ============================================================
-
-// Generic Registry Search (Organization, Location, Practitioner, PractitionerRole, HealthcareService, Endpoint)
-router.get('/registry/:resourceType', async (req: Request, res: Response) => {
-    try {
-        const resourceType = req.params.resourceType as string;
-        const rawParams = { ...req.query };
-        const cleanParams: Record<string, any> = {};
-
-        // 1. Handle 'name' - mCSD Location/Org/HS/Practitioner use name, Role/Endpoint do NOT
-        if (rawParams.name && !['PractitionerRole', 'Endpoint'].includes(resourceType)) {
-            cleanParams['name:contains'] = rawParams.name;
-        }
-
-        // 2. Handle 'active/status' mapping
-        if (rawParams.active === 'true') {
-            if (['Location', 'Endpoint'].includes(resourceType)) {
-                cleanParams.status = 'active';
-            } else if (['Organization', 'Practitioner', 'PractitionerRole', 'HealthcareService'].includes(resourceType)) {
-                cleanParams.active = 'true';
-            }
-        }
-
-        // 3. Add any other specific params passed
-        for (const [key, val] of Object.entries(rawParams)) {
-            if (['name', 'active'].includes(key)) continue;
-            cleanParams[key] = val;
-        }
-
-        console.log(`[API] Registry ${resourceType} cleaned params:`, cleanParams);
-        const result = await registryService.searchResources(resourceType, cleanParams);
-        
-        // Return in a format the frontend expects (e.g., organizations, practitioners, etc.)
-        const key = resourceType.charAt(0).toLowerCase() + resourceType.slice(1);
-        const pluralKey = key.endsWith('y') ? key.slice(0, -1) + 'ies' : key + 's';
-        
-        res.json({ 
-            success: true, 
-            count: result.total, 
-            [pluralKey]: result.resources,
-            bundle: result.bundle
-        });
-    } catch (error: any) {
-        console.error(`[API] Registry ${req.params.resourceType} failed:`, error.message);
-        res.status(error.response?.status || 500).json({ 
-            success: false, 
-            error: error.message 
-        });
     }
 });
 
