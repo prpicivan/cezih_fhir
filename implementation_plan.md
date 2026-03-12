@@ -224,6 +224,13 @@ All use the **IHE MHD** profile with Croatian national extensions.
 > [!WARNING]
 > **Digital Signatures**: FHIR document signing requires access to the healthcare professional's certificate (either from smart card or cloud). This is deeply tied to the authentication mechanism. Does your existing system already handle this, or is this net-new?
 
+> [!WARNING]
+> **Terminology Functionality Restored**:
+> 1. **Full ValueSet Persistence**: Updated `syncValueSets` to fetch `$expand` for all essential ValueSets and save the results in the `fullResource` column.
+> 2. **On-Demand Remote Expand**: Restored the `getLocalConcepts` and `remoteExpand` functions to populate frontend dropdowns in real-time if local data is missing.
+> 3. **Local ICD-10 "Zlatni Rudnik"**: Added direct lookup into the `diagnoses` table for instant MKB-10 results.
+> 4. **Stability Guards**: Retained try-catch isolation and the global HTTPS agent to prevent sync crashes.
+
 ---
 
 ## Key FHIR Identifiers Used

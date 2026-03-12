@@ -1138,27 +1138,37 @@ function ClinicalWorkspace() {
                                 <Send className="w-5 h-5" />
                                 Slanje Medicinskog Nalaza
                             </h3>
-                            <p className="text-sm text-blue-100 mt-1">TC16 → Indeksacija → Potpis → CEZIH</p>
                         </div>
 
                         {/* Stepper */}
                         <div className="p-5 space-y-4">
                             {[
-                                { key: 'tc16', label: '1. Kreiranje slučaja (TC16)', sub: 'U sklopu posjete potrebno je kreirati medicinski slučaj za praćenje dijagnoze.', icon: '📋' },
-                                { key: 'indexing', label: '2. CEZIH indeksacija', sub: 'Čekam da CEZIH indeksira slučaj...', icon: '⏳' },
-                                { key: 'signing', label: '3. Potpis dokumenta', sub: 'Gradnja i potpis unutarnjeg bundlea (Sign token)', icon: '🔐' },
-                                { key: 'done', label: '4. Slanje na CEZIH', sub: 'MHD ITI-65 submit', icon: '🚀' },
+                                { key: 'signing', label: '1. Potpis dokumenta', sub: 'Priprema i digitalni potpis nalaza', icon: '🔐' },
+                                { key: 'done', label: '2. Slanje na CEZIH', sub: 'MHD ITI-65 predaja dokumenta', icon: '🚀' },
                             ].map((step, idx) => {
-                                const phases = ['tc16', 'indexing', 'signing', 'done'];
-                                const currentIdx = phases.indexOf(stepperPhase === 'error' ? phases[phases.length - 1] : stepperPhase);
+                                const phases = ['signing', 'done'];
                                 const stepIdx = idx;
-                                const isActive = phases[stepIdx] === stepperPhase;
-                                const isDone = stepIdx < currentIdx || stepperPhase === 'done';
-                                const isError = stepperPhase === 'error' && stepIdx === currentIdx;
+                                
+                                // Step 1 is active/done during tc16, indexing, and signing
+                                let isActive = false;
+                                let isDone = false;
+
+                                if (step.key === 'signing') {
+                                    isActive = ['tc16', 'indexing', 'signing'].includes(stepperPhase);
+                                    isDone = stepperPhase === 'done';
+                                } else if (step.key === 'done') {
+                                    isActive = false; // Submission is atomic in send-full for now
+                                    isDone = stepperPhase === 'done';
+                                }
+
+                                const isError = stepperPhase === 'error' && (
+                                    (step.key === 'signing' && ['tc16', 'indexing', 'signing'].includes(stepperPhase)) ||
+                                    (step.key === 'done' && stepperPhase === 'error')
+                                );
 
                                 return (
-                                    <div key={step.key} className={`flex items-start gap-3 p-3 rounded-xl transition-all ${isActive ? 'bg-blue-50 border border-blue-200' : isDone ? 'bg-emerald-50 border border-emerald-100' : 'bg-slate-50 border border-slate-100'}`}>
-                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${isDone ? 'bg-emerald-500 text-white' : isActive ? 'bg-blue-500 text-white animate-pulse' : 'bg-slate-200 text-slate-400'}`}>
+                                    <div key={step.key} className={`flex items-start gap-4 p-4 rounded-xl transition-all ${isActive ? 'bg-blue-50 border border-blue-200' : isDone ? 'bg-emerald-50 border border-emerald-100' : 'bg-slate-50 border border-slate-100'}`}>
+                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-base font-bold shrink-0 ${isDone ? 'bg-emerald-500 text-white' : isActive ? 'bg-blue-500 text-white animate-pulse' : 'bg-slate-200 text-slate-400'}`}>
                                             {isDone ? '✓' : step.icon}
                                         </div>
                                         <div className="flex-1 min-w-0">
@@ -1166,13 +1176,13 @@ function ClinicalWorkspace() {
                                                 {step.label}
                                             </div>
                                             {(isActive || isDone) && (
-                                                <div className={`text-xs mt-0.5 ${isDone ? 'text-emerald-500' : 'text-blue-500'}`}>
+                                                <div className={`text-xs mt-1 ${isDone ? 'text-emerald-500' : 'text-blue-500'}`}>
                                                     {isDone ? '✅ Gotovo' : step.sub}
                                                 </div>
                                             )}
                                         </div>
                                         {isActive && !isDone && (
-                                            <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin shrink-0 mt-1" />
+                                            <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin shrink-0 mt-1" />
                                         )}
                                     </div>
                                 );

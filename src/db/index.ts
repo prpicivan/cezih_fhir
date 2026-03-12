@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 
 const dbPath = path.join(process.cwd(), 'cezih.db');
-const db: Database.Database = new Database(dbPath, { verbose: console.log });
+const db: Database.Database = new Database(dbPath);
 
 export function initDatabase() {
   console.log('Initializing SQLite database at', dbPath);
