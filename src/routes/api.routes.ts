@@ -426,29 +426,86 @@ router.post('/auth/system-token', async (_req: Request, res: Response) => {
 // ============================================================
 // Registry Routes (mCSD ITI-90 lookup — uses system token)
 // ============================================================
-router.get('/registry/Organization', async (req: Request, res: Response) => {
+
+// Generic registry type history
+router.get('/registry/:resourceType/_history', async (req: Request, res: Response) => {
     try {
-        const params: any = {};
-        if (req.query.identifier) params.identifier = req.query.identifier as string;
-        if (req.query.name) params['name:contains'] = req.query.name as string;
-        if (req.query._id) params._id = req.query._id as string;
-        const resources = await registryService.searchOrganizations(params);
-        res.json({ total: resources.length, entry: resources });
+        const resourceType = req.params.resourceType as string;
+        const history = await registryService.getTypeHistory(resourceType);
+        res.json({ success: true, history });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
-router.get('/registry/Practitioner', async (req: Request, res: Response) => {
+// Generic registry instance history
+router.get('/registry/:resourceType/:id/_history', async (req: Request, res: Response) => {
     try {
-        const params: any = {};
-        if (req.query.identifier) params.identifier = req.query.identifier as string;
-        if (req.query.name) params['name:contains'] = req.query.name as string;
-        if (req.query._id) params._id = req.query._id as string;
-        const resources = await registryService.searchPractitioners(params);
-        res.json({ total: resources.length, entry: resources });
+        const resourceType = req.params.resourceType as string;
+        const id = req.params.id as string;
+        const history = await registryService.getResourceHistory(resourceType, id);
+        res.json({ success: true, history });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Generic registry get by ID
+router.get('/registry/:resourceType/:id', async (req: Request, res: Response) => {
+    try {
+        const resourceType = req.params.resourceType as string;
+        const id = req.params.id as string;
+        
+        const resource = await registryService.getResourceById(resourceType, id);
+        res.json({ success: true, resource });
+    } catch (error: any) {
+        res.status(error.response?.status || 500).json({ success: false, error: error.message });
+    }
+});
+
+// Generic registry search
+router.get('/registry/:resourceType', async (req: Request, res: Response) => {
+    try {
+        const resourceType = req.params.resourceType as string;
+        const validTypes = ['Organization', 'Location', 'Practitioner', 'PractitionerRole', 'HealthcareService', 'Endpoint', 'OrganizationAffiliation'];
+        
+        if (!validTypes.includes(resourceType)) {
+            return res.status(400).json({ error: `Invalid resource type: ${resourceType}` });
+        }
+
+        const params: any = { ...req.query };
+        // Support common aliases for search
+        if (req.query.name && !req.query['name:contains']) params['name:contains'] = req.query.name as string;
+
+        const result = await registryService.searchResources(resourceType, params);
+        
+        // Return format that matches what frontend expects for Orgs/Practitioners
+        const key = resourceType.toLowerCase() + (resourceType.endsWith('y') ? 'ies' : 's');
+        res.json({ 
+            success: true,
+            total: result.total, 
+            [key]: result.resources,
+            bundle: result.bundle 
+        });
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Generic registry POST (Create/Update)
+router.post('/registry/:resourceType', async (req: Request, res: Response) => {
+    try {
+        const resourceType = req.params.resourceType as string;
+        const resource = req.body;
+        
+        if (!resource || resource.resourceType !== resourceType) {
+            return res.status(400).json({ error: `Invalid resource body or mismatched resourceType` });
+        }
+
+        const result = await registryService.saveResource(resourceType, resource);
+        res.json({ success: true, result });
+    } catch (error: any) {
+        res.status(error.response?.status || 500).json({ success: false, error: error.message });
     }
 });
 
@@ -997,42 +1054,52 @@ router.get('/audit/logs/:visitId', (req: Request, res: Response) => {
 // Registry Routes (Test Case 9)
 // ============================================================
 
-router.get('/registry/organizations', async (req: Request, res: Response) => {
+// Generic Registry Search (Organization, Location, Practitioner, PractitionerRole, HealthcareService, Endpoint)
+router.get('/registry/:resourceType', async (req: Request, res: Response) => {
     try {
-        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
-        const organizations = await registryService.searchOrganizations({
-            active: req.query.active === 'true',
-            name: req.query.name as string,
-        });
-        res.json({ success: true, count: organizations.length, organizations });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
+        const resourceType = req.params.resourceType as string;
+        const rawParams = { ...req.query };
+        const cleanParams: Record<string, any> = {};
 
-router.get('/registry/practitioners', async (req: Request, res: Response) => {
-    try {
-        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
-        const practitioners = await registryService.searchPractitioners({
-            name: req.query.name as string,
-            identifier: req.query.identifier as string,
-        });
-        res.json({ success: true, count: practitioners.length, practitioners });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
+        // 1. Handle 'name' - mCSD Location/Org/HS/Practitioner use name, Role/Endpoint do NOT
+        if (rawParams.name && !['PractitionerRole', 'Endpoint'].includes(resourceType)) {
+            cleanParams['name:contains'] = rawParams.name;
+        }
 
-router.get('/registry/healthcare-services', async (req: Request, res: Response) => {
-    try {
-        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
-        const services = await registryService.searchHealthcareServices({
-            active: req.query.active !== undefined ? req.query.active === 'true' : undefined,
-            organization: req.query.organization as string,
+        // 2. Handle 'active/status' mapping
+        if (rawParams.active === 'true') {
+            if (['Location', 'Endpoint'].includes(resourceType)) {
+                cleanParams.status = 'active';
+            } else if (['Organization', 'Practitioner', 'PractitionerRole', 'HealthcareService'].includes(resourceType)) {
+                cleanParams.active = 'true';
+            }
+        }
+
+        // 3. Add any other specific params passed
+        for (const [key, val] of Object.entries(rawParams)) {
+            if (['name', 'active'].includes(key)) continue;
+            cleanParams[key] = val;
+        }
+
+        console.log(`[API] Registry ${resourceType} cleaned params:`, cleanParams);
+        const result = await registryService.searchResources(resourceType, cleanParams);
+        
+        // Return in a format the frontend expects (e.g., organizations, practitioners, etc.)
+        const key = resourceType.charAt(0).toLowerCase() + resourceType.slice(1);
+        const pluralKey = key.endsWith('y') ? key.slice(0, -1) + 'ies' : key + 's';
+        
+        res.json({ 
+            success: true, 
+            count: result.total, 
+            [pluralKey]: result.resources,
+            bundle: result.bundle
         });
-        res.json({ success: true, count: services.length, services });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        console.error(`[API] Registry ${req.params.resourceType} failed:`, error.message);
+        res.status(error.response?.status || 500).json({ 
+            success: false, 
+            error: error.message 
+        });
     }
 });
 

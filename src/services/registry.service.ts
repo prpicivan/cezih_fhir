@@ -154,9 +154,9 @@ class RegistryService {
     /**
      * Generic FHIR resource search on mCSD (port 9443 only).
      */
-    private async searchResource(
+    async searchResources(
         resourceType: string,
-        params: Record<string, any>,
+        params: Record<string, any> = {},
     ): Promise<{ total: number; resources: any[]; bundle: any }> {
         const headers = await this.getAuthHeaders();
         const searchParams = new URLSearchParams();
@@ -175,7 +175,7 @@ class RegistryService {
         const url = queryString
             ? `${baseUrl}/${resourceType}?${queryString}`
             : `${baseUrl}/${resourceType}`;
-        console.log(`[RegistryService] ${resourceType}: ${url}`);
+        console.log(`[RegistryService] SEARCH ${resourceType}: ${url}`);
 
         const response = await axios.get(url, {
             headers,
@@ -190,6 +190,82 @@ class RegistryService {
     }
 
     /**
+     * Get a specific resource by ID.
+     */
+    async getResourceById(resourceType: string, id: string): Promise<any> {
+        const headers = await this.getAuthHeaders();
+        const baseUrl = this.getMcsdBaseUrl();
+        const url = `${baseUrl}/${resourceType}/${id}`;
+        console.log(`[RegistryService] GET ${resourceType}/${id}: ${url}`);
+
+        const response = await axios.get(url, {
+            headers,
+            httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false }),
+            timeout: 15000,
+        });
+
+        return response.data;
+    }
+
+    /**
+     * Save (Create or Update) a resource.
+     * mCSD uses POST for creating and potentially updating (depending on server implementation).
+     */
+    async saveResource(resourceType: string, resource: any): Promise<any> {
+        const headers = await this.getAuthHeaders();
+        const baseUrl = this.getMcsdBaseUrl();
+        const url = `${baseUrl}/${resourceType}`;
+        console.log(`[RegistryService] POST ${resourceType}: ${url}`);
+
+        const response = await axios.post(url, resource, {
+            headers: {
+                ...headers,
+                'Content-Type': 'application/fhir+json',
+            },
+            httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false }),
+            timeout: 15000,
+        });
+
+        return response.data;
+    }
+
+    /**
+     * Get history of a specific resource instance.
+     */
+    async getResourceHistory(resourceType: string, id: string): Promise<any> {
+        const headers = await this.getAuthHeaders();
+        const baseUrl = this.getMcsdBaseUrl();
+        const url = `${baseUrl}/${resourceType}/${id}/_history`;
+        console.log(`[RegistryService] HISTORY ${resourceType}/${id}: ${url}`);
+
+        const response = await axios.get(url, {
+            headers,
+            httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false }),
+            timeout: 15000,
+        });
+
+        return response.data;
+    }
+
+    /**
+     * Get history of all resources of a certain type.
+     */
+    async getTypeHistory(resourceType: string): Promise<any> {
+        const headers = await this.getAuthHeaders();
+        const baseUrl = this.getMcsdBaseUrl();
+        const url = `${baseUrl}/${resourceType}/_history`;
+        console.log(`[RegistryService] HISTORY ${resourceType}: ${url}`);
+
+        const response = await axios.get(url, {
+            headers,
+            httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false }),
+            timeout: 15000,
+        });
+
+        return response.data;
+    }
+
+    /**
      * Wrap searchResource with common error handling.
      */
     private async executeSearch(
@@ -197,7 +273,7 @@ class RegistryService {
         params: Record<string, any>,
     ): Promise<any[]> {
         try {
-            const result = await this.searchResource(resourceType, params);
+            const result = await this.searchResources(resourceType, params);
             return result.resources;
         } catch (error: any) {
             if (error.response) {

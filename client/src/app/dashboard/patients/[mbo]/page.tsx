@@ -326,6 +326,18 @@ export default function PatientChartPage() {
                                         Provjereno (CEZIH)
                                     </div>
                                 )}
+                                {patient.passportNumber && (
+                                    <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 border border-blue-100">
+                                        <Globe className="w-3.5 h-3.5" />
+                                        Stranac (PUTOVNICA: {patient.passportNumber})
+                                    </div>
+                                )}
+                                {patient.euCardNumber && (
+                                    <div className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 border border-indigo-100">
+                                        <Globe className="w-3.5 h-3.5" />
+                                        Stranac (EKZO: {patient.euCardNumber})
+                                    </div>
+                                )}
                             </div>
                             <div className="flex flex-wrap items-center gap-4 mt-2 text-slate-500 font-medium">
                                 <span className="flex items-center gap-1.5"><Calendar className="w-4 h-4" /> {patient.birthDate}</span>

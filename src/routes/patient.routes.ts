@@ -38,8 +38,15 @@ router.get('/:mbo/chart', async (req: Request, res: Response) => {
         if (refresh) {
             patient = await patientService.syncPatient(mbo, userToken);
         } else {
+            // Try MBO first
             const patients = await patientService.searchByMbo(mbo, userToken);
             patient = patients[0];
+
+            // Fallback to generic identifier search (passport/EKZO) if MBO fails
+            if (!patient) {
+                const identifierPatients = await patientService.searchByIdentifier(mbo, userToken);
+                patient = identifierPatients[0];
+            }
         }
 
         if (!patient) {
@@ -103,9 +110,12 @@ router.get('/search', async (req: Request, res: Response) => {
         const oib = req.query.oib as string | undefined;
         const passport = req.query.passport as string | undefined;
         const euCard = req.query.euCard as string | undefined;
+        const identifier = req.query.identifier as string | undefined;
 
         let patients;
-        if (mbo) {
+        if (identifier) {
+            patients = await patientService.searchByIdentifier(identifier, userToken);
+        } else if (mbo) {
             patients = await patientService.searchByMbo(mbo, userToken);
         } else if (oib) {
             patients = await patientService.searchByOib(oib, userToken);
@@ -114,7 +124,7 @@ router.get('/search', async (req: Request, res: Response) => {
         } else if (euCard) {
             patients = await patientService.searchByEuCard(euCard, userToken);
         } else {
-            return res.status(400).json({ error: 'Provide mbo, oib, passport or euCard' });
+            return res.status(400).json({ error: 'Provide mbo, oib, passport, euCard or identifier' });
         }
         res.json({ success: true, count: patients.length, patients });
     } catch (error: any) {

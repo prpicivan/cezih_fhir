@@ -150,6 +150,13 @@ export function initDatabase() {
     db.exec('ALTER TABLE documents ADD COLUMN caseId TEXT');
   } catch (e) { /* column already exists */ }
 
+  // Migration: add foreigner columns to patients (TC11)
+  try {
+    db.exec('ALTER TABLE patients ADD COLUMN passportNumber TEXT');
+    db.exec('ALTER TABLE patients ADD COLUMN euCardNumber TEXT');
+    db.exec('ALTER TABLE patients ADD COLUMN cezihUniqueId TEXT');
+  } catch (e) { /* columns already exist */ }
+
   // Migration: add cezihVisitId column to visits (CEZIH-assigned identifier for TC13/TC14)
   try {
     db.exec('ALTER TABLE visits ADD COLUMN cezihVisitId TEXT');

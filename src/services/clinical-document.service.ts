@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { AxiosResponse } from 'axios';
 import { config } from '../config';
 import { authService } from './auth.service';
 import { signatureService } from './signature.service';
@@ -733,6 +733,10 @@ class ClinicalDocumentService {
         }
         const newDocumentOid = await oidService.generateSingleOid();
 
+        // NOVO: Dohvaćanje pravih podataka pacijenta iz lokalne baze
+        const localPatient = (await patientService.searchByMbo(data.patientMbo, userToken))[0];
+        if (!localPatient) throw new Error(`Pacijent nije pronađen (MBO: ${data.patientMbo})`);
+
         // Step 1: Update Local DB
         try {
             db.prepare('UPDATE documents SET status = ? WHERE id = ?').run('replaced', originalDocumentOid);
@@ -741,8 +745,8 @@ class ClinicalDocumentService {
                     id, patientMbo, visitId, type, status, 
                     anamnesis, status_text, finding, recommendation, 
                     diagnosisCode, diagnosisDisplay, content, 
-                    createdAt, sentAt
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    createdAt, sentAt, caseId
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `);
             stmt.run(
                 newDocumentOid, data.patientMbo, data.visitId || null,
@@ -750,7 +754,8 @@ class ClinicalDocumentService {
                 data.anamnesis || null, data.status || null,
                 data.finding || null, data.recommendation || null,
                 data.diagnosisCode || null, data.diagnosisDisplay || null,
-                data.content || null, new Date().toISOString(), new Date().toISOString()
+                data.content || null, new Date().toISOString(), new Date().toISOString(),
+                data.caseId || null // Dodan caseId koji je nedostajao u SQL-u
             );
         } catch (dbError) {
             console.error('[ClinicalDocumentService] DB Replace Error', dbError);
@@ -766,9 +771,23 @@ class ClinicalDocumentService {
         } catch (e: any) { /* ignore */ }
 
         // Step 3: Get encounter/case IDs from local visit data
-        const visit = data.visitId ? visitService.getVisit(data.visitId) : null;
-        const encCezihId = visit?.cezihVisitId || visit?.id || '';
-        const condFhirId = visit?.caseId || '';
+        // NOVO: Dohvaćamo originalni dokument iz baze kako bismo "naslijedili" ID posjete i slučaja
+        const originalDoc = db.prepare('SELECT * FROM documents WHERE id = ?').get(originalDocumentOid) as any;
+        
+        // Ako u 'data' nismo dobili visitId/caseId, uzimamo ih iz starog dokumenta
+        const finalVisitId = data.visitId || originalDoc?.visitId;
+        const finalCaseId = data.caseId || originalDoc?.caseId;
+
+        const visit = finalVisitId ? visitService.getVisit(finalVisitId) : null;
+        
+        // Postavljamo CEZIH identifikatore
+        const encCezihId = visit?.cezihVisitId || visit?.id || finalVisitId || '';
+        const condFhirId = visit?.caseId || finalCaseId || '';
+
+        // Sigurnosni osigurač u konzoli da znamo ako nam i dalje fale ID-jevi
+        if (!encCezihId || !condFhirId) {
+             console.warn('[TC19 UPOZORENJE] encCezihId ili condFhirId su prazni! CEZIH će vjerojatno baciti grešku.');
+        }
 
         // Step 4: Build & submit using shared MHD builder (same as TC18 + relatesTo)
         const { buildMhdBundle, submitMhdToGateway } = await import('./mhd-bundle.builder');
@@ -782,14 +801,18 @@ class ClinicalDocumentService {
             const { outer } = await buildMhdBundle({
                 docOid: `urn:oid:${newDocumentOid}`,
                 patientMbo: data.patientMbo,
-                patientName: { family: 'PACPRIVATNICI42', given: ['IVAN'] },
-                patientGender: 'male',
-                patientBirthDate: '1980-01-01',
+                // POPRAVLJENO: Koristimo dinamičke podatke iz baze
+                patientName: { 
+                    family: localPatient?.name?.family || 'NEPOZNATO', 
+                    given: [localPatient?.name?.given?.[0] || 'N'] 
+                },
+                patientGender: localPatient?.gender || 'unknown',
+                patientBirthDate: localPatient?.birthDate || '1980-01-01',
                 patientCezihId,
-                practitionerId: process.env.PRACTITIONER_ID || '4981825',
-                practitionerOib: process.env.PRACTITIONER_OIB || '30160453873',
+                practitionerId: process.env.PRACTITIONER_ID || config.practitioner.hzjzId,
+                practitionerOib: process.env.PRACTITIONER_OIB || config.practitioner.oib,
                 practitionerName: { family: 'Prpic', given: ['Ivan'] },
-                orgId: process.env.ORG_ID || '999001425',
+                orgId: process.env.ORG_ID || config.organization.hzzoCode,
                 orgDisplay: 'WBS privatna ordinacija',
                 encCezihId,
                 condFhirId,
@@ -801,18 +824,19 @@ class ClinicalDocumentService {
             const result = await submitMhdToGateway(outer);
             if (result.success) {
                 responseData = result.data;
+                console.log('[ClinicalDocumentService] ✅ TC19 Replace accepted by CEZIH!');
             } else {
                 errorMessage = result.error;
                 responseData = {
-                    success: true, localOnly: true,
-                    cezihStatus: 'failed', cezihError: result.data?.cezihError,
+                    success: false, localOnly: true,
+                    cezihStatus: 'failed', cezihError: result.data?.cezihError || result.error,
                     documentOid: newDocumentOid, replacedOid: originalDocumentOid,
                 };
             }
         } catch (error: any) {
             errorMessage = error.message;
             responseData = {
-                success: true, localOnly: true,
+                success: false, localOnly: true,
                 cezihStatus: 'failed', cezihError: error.message,
                 documentOid: newDocumentOid, replacedOid: originalDocumentOid,
             };
@@ -836,54 +860,63 @@ class ClinicalDocumentService {
     // ============================================================
 
     async cancelDocument(documentOid: string, userToken: string): Promise<any> {
-        console.log(`[ClinicalDocumentService] TC20: Storno initiated for OID ${documentOid}`);
-
         const oidValue = documentOid.startsWith('urn:oid:') ? documentOid : `urn:oid:${documentOid}`;
 
-        // 1. Update Local DB status immediately
+        // 1. Update Local DB
         try {
             db.prepare('UPDATE documents SET status = ? WHERE id = ?').run('cancelled', documentOid);
         } catch (dbError) {
             console.error('[ClinicalDocumentService] DB Cancel Error', dbError);
         }
 
-        // 2. Fetch current document from CEZIH to ensure we have the correct content/metadata
-        // This is the "prekopirajte content blok" part.
-        let remoteDoc: any = null;
-        try {
-            const rawHeaders = authService.getUserAuthHeaders(userToken);
-            delete rawHeaders['Content-Type'];
-            const searchHeaders = { ...rawHeaders, 'Accept': 'application/fhir+json' };
-            const gatewayHeaders = authService.hasGatewaySession() ? authService.getGatewayAuthHeaders() : {};
-            const combinedSearchHeaders = {
-                ...searchHeaders,
-                ...(gatewayHeaders.Cookie ? { Cookie: gatewayHeaders.Cookie } : {}),
-            };
+        // 2. Fetch original document metadata from DB
+        const fullDoc = db.prepare('SELECT * FROM documents WHERE id = ?').get(documentOid) as any;
+        const patientMbo = fullDoc?.patientMbo || '999999423';
+        const docType = fullDoc?.type || '011';
+        const nowIso = new Date().toISOString();
+        const docDate = fullDoc?.sentAt || fullDoc?.createdAt || nowIso;
 
-            const searchUrl = `${config.cezih.gatewayBase}${config.cezih.services.document}/DocumentReference?identifier=${encodeURIComponent(`urn:ietf:rfc:3986|${oidValue}`)}&status=current`;
-            console.log(`[ClinicalDocumentService] Searching for original document: ${searchUrl}`);
-            const searchResponse = await axios.get(searchUrl, { headers: combinedSearchHeaders });
-            
-            if (searchResponse.data.entry && searchResponse.data.entry.length > 0) {
-                remoteDoc = searchResponse.data.entry[0].resource;
-                console.log(`[ClinicalDocumentService] Found original document ${remoteDoc.id} on CEZIH`);
-            }
-        } catch (err: any) {
-            console.warn(`[ClinicalDocumentService] Failed to fetch remote document for storno: ${err.message}`);
-        }
+        const practHzjz = config.practitioner.hzjzId || config.practitioner.oib;
+        const orgId = config.organization.hzzoCode;
+
+        // 3. GRADIMO SAMO DOCUMENT REFERENCE (NEMA BUNDLEA!)
+        const docRef = {
+            resourceType: 'DocumentReference',
+            meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-document-reference'] },
+            masterIdentifier: { use: 'usual', system: 'urn:ietf:rfc:3986', value: oidValue },
+            status: 'entered-in-error', // KLJUČNO ZA STORNO
+            type: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type', code: docType }] },
+            subject: {
+                type: 'Patient',
+                identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO', value: patientMbo }
+            },
+            date: docDate,
+            author: [
+                { type: 'Practitioner', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika', value: practHzjz } },
+                { type: 'Organization', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije', value: orgId } }
+            ],
+            content: [{ attachment: { contentType: 'application/fhir+json', language: 'hr', url: `urn:uuid:${uuidv4()}` } }]
+        };
+
+        // 4. URL SA IDENTIFIKATOROM ZA CONDITIONAL UPDATE (Mora imati ?identifier=...)
+        const url = `${config.cezih.gatewayBase}${config.cezih.services.document}/DocumentReference?identifier=urn:ietf:rfc:3986|${oidValue}`;
+        console.log('[ClinicalDocumentService] Saljem STORNO PUT na URL:', url);
+
+        // DEBUG: Spremamo payload koji šaljemo na CEZIH
+        try { require('fs').writeFileSync('./tmp/mhd-sent-to-cezih.json', JSON.stringify(docRef, null, 2)); } catch (e) { }
 
         let responseData: any = null;
         let errorMessage: string | undefined;
 
         try {
-            // 3. Prepare headers for PUT
+            // 5. OBAVEZNO HTTP PUT METODA!
             let headers: Record<string, string>;
             try {
                 headers = await authService.getSystemAuthHeaders();
-            } catch (tokenErr: any) {
+            } catch (e) {
                 headers = authService.getUserAuthHeaders(userToken);
             }
-
+            
             const gatewayHeaders = authService.hasGatewaySession() ? authService.getGatewayAuthHeaders() : {};
             const combinedHeaders = {
                 ...headers,
@@ -892,68 +925,31 @@ class ClinicalDocumentService {
                 'Accept': 'application/fhir+json',
             };
 
-            // 4. Construct the storno resource (DocumentReference)
-            // If we found it on CEZIH, we use it as base. Otherwise we reconstruct from local data.
-            let stornoResource: any;
-
-            if (remoteDoc) {
-                stornoResource = {
-                    ...remoteDoc,
-                    status: 'entered-in-error'
-                };
-                // Remove keys that shouldn't be in a PUT body or might cause issues
-                delete stornoResource.text; 
-            } else {
-                // Fallback: Reconstruct from local data (not ideal but better than nothing)
-                const localDoc = this.getDocument(documentOid);
-                const patientMbo = localDoc?.patientMbo || '999999423';
-                const docType = localDoc?.type || '011';
-                
-                stornoResource = {
-                    resourceType: 'DocumentReference',
-                    meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-document-reference'] },
-                    masterIdentifier: { use: 'usual', system: 'urn:ietf:rfc:3986', value: oidValue },
-                    status: 'entered-in-error',
-                    type: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type', code: docType }] },
-                    subject: { 
-                        type: 'Patient', 
-                        identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO', value: patientMbo } 
-                    },
-                    date: localDoc?.sentAt || new Date().toISOString(),
-                    author: [{ type: 'Practitioner', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika', value: config.practitioner.hzjzId } }],
-                    content: [{ attachment: { contentType: 'application/fhir+json', language: 'hr', url: 'urn:oid:' + documentOid } }] // Placeholder if not found
-                };
-            }
-
-            const putUrl = `${config.cezih.gatewayBase}${config.cezih.services.document}/DocumentReference?identifier=${encodeURIComponent(`urn:ietf:rfc:3986|${oidValue}`)}`;
-            console.log(`[ClinicalDocumentService] Sending storno (PUT): ${putUrl}`);
-            
-            // Debug: save payload
-            try { require('fs').writeFileSync('./tmp/storno-payload.json', JSON.stringify(stornoResource, null, 2)); } catch (e) { }
-
-            const response = await axios.put(putUrl, stornoResource, { headers: combinedHeaders });
-            responseData = response.data;
-            console.log('[ClinicalDocumentService] ✅ Storno accepted by CEZIH!');
+            const response = await axios.put(url, docRef, { headers: combinedHeaders });
+            responseData = { success: true, data: response.data, documentOid };
+            console.log('[ClinicalDocumentService] ✅ TC20 Cancel accepted by CEZIH!');
         } catch (error: any) {
             const errStatus = error.response?.status;
             const errBody = error.response?.data;
-            console.warn(`[ClinicalDocumentService] Storno failed: HTTP ${errStatus || '?'}: ${error.message}`);
+            console.warn(`[ClinicalDocumentService] TC20 Cancel failed: HTTP ${errStatus || '?'}: ${error.message}`);
             errorMessage = error.message;
             responseData = {
                 success: false,
+                localOnly: true,
+                cezihStatus: 'failed',
                 cezihError: errStatus
-                    ? `HTTP ${errStatus}: ${errBody?.issue?.[0]?.diagnostics || JSON.stringify(errBody?.issue || errBody)?.slice(0, 500) || error.message}`
+                    ? `HTTP ${errStatus}: ${errBody?.issue?.[0]?.diagnostics || JSON.stringify(errBody?.issue || errBody)?.slice(0, 1000) || error.message}`
                     : error.message,
-                documentOid,
+                id: documentOid,
+                status: 'cancelled',
             };
-            try { require('fs').writeFileSync('./tmp/storno-error.json', JSON.stringify(errBody, null, 2)); } catch (e) { }
         } finally {
             auditService.log({
-                patientMbo: this.getDocument(documentOid)?.patientMbo,
-                action: 'STORNIRAJ_DOKUMENT',
+                patientMbo,
+                action: 'CANCEL_DOCUMENT',
                 direction: 'OUTGOING_CEZIH',
                 status: errorMessage ? 'ERROR' : 'SUCCESS',
-                payload_req: { oid: oidValue, url: `${config.cezih.gatewayBase}${config.cezih.services.document}/DocumentReference` },
+                payload_req: docRef,
                 payload_res: responseData,
                 error_msg: errorMessage,
             });
@@ -1017,25 +1013,38 @@ class ClinicalDocumentService {
 
         try {
             const rawHeaders = authService.getUserAuthHeaders(userToken);
-            // For GET requests, remove Content-Type (no body) and add Accept
             delete rawHeaders['Content-Type'];
             const headers = { ...rawHeaders, 'Accept': 'application/fhir+json' };
-            // TC21: ITI-67 endpoint is /DocumentReference (confirmed by CEZIH spec)
             const baseUrl = `${config.cezih.gatewayBase}${config.cezih.services.document}/DocumentReference`;
-            const qp = new URLSearchParams({
-                'patient.identifier': `${CEZIH_IDENTIFIERS.MBO}|${params.patientMbo}`,
-                'status': 'current',
-            });
-            const url = `${baseUrl}?${qp.toString()}`;
+            
+            let url = `${baseUrl}?patient.identifier=${encodeURIComponent(`${CEZIH_IDENTIFIERS.MBO}|${params.patientMbo}`)}&status=current&_count=100`;
 
             console.log(`[TC21] GET ${url}`);
-            const response = await axios.get(url, { headers });
+            
+            let allRemoteDocs: any[] = [];
+            let nextUrl: string | undefined = url;
 
-            return (response.data.entry || []).map((e: any) => this.mapRemoteDocument(e.resource));
+            while (nextUrl) {
+                const response: AxiosResponse = await axios.get(nextUrl, { headers });
+                const bundle: any = response.data;
+                
+                if (bundle.entry) {
+                    const mapped = bundle.entry.map((e: any) => this.mapRemoteDocument(e.resource));
+                    allRemoteDocs = [...allRemoteDocs, ...mapped];
+                }
+
+                // Check for next page
+                const nextLink: any = bundle.link?.find((l: any) => l.relation === 'next');
+                nextUrl = nextLink ? nextLink.url : undefined;
+                
+                if (nextUrl) {
+                    console.log(`[TC21] Fetching next page: ${nextUrl}`);
+                }
+            }
+
+            return allRemoteDocs;
         } catch (error: any) {
             console.warn('[TC21] CEZIH remote search failed:', error.message);
-            console.warn('[TC21] Response status:', error.response?.status);
-            console.warn('[TC21] Response data:', JSON.stringify(error.response?.data || ''));
             throw error;
         }
     }
@@ -1070,15 +1079,26 @@ class ClinicalDocumentService {
 
     async retrieveDocument(documentUrl: string, userToken: string): Promise<any> {
         const oidMatch = documentUrl.match(/urn:oid:(.*)/);
+        let finalUrl = documentUrl;
+        let oid: string | null = null;
+
         if (oidMatch) {
-            const localDoc = this.getDocument(oidMatch[1]);
+            oid = oidMatch[1];
+            // Check local DB first
+            const localDoc = this.getDocument(oid);
             if (localDoc) return localDoc;
+            
+            // If not local, construct CEZIH retrieval URL
+            finalUrl = `${config.cezih.gatewayBase}${config.cezih.services.document}/iti-68-service?id=${encodeURIComponent(oidMatch[0])}`;
         }
 
         try {
-            const headers = authService.getUserAuthHeaders(userToken);
-            console.log(`[ClinicalDocumentService] Retrieving remote document: ${documentUrl}`);
-            const response = await axios.get(documentUrl, { headers });
+            const rawHeaders = authService.getUserAuthHeaders(userToken);
+            delete rawHeaders['Content-Type'];
+            const headers = { ...rawHeaders, 'Accept': 'application/fhir+json' };
+            
+            console.log(`[ClinicalDocumentService] Retrieving document: ${finalUrl}`);
+            const response = await axios.get(finalUrl, { headers });
 
             let resource = response.data;
 

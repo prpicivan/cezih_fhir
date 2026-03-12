@@ -17,6 +17,18 @@ interface FhirBundle {
     }>;
 }
 
+const TERMINOLOGY_MAPPING: Record<string, { name: string; title: string }> = {
+    'document-type': { name: 'HRVrstaDokumenta', title: 'Tipovi kliničkih dokumenata' },
+    'djelatnosti-zz': { name: 'HRDjelatnostiZZ', title: 'Djelatnosti zdravstvene zaštite' },
+    'ehe-message-types': { name: 'EHEMessageTypes', title: 'Vrste eKarton poruka (TC16/TC17)' },
+    'icd10-hr': { name: 'ICD10HR', title: 'MKB-10 Dijagnoze (Hrvatska)' },
+    'atc-hr': { name: 'ATCHR', title: 'ATC Klasifikacija lijekova' },
+    'mtp-hr': { name: 'MTPHR', title: 'MTP Postupci' },
+    'vrsta-posjete': { name: 'HRVrstaPosjete', title: 'Vrste posjete' },
+    'nacin-prijema': { name: 'HRNacinPrijema', title: 'Načini prijema u zdravstvenu ustanovu' },
+    'sifra-oslobodjenja-od-sudjelovanja-u-troskovima': { name: 'HROslobodjenje', title: 'Šifre oslobođenja (Dopunsko)' }
+};
+
 class TerminologyService {
     private cachedCodeSystems: Map<string, any> = new Map();
     private cachedValueSets: Map<string, any> = new Map();
@@ -46,6 +58,35 @@ class TerminologyService {
             const response = await axios.get<FhirBundle>(url, { headers });
 
             const codeSystems = response.data.entry?.map(e => e.resource) || [];
+
+            // Enrich skeletal CodeSystems
+            for (let i = 0; i < codeSystems.length; i++) {
+                const cs = codeSystems[i];
+                if (cs && cs.url) {
+                    // 1. Try mapping first (very stable)
+                    const slug = this.getSlug(cs.url);
+                    if (slug && TERMINOLOGY_MAPPING[slug]) {
+                        cs.name = cs.name || TERMINOLOGY_MAPPING[slug].name;
+                        cs.title = cs.title || TERMINOLOGY_MAPPING[slug].title;
+                    }
+
+                    // 2. Try individual fetch if still skeletal
+                    if (!cs.title || !cs.name) {
+                        try {
+                            console.log(`[TerminologyService] Enriching skeletal CodeSystem: ${cs.url}`);
+                            const enriched = await this.fetchFullResource('CodeSystem', cs.url, headers);
+                            if (enriched) {
+                                // Re-apply mapping to enriched resource too
+                                if (slug && TERMINOLOGY_MAPPING[slug]) {
+                                    enriched.name = enriched.name || TERMINOLOGY_MAPPING[slug].name;
+                                    enriched.title = enriched.title || TERMINOLOGY_MAPPING[slug].title;
+                                }
+                                codeSystems[i] = enriched;
+                            }
+                        } catch (e) { /* continue */ }
+                    }
+                }
+            }
 
             // Cache and Persist the code systems
             const insertStmt = db.prepare('INSERT OR REPLACE INTO terminology_concepts (system, code, display, version) VALUES (?, ?, ?, ?)');
@@ -77,6 +118,31 @@ class TerminologyService {
         }
     }
 
+    private async fetchFullResource(type: 'CodeSystem' | 'ValueSet', url: string, headers: any): Promise<any | null> {
+        try {
+            const res = await axios.get(`${config.cezih.gatewaySystem}${config.cezih.services.terminology}/${type}?url=${encodeURIComponent(url)}`, { headers, timeout: 5000 });
+            return res.data.entry?.[0]?.resource || null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    private getSlug(url: string | undefined): string | undefined {
+        if (!url) return undefined;
+        // Remove trailing slash if exists
+        const normalized = url.endsWith('/') ? url.slice(0, -1) : url;
+        return normalized.split('/').pop();
+    }
+
+    private clearLocalTerminology() {
+        console.log('[TerminologyService] Cleaning local terminology tables...');
+        db.prepare('DELETE FROM terminology_valuesets').run();
+        db.prepare('DELETE FROM terminology_concepts').run();
+        db.prepare('DELETE FROM terminology_sync').run();
+        this.cachedCodeSystems.clear();
+        this.cachedValueSets.clear();
+    }
+
     // ============================================================
     // Test Case 8: ValueSet Synchronization (IHE SVCM ITI-95)
     // ============================================================
@@ -99,7 +165,6 @@ class TerminologyService {
             }
 
             const response = await axios.get<FhirBundle>(url, { headers });
-
             const valueSets = response.data.entry?.map(e => e.resource) || [];
 
             // CEZIH sometimes omits its own ValueSets from the main list. 
@@ -115,11 +180,22 @@ class TerminologyService {
 
             for (const url of essentialUrls) {
                 if (!valueSets.find(vs => vs && vs.url === url)) {
+                    const enriched = await this.fetchFullResource('ValueSet', url, headers);
+                    if (enriched) {
+                        console.log(`[TerminologyService] Added missing essential ValueSet: ${url}`);
+                        valueSets.push(enriched);
+                    }
+                }
+            }
+
+            // Enrich skeletal ValueSets from the main list
+            for (let i = 0; i < valueSets.length; i++) {
+                const vs = valueSets[i];
+                if (!vs.title || !vs.name) {
                     try {
-                        console.log(`[TerminologyService] Fetching essential ValueSet: ${url}`);
-                        const vsRes = await axios.get(`${config.cezih.gatewaySystem}${config.cezih.services.terminology}/ValueSet?url=${encodeURIComponent(url)}`, { headers });
-                        const vs = vsRes.data.entry?.[0]?.resource;
-                        if (vs) valueSets.push(vs);
+                        console.log(`[TerminologyService] Enriching skeletal ValueSet: ${vs.url}`);
+                        const enriched = await this.fetchFullResource('ValueSet', vs.url, headers);
+                        if (enriched) valueSets[i] = enriched;
                     } catch (e) { /* ignore */ }
                 }
             }
@@ -131,11 +207,20 @@ class TerminologyService {
             const now = new Date().toISOString();
             for (const vs of valueSets) {
                 if (vs && vs.url) {
+                    let name = vs.name;
+                    let title = vs.title;
+
+                    const slug = this.getSlug(vs.url);
+                    if (slug && TERMINOLOGY_MAPPING[slug]) {
+                        name = name || TERMINOLOGY_MAPPING[slug].name;
+                        title = title || TERMINOLOGY_MAPPING[slug].title;
+                    }
+
                     this.cachedValueSets.set(vs.url, vs);
                     upsertStmt.run(
                         vs.url, 
-                        vs.name || null, 
-                        vs.title || null, 
+                        name || null, 
+                        title || null, 
                         vs.version || null, 
                         vs.status || null, 
                         now,
@@ -144,7 +229,7 @@ class TerminologyService {
                 }
             }
 
-            console.log(`[TerminologyService] Synced and persisted ${valueSets.length} ValueSets (with fullResource)`);
+            console.log(`[TerminologyService] Synced and persisted ${valueSets.length} ValueSets`);
             return valueSets;
         } catch (error: any) {
             console.error('[TerminologyService] Failed to sync ValueSets:', error.message);
@@ -157,6 +242,9 @@ class TerminologyService {
      * @param force - If true, ignores lastSyncDate and fetches everything
      */
     async syncAll(force = true): Promise<{ codeSystems: any[]; valueSets: any[] }> {
+        if (force) {
+            this.clearLocalTerminology();
+        }
         const lastUpdated = force ? undefined : (this.lastSyncDate || undefined);
         const codeSystems = await this.syncCodeSystems(lastUpdated);
         const valueSets = await this.syncValueSets(lastUpdated);
@@ -208,16 +296,27 @@ class TerminologyService {
         const rows = db.prepare(`
             SELECT url, name, title, version, status, lastSync
             FROM terminology_valuesets
-            ORDER BY lastSync DESC
+            ORDER BY lastSync DESC, url ASC
         `).all() as any[];
-        return rows.map(r => ({
-            url: r.url,
-            name: r.name ?? null,
-            title: r.title ?? null,
-            version: r.version ?? null,
-            status: r.status ?? null,
-            lastSync: r.lastSync ?? null,
-        }));
+        return rows.map(r => {
+            let name = r.name;
+            let title = r.title;
+            
+            // Fallback for mapping
+            if ((!name || !title) && TERMINOLOGY_MAPPING[r.url]) {
+                name = name || TERMINOLOGY_MAPPING[r.url].name;
+                title = title || TERMINOLOGY_MAPPING[r.url].title;
+            }
+
+            return {
+                url: r.url,
+                name: name || null,
+                title: title || null,
+                version: r.version || null,
+                status: r.status || null,
+                lastSync: r.lastSync || null,
+            };
+        });
     }
 
     /**

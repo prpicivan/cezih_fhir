@@ -33,7 +33,7 @@ export default function PatientsPage() {
 
     const [isRegModalOpen, setIsRegModalOpen] = useState(false);
     const [regMbo, setRegMbo] = useState('');
-    const [searchType, setSearchType] = useState<'mbo' | 'passport' | 'euCard'>('mbo');
+    const [regSearchType, setRegSearchType] = useState<'mbo' | 'passport' | 'eu-card'>('mbo');
     const [remotePatient, setRemotePatient] = useState<any>(null);
     const [regLoading, setRegLoading] = useState(false);
     const [regError, setRegError] = useState<string | null>(null);
@@ -46,10 +46,19 @@ export default function PatientsPage() {
         setRegLoading(true);
         setRegError(null);
         try {
-            const res = await fetch(`/api/patient/search?${searchType}=${regMbo}`);
+            // If MBO, use search-remote (standard PDQm). If passport/EKZO, use identifier search.
+            const url = regSearchType === 'mbo' 
+                ? `/api/patient/search-remote?mbo=${regMbo}` 
+                : `/api/patient/search?identifier=${encodeURIComponent(regMbo)}`;
+
+            const res = await fetch(url);
             const data = await res.json();
-            if (data.success && data.patients.length > 0) {
-                setRemotePatient(data.patients[0]);
+            
+            // Fixed response parsing: accept both single patient and patients array
+            const found = data.patients ? data.patients : (data.patient ? [data.patient] : []);
+            
+            if (data.success && found.length > 0) {
+                setRemotePatient(found[0]);
             } else {
                 setRegError('Pacijent nije pronađen na CEZIH-u niti u lokalnoj bazi.');
             }
@@ -65,10 +74,11 @@ export default function PatientsPage() {
         setRegLoading(true);
         setRegError(null);
         try {
+            const mboToSync = remotePatient.mbo || remotePatient.id;
             const res = await fetch('/api/patient/sync', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mbo: remotePatient.mbo })
+                body: JSON.stringify({ mbo: mboToSync })
             });
             const data = await res.json();
             if (data.success) {
@@ -151,12 +161,12 @@ export default function PatientsPage() {
                                 <>
                                     <div className="space-y-4">
                                         <div className="flex gap-2 p-1 bg-slate-100 rounded-xl">
-                                            {(['mbo', 'passport', 'euCard'] as const).map((type) => (
+                                            {(['mbo', 'passport', 'eu-card'] as const).map((type) => (
                                                 <button
                                                     key={type}
-                                                    onClick={() => setSearchType(type)}
+                                                    onClick={() => setRegSearchType(type)}
                                                     className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                                                        searchType === type 
+                                                        regSearchType === type 
                                                         ? 'bg-white text-blue-600 shadow-sm' 
                                                         : 'text-slate-500 hover:text-slate-700'
                                                     }`}
@@ -168,15 +178,15 @@ export default function PatientsPage() {
                                         
                                         <div className="space-y-1">
                                             <label className="text-xs font-bold text-slate-500 uppercase">
-                                                {searchType === 'mbo' ? 'MBO (9 znamenki)' : searchType === 'passport' ? 'Broj putovnice' : 'Broj EKZO kartice'}
+                                                {regSearchType === 'mbo' ? 'MBO (9 znamenki)' : regSearchType === 'passport' ? 'Broj putovnice' : 'Broj EKZO kartice'}
                                             </label>
                                             <div className="flex gap-2">
                                                 <input
                                                     type="text"
                                                     className="flex-1 border rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono"
-                                                    placeholder={searchType === 'mbo' ? 'npr. 123456789' : 'Unesite broj...'}
+                                                    placeholder={regSearchType === 'mbo' ? 'npr. 123456789' : 'Unesite broj...'}
                                                     value={regMbo}
-                                                    onChange={(e) => setRegMbo(searchType === 'mbo' ? e.target.value.replace(/\D/g, '') : e.target.value)}
+                                                    onChange={(e) => setRegMbo(regSearchType === 'mbo' ? e.target.value.replace(/\D/g, '') : e.target.value)}
                                                 />
                                                 <button
                                                     onClick={handleRemoteLookup}

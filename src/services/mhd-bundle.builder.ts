@@ -102,6 +102,19 @@ export function buildInnerBundle(p: MhdDocumentParams): any {
                         { mode: 'official', party: { reference: `urn:uuid:${U.org}` } }
                     ],
                     custodian: { reference: `urn:uuid:${U.org}` },
+                    
+                    // OVO JE NOVI DIO KOJI MORATE DODATI:
+                    ...(p.replacesOid ? {
+                        relatesTo: [{
+                            code: 'replaces',
+                            targetIdentifier: {
+                                system: 'urn:ietf:rfc:3986',
+                                value: p.replacesOid.startsWith('urn:oid:') ? p.replacesOid : `urn:oid:${p.replacesOid}`
+                            }
+                        }]
+                    } : {}),
+                    // KRAJ NOVOG DIJELA
+
                     section: [
                         {
                             title: 'Djelatnost',

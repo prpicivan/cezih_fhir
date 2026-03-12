@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Search, Building2, User, BookOpen, Tag, RefreshCw, AlertCircle, CheckCircle, Clock, Hash, Copy, ChevronDown, ChevronRight, ArrowRight } from 'lucide-react';
 
-type Tab = 'organizations' | 'practitioners' | 'codeSystems' | 'valueSets' | 'oid';
+type Tab = 'organizations' | 'practitioners' | 'locations' | 'practitionerRoles' | 'healthcareServices' | 'endpoints' | 'orgAffiliations' | 'codeSystems' | 'valueSets' | 'oid';
 
 // ─── helpers ──────────────────────────────────────────────────
 function formatDate(iso: string | null) {
@@ -51,7 +51,7 @@ function CodeSystemsTab() {
         setLoading(true);
         setError(null);
         try {
-            const res = await fetch('/api/terminology/local-code-systems');
+            const res = await fetch('/api/terminology/local-code-systems', { cache: 'no-store' });
             const data = await res.json();
             if (data.success) setRows(data.codeSystems);
             else setError(data.error || 'Greška');
@@ -66,7 +66,7 @@ function CodeSystemsTab() {
         if (concepts[system]) return;
         setLoadingConcepts(prev => ({ ...prev, [system]: true }));
         try {
-            const res = await fetch(`/api/terminology/local-concepts?system=${encodeURIComponent(system)}`);
+            const res = await fetch(`/api/terminology/local-concepts?system=${encodeURIComponent(system)}`, { cache: 'no-store' });
             const data = await res.json();
             if (data.success) {
                 setConcepts(prev => ({ ...prev, [system]: data.concepts }));
@@ -227,7 +227,7 @@ function ValueSetsTab() {
         setLoading(true);
         setError(null);
         try {
-            const res = await fetch('/api/terminology/local-value-sets');
+            const res = await fetch('/api/terminology/local-value-sets', { cache: 'no-store' });
             const data = await res.json();
             if (data.success) setRows(data.valueSets);
             else setError(data.error || 'Greška');
@@ -396,12 +396,128 @@ function ValueSetsTab() {
     );
 }
 
+// ─── Component: ResourceDetails ──────────────────────────────
+function ResourceDetails({ resource, type, isOpen, onClose }: { resource: any; type: string; isOpen: boolean; onClose: () => void }) {
+    const [history, setHistory] = useState<any>(null);
+    const [loadingHistory, setLoadingHistory] = useState(false);
+
+    useEffect(() => {
+        if (isOpen && resource?.id) {
+            const fetchHistory = async () => {
+                setLoadingHistory(true);
+                try {
+                    const resType = resource.resourceType;
+                    const res = await fetch(`/api/registry/${resType}/${resource.id}/_history`);
+                    const data = await res.json();
+                    if (data.success) setHistory(data.history);
+                } catch (e) {
+                    console.error('Failed to fetch history', e);
+                } finally {
+                    setLoadingHistory(false);
+                }
+            };
+            fetchHistory();
+        } else {
+            setHistory(null);
+        }
+    }, [isOpen, resource]);
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
+                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-bold uppercase tracking-wider">
+                                {resource.resourceType}
+                            </span>
+                            <h2 className="text-lg font-bold text-slate-800">
+                                {typeof resource.name === 'string' ? resource.name : resource.id}
+                            </h2>
+                        </div>
+                        <p className="text-xs text-slate-400 font-mono mt-0.5">ID: {resource.id}</p>
+                    </div>
+                    <button 
+                        onClick={onClose}
+                        className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+                    >
+                        <ChevronRight className="w-5 h-5 rotate-180" />
+                    </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* JSON Data */}
+                    <div className="space-y-3">
+                        <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                            <BookOpen className="w-4 h-4 text-slate-400" />
+                            Sirovni podaci (FHIR JSON)
+                        </h3>
+                        <div className="bg-slate-900 rounded-xl p-4 overflow-x-auto text-[11px] font-mono text-blue-300 shadow-inner max-h-[400px]">
+                            <pre>{JSON.stringify(resource, null, 2)}</pre>
+                        </div>
+                    </div>
+
+                    {/* History */}
+                    <div className="space-y-3">
+                        <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                            <Clock className="w-4 h-4 text-slate-400" />
+                            Povijest mCSD resursa
+                        </h3>
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl overflow-hidden min-h-[100px]">
+                            {loadingHistory ? (
+                                <div className="p-8 text-center text-slate-400 flex flex-col items-center gap-2">
+                                    <RefreshCw className="w-5 h-5 animate-spin" />
+                                    <p className="text-xs">Učitavam povijest...</p>
+                                </div>
+                            ) : history?.entry?.length > 0 ? (
+                                <div className="divide-y divide-slate-200">
+                                    {history.entry.map((e: any, i: number) => (
+                                        <div key={i} className="p-4 hover:bg-white transition-colors">
+                                            <div className="flex justify-between items-start mb-1">
+                                                <span className="text-[10px] font-bold text-slate-500 uppercase">
+                                                    Verzija {e.resource.meta?.versionId || history.entry.length - i}
+                                                </span>
+                                                <span className="text-[10px] text-slate-400">
+                                                    {formatDate(e.resource.meta?.lastUpdated)}
+                                                </span>
+                                            </div>
+                                            <p className="text-xs text-slate-600 font-medium">
+                                                {e.request?.method || 'GET'} - {e.response?.status || '200 OK'}
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="p-12 text-center text-slate-300 italic text-xs">
+                                    Povijest nije dostupna za ovaj resurs.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+                    <button 
+                        onClick={onClose}
+                        className="px-5 py-2 bg-slate-800 text-white rounded-lg text-sm font-semibold hover:bg-slate-900 transition-colors"
+                    >
+                        Zatvori
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // ─── Tab: Organizations / Practitioners ───────────────────────
-function RegistrySearchTab({ type }: { type: 'organization' | 'practitioner' }) {
+function RegistrySearchTab({ type }: { type: 'organization' | 'practitioner' | 'location' | 'practitionerRole' | 'healthcareService' | 'endpoint' | 'organizationAffiliation' }) {
     const [searchTerm, setSearchTerm] = useState('');
     const [results, setResults] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [selectedResource, setSelectedResource] = useState<any>(null);
 
     const handleSearch = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -409,13 +525,13 @@ function RegistrySearchTab({ type }: { type: 'organization' | 'practitioner' }) 
         setError(null);
         setResults([]);
         try {
-            const endpoint = type === 'organization'
-                ? `/api/registry/organizations?active=true&name=${encodeURIComponent(searchTerm)}`
-                : `/api/registry/practitioners?name=${encodeURIComponent(searchTerm)}`;
+            const resType = type.charAt(0).toUpperCase() + type.slice(1);
+            const endpoint = `/api/registry/${resType}?active=true&name=${encodeURIComponent(searchTerm)}`;
             const res = await fetch(endpoint);
             const data = await res.json();
             if (data.success) {
-                setResults(type === 'organization' ? data.organizations : data.practitioners);
+                const key = type.endsWith('y') ? type.slice(0, -1) + 'ies' : type + 's';
+                setResults(data[key] || []);
             } else {
                 const msg = data.error || 'Greška u komunikaciji.';
                 setError(msg.includes('nije dostupna') ? msg : `Greška: ${msg}`);
@@ -431,7 +547,13 @@ function RegistrySearchTab({ type }: { type: 'organization' | 'practitioner' }) 
         <div className="space-y-4">
             <div>
                 <h2 className="text-base font-semibold text-slate-800">
-                    {type === 'organization' ? 'Pretraga Organizacija' : 'Pretraga Djelatnika'}
+                    {type === 'organization' ? 'Pretraga Organizacija' : 
+                     type === 'practitioner' ? 'Pretraga Djelatnika' :
+                     type === 'location' ? 'Pretraga Lokacija' :
+                     type === 'practitionerRole' ? 'Pretraga Uloga' :
+                     type === 'healthcareService' ? 'Pretraga Usluga' :
+                     type === 'endpoint' ? 'Pretraga Endpointova' :
+                     'Pretraga Relacija'}
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">IHE mCSD ITI-90 · live pretraga CEZIH imenika (TC9)</p>
             </div>
@@ -444,7 +566,12 @@ function RegistrySearchTab({ type }: { type: 'organization' | 'practitioner' }) 
                             type="text"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            placeholder={type === 'organization' ? 'Naziv ustanove (npr. KBC)...' : 'Ime i prezime liječnika...'}
+                            placeholder={
+                                type === 'organization' ? 'Naziv ustanove (npr. KBC)...' : 
+                                type === 'practitioner' ? 'Ime i prezime liječnika...' :
+                                type === 'location' ? 'Naziv lokacije...' :
+                                'Pretraga...'
+                            }
                             className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                         />
                     </div>
@@ -473,15 +600,21 @@ function RegistrySearchTab({ type }: { type: 'organization' | 'practitioner' }) 
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {results.map((item, i) => (
-                                <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                <tr key={i} 
+                                    className="hover:bg-blue-50/50 transition-colors cursor-pointer group"
+                                    onClick={() => setSelectedResource(item)}
+                                >
                                     <td className="px-5 py-3 font-medium text-slate-900">
-                                        {typeof item.name === 'string'
-                                            ? item.name
-                                            : Array.isArray(item.name)
-                                                ? item.name.map((n: any) => [n.given?.join(' '), n.family].filter(Boolean).join(' ')).join(', ')
-                                                : item.name?.family
-                                                    ? [item.name.given?.join(' '), item.name.family].filter(Boolean).join(' ')
-                                                    : '—'}
+                                        <div className="flex items-center gap-2">
+                                            {typeof item.name === 'string'
+                                                ? item.name
+                                                : Array.isArray(item.name)
+                                                    ? item.name.map((n: any) => [n.given?.join(' '), n.family].filter(Boolean).join(' ')).join(', ')
+                                                    : item.name?.family
+                                                        ? [item.name.given?.join(' '), item.name.family].filter(Boolean).join(' ')
+                                                        : item.id}
+                                            <ChevronRight className="w-3.5 h-3.5 text-slate-300 opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all" />
+                                        </div>
                                     </td>
                                     <td className="px-5 py-3 font-mono text-xs text-slate-600">{item.identifier?.[0]?.value || '—'}</td>
                                     <td className="px-5 py-3">
@@ -504,6 +637,13 @@ function RegistrySearchTab({ type }: { type: 'organization' | 'practitioner' }) 
                     Unesite pojamove za pretragu...
                 </div>
             )}
+
+            <ResourceDetails 
+                resource={selectedResource} 
+                type={type} 
+                isOpen={!!selectedResource} 
+                onClose={() => setSelectedResource(null)} 
+            />
         </div>
     );
 }
@@ -616,12 +756,16 @@ function OidTab() {
 }
 
 // ─── Main Page ────────────────────────────────────────────────
-const TABS: { id: Tab; label: string; icon: React.ComponentType<any>; tc?: string }[] = [
+const TABS: { id: Tab; label: string; icon: React.ComponentType<any>; tc?: string; resource?: string }[] = [
     { id: 'oid', label: 'OID Generator', icon: Hash, tc: 'TC6' },
     { id: 'codeSystems', label: 'Šifrarnici', icon: BookOpen, tc: 'TC7' },
     { id: 'valueSets', label: 'Skupovi vrijednosti', icon: Tag, tc: 'TC8' },
-    { id: 'organizations', label: 'Organizacije', icon: Building2, tc: 'TC9' },
-    { id: 'practitioners', label: 'Djelatnici', icon: User, tc: 'TC9' },
+    { id: 'organizations', label: 'Organizacije', icon: Building2, tc: 'TC9', resource: 'organization' },
+    { id: 'practitioners', label: 'Djelatnici', icon: User, tc: 'TC9', resource: 'practitioner' },
+    { id: 'locations', label: 'Lokacije', icon: Clock, tc: 'TC9', resource: 'location' },
+    { id: 'practitionerRoles', label: 'Uloge', icon: Tag, tc: 'TC9', resource: 'practitionerRole' },
+    { id: 'healthcareServices', label: 'Usluge', icon: BookOpen, tc: 'TC9', resource: 'healthcareService' },
+    { id: 'endpoints', label: 'Endpointovi', icon: ArrowRight, tc: 'TC9', resource: 'endpoint' },
 ];
 
 export default function RegistryPage() {
@@ -666,6 +810,11 @@ export default function RegistryPage() {
                 {activeTab === 'oid' && <OidTab />}
                 {activeTab === 'organizations' && <RegistrySearchTab type="organization" />}
                 {activeTab === 'practitioners' && <RegistrySearchTab type="practitioner" />}
+                {activeTab === 'locations' && <RegistrySearchTab type="location" />}
+                {activeTab === 'practitionerRoles' && <RegistrySearchTab type="practitionerRole" />}
+                {activeTab === 'healthcareServices' && <RegistrySearchTab type="healthcareService" />}
+                {activeTab === 'endpoints' && <RegistrySearchTab type="endpoint" />}
+                {activeTab === 'orgAffiliations' && <RegistrySearchTab type="organizationAffiliation" />}
                 {activeTab === 'codeSystems' && <CodeSystemsTab />}
                 {activeTab === 'valueSets' && <ValueSetsTab />}
             </div>

@@ -182,8 +182,20 @@ async function runTC(id: string, groups: TCGroup[]): Promise<TCResult> {
             break;
         }
         case 'tc-10': {
+            // Check if we have custom identifier override from UI
+            const customId = (groups.flatMap(g => g.cases).find(c => c.id === 'tc-10') as any)?.customId;
+            const customType = (groups.flatMap(g => g.cases).find(c => c.id === 'tc-10') as any)?.customType;
+            
+            const idToUse = customId || PATIENT_MBO;
+            const typeToUse = customType || 'mbo';
+            
+            // If MBO, use search-remote (standard PDQm). If passport/EKZO, use identifier search.
+            const url = typeToUse === 'mbo' 
+                ? `/patient/search-remote?mbo=${idToUse}` 
+                : `/patient/search?identifier=${encodeURIComponent(idToUse)}`;
+            
             req = undefined;
-            res = await get(`/patient/search?mbo=${PATIENT_MBO}`);
+            res = await get(url);
             break;
         }
         case 'tc-15': {
@@ -978,6 +990,38 @@ export default function CertificationPage() {
                                         <span className={`font-bold ${tc.method === 'GET' ? 'text-sky-600' : tc.method === 'PUT' ? 'text-amber-600' : 'text-violet-600'}`}>{tc.method}</span>
                                         {' '}{tc.endpoint.length > 35 ? tc.endpoint.slice(0, 35) + '…' : tc.endpoint}
                                     </span>
+                                    {tc.id === 'tc-10' && (
+                                        <div className="flex items-center gap-2 mr-2">
+                                            <select 
+                                                value={(tc as any).customType || 'mbo'}
+                                                onChange={(e) => {
+                                                    const val = e.target.value as any;
+                                                    setGroups(prev => prev.map(g => ({
+                                                        ...g,
+                                                        cases: g.cases.map(c => c.id === 'tc-10' ? { ...c, customType: val } : c)
+                                                    })));
+                                                }}
+                                                className="text-[10px] h-7 bg-white border border-slate-200 rounded px-1 outline-none focus:ring-1 focus:ring-blue-500"
+                                            >
+                                                <option value="mbo">MBO</option>
+                                                <option value="passport">PASS</option>
+                                                <option value="eu-card">EKZO</option>
+                                            </select>
+                                            <input 
+                                                type="text"
+                                                placeholder="ID..."
+                                                value={(tc as any).customId !== undefined ? (tc as any).customId : PATIENT_MBO}
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    setGroups(prev => prev.map(g => ({
+                                                        ...g,
+                                                        cases: g.cases.map(c => c.id === 'tc-10' ? { ...c, customId: val } : c)
+                                                    })));
+                                                }}
+                                                className="text-[10px] h-7 w-24 bg-white border border-slate-200 rounded px-2 outline-none font-mono focus:ring-1 focus:ring-blue-500"
+                                            />
+                                        </div>
+                                    )}
                                     {tc.id === 'tc-18' ? (
                                         <button
                                             onClick={() => toggleExpand(tc.id)}
