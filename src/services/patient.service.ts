@@ -269,7 +269,14 @@ class PatientService {
     }
 
     async saveOrUpdatePatient(patient: PatientDemographics) {
-        if (!patient.mbo) return;
+        // Fallback: if MBO is missing, use technical ID or unique identifier as "MBO" for the table primary key
+        // We use .id (technical) which is guaranteed, but prefer Unique ID for FHIR references
+        const mboValue = patient.mbo || patient.id;
+        if (!mboValue) {
+            console.warn('[PatientService] Cannot save patient: no MBO or ID found');
+            return;
+        }
+
         try {
             const now = new Date().toISOString();
             const stmt = db.prepare(`
@@ -291,7 +298,7 @@ class PatientService {
                     cezihUniqueId = excluded.cezihUniqueId
             `);
             stmt.run(
-                patient.mbo,
+                mboValue,
                 patient.oib || null,
                 patient.cezihId || null,
                 patient.name.given[0] || '',

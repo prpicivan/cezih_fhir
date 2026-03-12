@@ -205,9 +205,34 @@ class VisitService {
         }
 
         // Logical identifier references (no urn:uuid — Patient/Practitioner NOT in bundle)
+        // Refactor: select the best identifier system based on patient data in local DB
+        let mboValue = data.patientMbo;
+        let mboSystem: string = CEZIH_IDENTIFIERS.MBO;
+
+        try {
+            const patient = db.prepare('SELECT * FROM patients WHERE mbo = ? OR oib = ? OR cezihUniqueId = ?').get(data.patientMbo, data.patientMbo, data.patientMbo) as any;
+            if (patient) {
+                if (patient.cezihUniqueId) {
+                    mboValue = patient.cezihUniqueId;
+                    mboSystem = CEZIH_IDENTIFIERS.UNIQUE_PATIENT_ID;
+                } else if (patient.mbo && /^\d{9}$/.test(patient.mbo)) {
+                    mboValue = patient.mbo;
+                    mboSystem = CEZIH_IDENTIFIERS.MBO;
+                } else if (patient.euCardNumber) {
+                    mboValue = patient.euCardNumber;
+                    mboSystem = CEZIH_IDENTIFIERS.EU_CARD;
+                } else if (patient.passportNumber) {
+                    mboValue = patient.passportNumber;
+                    mboSystem = CEZIH_IDENTIFIERS.PASSPORT;
+                }
+            }
+        } catch (e) {
+            console.warn('[VisitService] DB lookup failed for identifier mapping, falling back to MBO', e);
+        }
+
         const subject = {
             type: 'Patient',
-            identifier: { system: CEZIH_IDENTIFIERS.MBO, value: data.patientMbo },
+            identifier: { system: mboSystem, value: mboValue },
         };
 
         const encounterResource: any = {
@@ -568,6 +593,8 @@ class VisitService {
             }
             const url = `${config.cezih.gatewayBase}${config.cezih.services.visit}/$process-message`;
             console.log('[VisitService] Sending to:', url);
+            console.log('[VisitService] Generated Bundle:', JSON.stringify(bundleToSend, null, 2).slice(0, 1000) + '...');
+            
             const response = await axios.post(url, bundleToSend, { headers });
 
             console.log('[VisitService] Message sent successfully');
