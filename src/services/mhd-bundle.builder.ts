@@ -81,6 +81,10 @@ export function buildInnerBundle(p: MhdDocumentParams): any {
     const typeDisplay = DOC_TITLES[typeCode] || DOC_TITLES['011'];
     const compProfile = DOC_PROFILES[typeCode] || DOC_PROFILES['011'];
 
+    // Dinamičko određivanje klase posjete unutar samog dokumenta
+    const encClassCode = typeCode === '013' ? 'IMP' : 'AMB';
+    const encClassDisplay = typeCode === '013' ? 'inpatient encounter' : 'ambulatory';
+
     // Za unutarnji Bundle, CEZIH profil očekuje lokalnu urn:uuid referencu na Pacijenta
     return {
         resourceType: 'Bundle', id: uuidv4(), type: 'document',
@@ -145,7 +149,7 @@ export function buildInnerBundle(p: MhdDocumentParams): any {
             { fullUrl: `urn:uuid:${U.pat}`, resource: { resourceType: 'Patient', identifier: [p.patientIdentifier], name: [{ family: p.patientName.family, given: p.patientName.given }], gender: p.patientGender, birthDate: p.patientBirthDate } },
             { fullUrl: `urn:uuid:${U.prac}`, resource: { resourceType: 'Practitioner', identifier: [{ system: CEZIH_SYSTEMS.HZJZ, value: p.practitionerId }, { system: CEZIH_SYSTEMS.OIB, value: p.practitionerOib }], name: [{ family: p.practitionerName.family, given: p.practitionerName.given }] } },
             { fullUrl: `urn:uuid:${U.org}`, resource: { resourceType: 'Organization', identifier: [{ system: CEZIH_SYSTEMS.HZZO_ORG, value: p.orgId }] } },
-            { fullUrl: `urn:uuid:${U.enc}`, resource: { resourceType: 'Encounter', identifier: [{ system: CEZIH_SYSTEMS.VISIT, value: p.encCezihId }], status: 'finished', class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'AMB', display: 'ambulatory' }, subject: { reference: `urn:uuid:${U.pat}` } } },
+            { fullUrl: `urn:uuid:${U.enc}`, resource: { resourceType: 'Encounter', identifier: [{ system: CEZIH_SYSTEMS.VISIT, value: p.encCezihId }], status: 'finished', class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: encClassCode, display: encClassDisplay }, subject: { reference: `urn:uuid:${U.pat}` } } },
             { fullUrl: `urn:uuid:${U.ci}`, resource: { resourceType: 'Condition', identifier: [{ system: CEZIH_SYSTEMS.CASE, value: p.condFhirId }], clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }] }, subject: { reference: `urn:uuid:${U.pat}` }, code: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/icd10-hr', code: p.diagnosisCode }] } } },
             { fullUrl: `urn:uuid:${U.hcs}`, resource: { resourceType: 'HealthcareService', identifier: [{ system: CEZIH_SYSTEMS.ACTIVITY, value: actCode }], providedBy: { reference: `urn:uuid:${U.org}` }, name: actDisplay } },
             { fullUrl: `urn:uuid:${U.obsAnam}`, resource: { resourceType: 'Observation', status: 'final', code: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/observations', code: '15', display: 'Anamneza' }] }, subject: { reference: `urn:uuid:${U.pat}` }, valueString: p.anamnesis } },

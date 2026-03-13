@@ -246,6 +246,16 @@ function ClinicalWorkspace() {
     const [logs, setLogs] = useState<any[]>([]);
     const [visitType, setVisitType] = useState<'AMB' | 'IMP' | 'EMER'>('AMB');
 
+    // Sinkronizira klasu posjete s odabranim dokumentom
+    const handleTypeChange = (selectedDocType: '011' | '012' | '013') => {
+        setDocType(selectedDocType);
+        if (selectedDocType === '013') {
+            setVisitType('IMP'); // Otpusno pismo zahtijeva bolničku (Inpatient) posjetu
+        } else {
+            setVisitType('AMB'); // Nalazi i izvješća idu pod ambulantnu posjetu
+        }
+    };
+
     // Case selector (TC 15-17)
     const [patientCases, setPatientCases] = useState<any[]>([]);
     const [selectedCaseId, setSelectedCaseId] = useState<string>(caseIdParam || '');
@@ -683,16 +693,18 @@ function ClinicalWorkspace() {
                     {visitStatus === 'idle' && (
                         <>
 
+                            {/* NOVI POVEZANI IZBORNIK */}
                             <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-slate-200">
-                                <Activity className="w-4 h-4 text-slate-400" />
+                                <FileText className="w-4 h-4 text-slate-400" />
                                 <select
-                                    value={visitType}
-                                    onChange={(e) => setVisitType(e.target.value as any)}
-                                    className="text-sm text-slate-700 outline-none bg-transparent font-medium"
+                                    value={docType}
+                                    onChange={(e) => handleTypeChange(e.target.value as any)}
+                                    className="text-sm text-slate-700 outline-none bg-transparent font-medium max-w-[400px] truncate"
+                                    disabled={visitStatus !== 'idle'}
                                 >
-                                    <option value="AMB">Izvješće nakon pregleda u ambulanti privatne zdravstvene ustanove</option>
-                                    <option value="IMP">Nalazi iz specijalističke ordinacije privatne zdravstvene ustanove</option>
-                                    <option value="EMER">Otpusno pismo iz privatne zdravstvene ustanove</option>
+                                    <option value="011">Izvješće nakon pregleda u ambulanti (011)</option>
+                                    <option value="012">Specijalistički nalaz (012)</option>
+                                    <option value="013">Otpusno pismo (013)</option>
                                 </select>
                             </div>
                             {/* Case selector (TC 15-17) */}
