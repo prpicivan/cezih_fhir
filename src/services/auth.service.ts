@@ -52,6 +52,9 @@ class AuthService {
     private gatewaySession: GatewaySession | null = null;
     private pendingAuthState: Map<string, { chainCookies: string[]; gatewayUrl: string }> = new Map();
 
+    // --- Keep-Alive ---
+    private keepAliveInterval: NodeJS.Timeout | null = null;
+
     constructor() {
         // Obnovi sesiju iz SQLite ako postoji (preživljava tsx watch restart)
         this.restoreSessionFromDb();
@@ -66,6 +69,7 @@ class AuthService {
                 if (Date.now() - saved.createdAt < maxAge) {
                     this.gatewaySession = saved;
                     console.log('[AuthService] ✅ Gateway sesija obnovljena iz DB (stara', Math.round((Date.now() - saved.createdAt) / 60000), 'min)');
+                    this.startKeepAlive();
                 } else {
                     console.log('[AuthService] DB sesija je istekla, ignoriramo.');
                     db.prepare("DELETE FROM settings WHERE key = 'gateway_session'").run();
@@ -224,6 +228,9 @@ class AuthService {
         } catch (e: any) {
             console.warn('[AuthService] Ne mogu zapisati sesiju u DB:', e.message);
         }
+
+        // Pokreni keep-alive ping
+        this.startKeepAlive();
     }
 
     /**
@@ -284,6 +291,7 @@ class AuthService {
      * Clear the current gateway session (used before re-authentication).
      */
     clearGatewaySession(): void {
+        this.stopKeepAlive();
         this.gatewaySession = null;
         try {
             db.prepare("DELETE FROM settings WHERE key = 'gateway_session'").run();
@@ -296,6 +304,55 @@ class AuthService {
      */
     getUserClaims(): Record<string, any> | null {
         return this.gatewaySession?.userClaims || null;
+    }
+
+    // ============================================================
+    // Session Keep-Alive (Heartbeat)
+    // ============================================================
+
+    public startKeepAlive() {
+        // Ako već postoji aktivan ping, očisti ga da nemamo duplikate
+        this.stopKeepAlive();
+
+        console.log('[AuthService] 🕒 Pokrećem automatsko održavanje sesije (ping svakih 5 min)...');
+
+        // Postavljamo interval na 5 minuta (300,000 milisekundi)
+        this.keepAliveInterval = setInterval(async () => {
+            if (!this.hasGatewaySession()) {
+                this.stopKeepAlive();
+                return;
+            }
+
+            try {
+                const headers = this.getGatewayAuthHeaders();
+                // Gađamo bezazlen endpoint (/metadata vraća FHIR CapabilityStatement i ne radi audit log)
+                const url = `${config.cezih.gatewayBase}${config.cezih.services.patient}/metadata`;
+
+                await axios.get(url, { headers, timeout: 10000 });
+                console.log(`[AuthService] 🟢 Keep-alive ping uspješan (${new Date().toLocaleTimeString()}). Sesija produžena.`);
+            } catch (error: any) {
+                console.warn('[AuthService] 🔴 Keep-alive ping pao! Sesija je vjerojatno istekla na CEZIH strani.');
+
+                // Očisti lokalnu sesiju da sustav zna da smo odlogirani
+                this.clearSession();
+                this.stopKeepAlive();
+            }
+        }, 5 * 60 * 1000); // 5 minuta
+    }
+
+    public stopKeepAlive() {
+        if (this.keepAliveInterval) {
+            clearInterval(this.keepAliveInterval);
+            this.keepAliveInterval = null;
+            console.log('[AuthService] 🛑 Keep-alive ping zaustavljen.');
+        }
+    }
+
+    public clearSession() {
+        this.gatewaySession = null;
+        try {
+            db.prepare("DELETE FROM settings WHERE key = 'gateway_session'").run();
+        } catch (_) { }
     }
 
     // ============================================================

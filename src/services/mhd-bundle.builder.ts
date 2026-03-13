@@ -1,7 +1,3 @@
-/**
- * MHD Bundle Builder — Shared logic for TC18 (create) and TC19 (replace)
- * Extracted from TC18's proven, CEZIH-accepted bundle structure.
- */
 import { v4 as uuidv4 } from 'uuid';
 import { signatureService, jcsCanonialize } from './signature.service';
 import { authService } from './auth.service';
@@ -11,7 +7,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
 
-// ── Constants ──
 const CEZIH_SYSTEMS = {
     MBO: 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO',
     HZJZ: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika',
@@ -20,37 +15,48 @@ const CEZIH_SYSTEMS = {
     VISIT: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-posjete',
     CASE: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja',
     ACTIVITY: 'http://fhir.cezih.hr/specifikacije/identifikatori/ID-djelatnosti',
+    UNIQUE_PATIENT: 'http://fhir.cezih.hr/specifikacije/identifikatori/jedinstveni-identifikator-pacijenta',
+    PASSPORT: 'http://fhir.cezih.hr/specifikacije/identifikatori/putovnica'
+};
+
+const DOC_PROFILES: Record<string, string> = {
+    '011': 'http://fhir.cezih.hr/specifikacije/StructureDefinition/izvjesce-nakon-pregleda-u-ambulanti-privatne-zdravstvene-ustanove',
+    '012': 'http://fhir.cezih.hr/specifikacije/StructureDefinition/nalaz-iz-specijalisticke-ordinacije-privatne-zdravstvene-ustanove',
+    '013': 'http://fhir.cezih.hr/specifikacije/StructureDefinition/otpusno-pismo-iz-privatne-zdravstvene-ustanove'
+};
+
+const DOC_TITLES: Record<string, string> = {
+    '011': 'Izvješće nakon pregleda u ambulanti privatne zdravstvene ustanove',
+    '012': 'Nalazi iz specijalističke ordinacije privatne zdravstvene ustanove',
+    '013': 'Otpusno pismo iz privatne zdravstvene ustanove'
 };
 
 export interface MhdDocumentParams {
-    docOid: string;                  // Document OID (urn:oid:...)
-    patientMbo: string;
+    docOid: string;
+    docType?: string;
+    patientIdentifier: { system: string; value: string };
     patientName: { family: string; given: string[] };
     patientGender: string;
     patientBirthDate: string;
-    patientCezihId: string;          // e.g. "1118065" — Patient logical ID on CEZIH
-    practitionerId: string;          // HZJZ number
+    patientCezihId: string;
+    practitionerId: string;
     practitionerOib: string;
     practitionerName: { family: string; given: string[] };
-    orgId: string;                   // HZZO org code
+    orgId: string;
     orgDisplay: string;
-    encCezihId: string;              // CEZIH visit identifier
-    condFhirId: string;              // CEZIH case identifier
+    encCezihId: string;
+    condFhirId: string;
     diagnosisCode: string;
     anamnesis: string;
-    finding?: string;                // Klinički nalaz i status
-    status?: string;                 // Status (alternative key for finding)
-    recommendation?: string;         // Preporuka
-    activityCode?: string;           // Healthcare service code (default: 3030000)
+    finding?: string;
+    status?: string;
+    recommendation?: string;
+    activityCode?: string;
     activityDisplay?: string;
-    signPin?: string;                // Sign token PIN (optional)
-    replacesOid?: string;            // TC19: OID being replaced (urn:oid:... format)
+    signPin?: string;
+    replacesOid?: string;
 }
 
-/**
- * Generate the precise timestamp format CEZIH expects
- * toISOString() gives ms + Z → we keep ms and replace Z with +01:00
- */
 function cezihTimestamp(): string {
     const now = new Date();
     const offsetMin = now.getTimezoneOffset();
@@ -61,21 +67,21 @@ function cezihTimestamp(): string {
     return now.toISOString().replace(/\.(\d{3})Z$/, `.$1${sign}${tzH}:${tzM}`);
 }
 
-/**
- * Build the self-contained inner document bundle (9 resources)
- * Identical to TC18 proven structure.
- */
 export function buildInnerBundle(p: MhdDocumentParams): any {
     const docDate = cezihTimestamp();
     const U = {
         comp: uuidv4(), pat: uuidv4(), prac: uuidv4(), org: uuidv4(),
         enc: uuidv4(), ci: uuidv4(), hcs: uuidv4(),
         obsAnam: uuidv4(), obsIshod: uuidv4(),
-        obsNalaz: uuidv4(), obsPreporuka: uuidv4(),
     };
     const actCode = p.activityCode || '3030000';
     const actDisplay = p.activityDisplay || 'Opca/obiteljska medicina';
 
+    const typeCode = p.docType || '011';
+    const typeDisplay = DOC_TITLES[typeCode] || DOC_TITLES['011'];
+    const compProfile = DOC_PROFILES[typeCode] || DOC_PROFILES['011'];
+
+    // Za unutarnji Bundle, CEZIH profil očekuje lokalnu urn:uuid referencu na Pacijenta
     return {
         resourceType: 'Bundle', id: uuidv4(), type: 'document',
         identifier: { system: 'urn:ietf:rfc:3986', value: p.docOid },
@@ -85,11 +91,11 @@ export function buildInnerBundle(p: MhdDocumentParams): any {
                 fullUrl: `urn:uuid:${U.comp}`,
                 resource: {
                     resourceType: 'Composition',
-                    meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/izvjesce-nakon-pregleda-u-ambulanti-privatne-zdravstvene-ustanove'] },
+                    meta: { profile: [compProfile] },
                     identifier: { system: 'urn:ietf:rfc:3986', value: p.docOid },
                     language: 'hr', status: 'final', confidentiality: 'N',
-                    type: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type', code: '011', display: 'Izvješće nakon pregleda u ambulanti privatne zdravstvene ustanove' }] },
-                    title: 'Izvješće nakon pregleda u ambulanti privatne zdravstvene ustanove',
+                    type: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type', code: typeCode, display: typeDisplay }] },
+                    title: typeDisplay,
                     subject: { reference: `urn:uuid:${U.pat}` },
                     encounter: { reference: `urn:uuid:${U.enc}` },
                     date: docDate,
@@ -102,19 +108,6 @@ export function buildInnerBundle(p: MhdDocumentParams): any {
                         { mode: 'official', party: { reference: `urn:uuid:${U.org}` } }
                     ],
                     custodian: { reference: `urn:uuid:${U.org}` },
-                    
-                    // OVO JE NOVI DIO KOJI MORATE DODATI:
-                    ...(p.replacesOid ? {
-                        relatesTo: [{
-                            code: 'replaces',
-                            targetIdentifier: {
-                                system: 'urn:ietf:rfc:3986',
-                                value: p.replacesOid.startsWith('urn:oid:') ? p.replacesOid : `urn:oid:${p.replacesOid}`
-                            }
-                        }]
-                    } : {}),
-                    // KRAJ NOVOG DIJELA
-
                     section: [
                         {
                             title: 'Djelatnost',
@@ -149,7 +142,7 @@ export function buildInnerBundle(p: MhdDocumentParams): any {
                     ]
                 }
             },
-            { fullUrl: `urn:uuid:${U.pat}`, resource: { resourceType: 'Patient', identifier: [{ system: CEZIH_SYSTEMS.MBO, value: p.patientMbo }], name: [{ family: p.patientName.family, given: p.patientName.given }], gender: p.patientGender, birthDate: p.patientBirthDate } },
+            { fullUrl: `urn:uuid:${U.pat}`, resource: { resourceType: 'Patient', identifier: [p.patientIdentifier], name: [{ family: p.patientName.family, given: p.patientName.given }], gender: p.patientGender, birthDate: p.patientBirthDate } },
             { fullUrl: `urn:uuid:${U.prac}`, resource: { resourceType: 'Practitioner', identifier: [{ system: CEZIH_SYSTEMS.HZJZ, value: p.practitionerId }, { system: CEZIH_SYSTEMS.OIB, value: p.practitionerOib }], name: [{ family: p.practitionerName.family, given: p.practitionerName.given }] } },
             { fullUrl: `urn:uuid:${U.org}`, resource: { resourceType: 'Organization', identifier: [{ system: CEZIH_SYSTEMS.HZZO_ORG, value: p.orgId }] } },
             { fullUrl: `urn:uuid:${U.enc}`, resource: { resourceType: 'Encounter', identifier: [{ system: CEZIH_SYSTEMS.VISIT, value: p.encCezihId }], status: 'finished', class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'AMB', display: 'ambulatory' }, subject: { reference: `urn:uuid:${U.pat}` } } },
@@ -167,15 +160,10 @@ export function buildInnerBundle(p: MhdDocumentParams): any {
     };
 }
 
-/**
- * Sign the inner bundle and build the outer MHD transaction wrapper.
- * Returns the complete outer bundle ready for CEZIH submission.
- */
 export async function buildMhdBundle(p: MhdDocumentParams): Promise<{ outer: any; innerBundle: any }> {
     const innerBundle = buildInnerBundle(p);
     const outerDate = cezihTimestamp();
 
-    // Sign with Sign token
     const signedResult = await signatureService.signBundle(innerBundle, `urn:uuid:${innerBundle.entry[2].fullUrl.split(':').pop()}`, '', p.signPin);
     const signedBundle = signedResult.bundle;
     const signedB64 = Buffer.from(JSON.stringify(signedBundle), 'utf8').toString('base64').replace(/\n/g, '').replace(/\r/g, '');
@@ -183,41 +171,50 @@ export async function buildMhdBundle(p: MhdDocumentParams): Promise<{ outer: any
     const listUuid = uuidv4(), docRefUuid = uuidv4(), binUuid = uuidv4();
     const subOidRaw = await oidService.generateSingleOid();
 
-    const hybridSubject = {
-        reference: `Patient/${p.patientCezihId}`,
-        identifier: { system: CEZIH_SYSTEMS.MBO, value: p.patientMbo }
+    const typeCode = p.docType || '011';
+    const typeDisplay = DOC_TITLES[typeCode] || DOC_TITLES['011'];
+
+    // VRLO VAŽNO (Rješava ERR_DOM_10074 za strance i domaće)
+    // CEZIH STU3 MHD zahtijeva samo 'identifier' blok za subject unutar DocumentReference.
+    // Izbjegavamo polje 'reference' ako je u pitanju stranac kako HAPI FHIR ne bi vrištao na UUID-ove!
+    
+    // Za domaće pacijente možemo staviti Patient/1234. Za strance ostavljamo samo identifier.
+    const isDomestic = p.patientIdentifier.system === CEZIH_SYSTEMS.MBO;
+    
+    const subjectBlock = {
+        ...(isDomestic && p.patientCezihId && p.patientCezihId.length <= 10 ? { reference: `Patient/${p.patientCezihId}` } : {}),
+        type: 'Patient',
+        identifier: p.patientIdentifier
     };
 
     const practitionerDisplay = `${p.practitionerName.given.join(' ')} ${p.practitionerName.family}`;
 
-    // DocumentReference resource
     const docRef: any = {
         resourceType: 'DocumentReference',
         meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-document-reference'] },
         masterIdentifier: { use: 'usual', system: 'urn:ietf:rfc:3986', value: p.docOid },
         identifier: [{ use: 'official', system: 'urn:ietf:rfc:3986', value: `urn:uuid:${docRefUuid}` }],
         status: 'current',
-        type: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type', code: '011' }] },
+        type: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type', code: typeCode, display: typeDisplay }] },
         subject: {
-            reference: `Patient/${p.patientCezihId}`, type: 'Patient',
-            identifier: { system: CEZIH_SYSTEMS.MBO, value: p.patientMbo },
+            ...subjectBlock,
             display: `${p.patientName.given.join(' ')} ${p.patientName.family}`
         },
         date: outerDate,
         author: [{ type: 'Practitioner', identifier: { system: CEZIH_SYSTEMS.HZJZ, value: p.practitionerId }, display: practitionerDisplay }],
         authenticator: { type: 'Practitioner', identifier: { system: CEZIH_SYSTEMS.HZJZ, value: p.practitionerId }, display: practitionerDisplay },
         custodian: { type: 'Organization', identifier: { system: CEZIH_SYSTEMS.HZZO_ORG, value: p.orgId }, display: p.orgDisplay },
+        description: typeDisplay,
         content: [{ attachment: { contentType: 'application/fhir+json; charset=utf-8', language: 'hr', url: `urn:uuid:${binUuid}` } }],
         context: {
             encounter: [{ type: 'Encounter', identifier: { system: CEZIH_SYSTEMS.VISIT, value: p.encCezihId } }],
             period: { start: outerDate },
             practiceSetting: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/djelatnosti-zz', code: '1010000', display: 'Opca/obiteljska medicina' }] },
-            sourcePatientInfo: { identifier: { system: CEZIH_SYSTEMS.MBO, value: p.patientMbo } },
+            sourcePatientInfo: { identifier: p.patientIdentifier },
             related: [{ type: 'Condition', identifier: { system: CEZIH_SYSTEMS.CASE, value: p.condFhirId } }]
         }
     };
 
-    // TC19: Add relatesTo for document replacement
     if (p.replacesOid) {
         docRef.relatesTo = [{
             code: 'replaces',
@@ -248,7 +245,7 @@ export async function buildMhdBundle(p: MhdDocumentParams): Promise<{ outer: any
                     status: 'current', mode: 'working',
                     code: { coding: [{ system: 'https://profiles.ihe.net/ITI/MHD/CodeSystem/MHDlistTypes', code: 'submissionset' }] },
                     date: outerDate,
-                    subject: hybridSubject,
+                    subject: subjectBlock,
                     entry: [{ item: { type: 'DocumentReference', reference: `urn:uuid:${docRefUuid}` } }]
                 },
                 request: { method: 'POST', url: 'List' }
@@ -260,27 +257,15 @@ export async function buildMhdBundle(p: MhdDocumentParams): Promise<{ outer: any
             },
             {
                 fullUrl: `urn:uuid:${binUuid}`,
-                resource: { 
-                    resourceType: 'Binary', 
-                    id: binUuid, 
-                    meta: { profile: ['http://hl7.org/fhir/StructureDefinition/Binary'] },
-                    contentType: 'application/fhir+json; charset=utf-8', 
-                    data: signedB64 
-                },
+                resource: { resourceType: 'Binary', id: binUuid, contentType: 'application/fhir+json; charset=utf-8', data: signedB64 },
                 request: { method: 'POST', url: 'Binary' }
             }
         ]
     };
 
-    // Debug: save outer bundle
-    try { fs.writeFileSync(path.join(process.cwd(), 'tmp', 'mhd-outer.json'), JSON.stringify(outer, null, 2)); } catch (e) { }
-
     return { outer, innerBundle };
 }
 
-/**
- * Submit MHD bundle to CEZIH gateway with proper auth headers.
- */
 export async function submitMhdToGateway(bundle: any): Promise<{ success: boolean; data: any; error?: string }> {
     let headers: Record<string, string> = {};
     try { headers = await authService.getSystemAuthHeaders(); } catch { headers = {}; }
@@ -293,45 +278,26 @@ export async function submitMhdToGateway(bundle: any): Promise<{ success: boolea
     };
 
     const url = `${config.cezih.gatewayBase}${config.cezih.services.document}/iti-65-service`;
-    console.log(`[MhdBuilder] Submitting to CEZIH: ${url}`);
-    console.log(`[MhdBuilder] BUNDLE STRUCTURE CHECK: type=${bundle.type}, entries=${bundle.entry?.length}, entryTypes=${bundle.entry?.map((e: any) => e.resource?.resourceType).join(',')}`);
-    console.log(`[MhdBuilder] entry[0] profile: ${JSON.stringify(bundle.entry?.[0]?.resource?.meta?.profile)}`);
-    console.log(`[MhdBuilder] entry[1] profile: ${JSON.stringify(bundle.entry?.[1]?.resource?.meta?.profile)}`);
-
-    // CRITICAL: If bundle has a signature, we MUST send it as a JCS-canonicalized string.
-    // signBundle() signs the JCS-sorted (alphabetical keys) representation.
-    // If we pass a JS object to axios, it uses JSON.stringify() which preserves original key order.
-    // CEZIH re-canonicalizes the received body to verify the signature — key order mismatch → 403!
-    // Solution: convert JCS string to UTF-8 Buffer so wire format ≡ signed format (byte-perfect).
+    
     const isSigned = !!bundle.signature?.data;
     let bodyToSend: Buffer | any;
     if (isSigned) {
         const jcsString = jcsCanonialize(bundle);
-        bodyToSend = Buffer.from(jcsString, 'utf8'); // Explicit UTF-8 — no implicit encoding surprises
+        bodyToSend = Buffer.from(jcsString, 'utf8');
         combinedHeaders['Content-Type'] = 'application/fhir+json; charset=utf-8';
-        console.log(`[MhdBuilder] Sending JCS Buffer (${bodyToSend.length} bytes) to avoid key-order + encoding mismatch.`);
     } else {
         bodyToSend = bundle;
     }
 
-    // Save exactly what goes to the wire
-    try { require('fs').writeFileSync(require('path').join(process.cwd(), 'tmp', 'mhd-sent-to-cezih.json'), isSigned ? bodyToSend.toString('utf8') : JSON.stringify(bundle, null, 2)); } catch (e) { }
-
     try {
         const axiosConfig: any = { headers: combinedHeaders };
         if (isSigned) {
-            // Pass Buffer through without any transformation — axios sends raw bytes
             axiosConfig.transformRequest = [(data: any) => data];
         }
         const response = await axios.post(url, bodyToSend, axiosConfig);
-        console.log('[MhdBuilder] ✅ CEZIH accepted!');
         return { success: true, data: response.data };
     } catch (error: any) {
-        console.warn('[MhdBuilder] CEZIH error:', error.response?.status);
         const fullResponse = error.response?.data;
-        // Debug: save full error response
-        try { fs.writeFileSync(path.join(process.cwd(), 'tmp', 'cezih-mhd-error.json'), JSON.stringify(fullResponse, null, 2)); } catch (e) { }
-        console.error('[MhdBuilder] CEZIH full error:', JSON.stringify(fullResponse, null, 2));
         const issues = fullResponse?.issue?.map((i: any) => ({
             severity: i.severity,
             code: i.details?.coding?.[0]?.code || i.details?.text || i.code,

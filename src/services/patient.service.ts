@@ -165,26 +165,37 @@ class PatientService {
      * Get the best identifier for FHIR references (e.g., MBO for locals, Unique ID for foreigners).
      * Returns { system, value }
      */
-    getPatientIdentifier(identifierValue: string): { system: string, value: string } {
-        try {
-            const patient = db.prepare('SELECT * FROM patients WHERE mbo = ? OR oib = ? OR cezihUniqueId = ?').get(identifierValue, identifierValue, identifierValue) as any;
-            if (patient) {
-                if (patient.cezihUniqueId) {
-                    return { system: CEZIH_IDENTIFIERS.UNIQUE_PATIENT_ID, value: patient.cezihUniqueId };
-                } else if (patient.mbo && /^\d{9}$/.test(patient.mbo)) {
-                    return { system: CEZIH_IDENTIFIERS.MBO, value: patient.mbo };
-                } else if (patient.euCardNumber) {
-                    return { system: CEZIH_IDENTIFIERS.EU_CARD, value: patient.euCardNumber };
-                } else if (patient.passportNumber) {
-                    return { system: CEZIH_IDENTIFIERS.PASSPORT, value: patient.passportNumber };
-                }
-            }
-        } catch (e) {
-            console.warn('[PatientService] DB lookup failed for identifier mapping', e);
+    // ============================================================
+    // Helper za dohvat ispravnog FHIR identifikatora (Domaći vs Stranac)
+    // ============================================================
+    getPatientIdentifier(patient: any): { system: string, value: string } {
+        const CEZIH_IDENTIFIERS = {
+            MBO: 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO',
+            UNIQUE_PATIENT_ID: 'http://fhir.cezih.hr/specifikacije/identifikatori/jedinstveni-identifikator-pacijenta',
+            EU_CARD: 'http://fhir.cezih.hr/specifikacije/identifikatori/EU-kartica',
+            PASSPORT: 'http://fhir.cezih.hr/specifikacije/identifikatori/putovnica'
+        };
+
+        if (!patient) {
+            return { system: CEZIH_IDENTIFIERS.MBO, value: '999999423' };
         }
 
-        // Default fallback (compatible with existing hardcoded logic)
-        return { system: CEZIH_IDENTIFIERS.MBO, value: identifierValue };
+        // 1. STRANCI - Apsolutni prioritet: CEZIH Unique ID (cmj...)
+        if (patient.cezihUniqueId) {
+            return { system: CEZIH_IDENTIFIERS.UNIQUE_PATIENT_ID, value: patient.cezihUniqueId };
+        } 
+        // 2. STRANCI - Ako nemaju UniqueID još, ali imaju putovnicu
+        else if (patient.passportNumber) {
+            return { system: CEZIH_IDENTIFIERS.PASSPORT, value: patient.passportNumber };
+        } 
+        // 3. STRANCI - EU kartica
+        else if (patient.euCardNumber) {
+            return { system: CEZIH_IDENTIFIERS.EU_CARD, value: patient.euCardNumber };
+        }
+
+        // 4. DOMAĆI
+        const mboValue = patient.mbo || patient.id;
+        return { system: CEZIH_IDENTIFIERS.MBO, value: mboValue || '999999423' };
     }
 
     private async searchPatients(query: string, userToken: string, autoSave: boolean = true): Promise<PatientDemographics[]> {

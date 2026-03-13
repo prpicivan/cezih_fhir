@@ -336,23 +336,15 @@ class CaseService {
                             },
                         } : {}),
                         subject: (() => {
-                            const patientId = patientService.getPatientIdentifier(data.patientMbo);
-                            return data.patientFhirId
-                                ? {
-                                    reference: `Patient/${data.patientFhirId}`,
-                                    type: 'Patient',
-                                    identifier: {
-                                        system: patientId.system,
-                                        value: patientId.value,
-                                    },
-                                }
-                                : {
-                                    type: 'Patient',
-                                    identifier: {
-                                        system: patientId.system,
-                                        value: patientId.value,
-                                    },
-                                };
+                            const { patientService } = require('./patient.service');
+                            let patientRow: any = null;
+                            try { patientRow = db.prepare('SELECT * FROM patients WHERE mbo = ? OR oib = ? OR cezihUniqueId = ?').get(data.patientMbo, data.patientMbo, data.patientMbo); } catch(e){}
+                            const patIden = patientService.getPatientIdentifier(patientRow || { mbo: data.patientMbo });
+                            return {
+                                ...(data.patientFhirId ? { reference: `Patient/${data.patientFhirId}` } : {}),
+                                type: 'Patient',
+                                identifier: { system: patIden.system, value: patIden.value || data.patientMbo || '999999423' },
+                            };
                         })(),
                         onsetDateTime: data.startDate || new Date().toISOString(),
                         // recorder je max:0 u TC16 profilu — NE ŠALJEMO!
@@ -506,13 +498,14 @@ class CaseService {
                             },
                         } : {}),
                         subject: (() => {
-                            const patientId = patientService.getPatientIdentifier(data.patientMbo || '999999423');
+                            const { patientService } = require('./patient.service');
+                            const mbo = data.patientMbo || '999999423';
+                            let patientRow: any = null;
+                            try { patientRow = db.prepare('SELECT * FROM patients WHERE mbo = ? OR oib = ? OR cezihUniqueId = ?').get(mbo, mbo, mbo); } catch(e){}
+                            const patIden = patientService.getPatientIdentifier(patientRow || { mbo });
                             return {
                                 type: 'Patient',
-                                identifier: {
-                                    system: patientId.system,
-                                    value: patientId.value,
-                                },
+                                identifier: { system: patIden.system, value: patIden.value || mbo },
                             };
                         })(),
                         onsetDateTime: data.startDate || new Date().toISOString(),
@@ -667,13 +660,13 @@ class CaseService {
                 value: cezihCaseId,
             }],
             subject: (() => {
-                const patientId = patientService.getPatientIdentifier(patientMbo);
+                const { patientService } = require('./patient.service');
+                let patientRow: any = null;
+                try { patientRow = db.prepare('SELECT * FROM patients WHERE mbo = ? OR oib = ? OR cezihUniqueId = ?').get(patientMbo, patientMbo, patientMbo); } catch(e){}
+                const patIden = patientService.getPatientIdentifier(patientRow || { mbo: patientMbo });
                 return {
                     type: 'Patient',
-                    identifier: {
-                        system: patientId.system,
-                        value: patientId.value,
-                    },
+                    identifier: { system: patIden.system, value: patIden.value || patientMbo || '999999423' },
                 };
             })(),
         };
@@ -825,13 +818,16 @@ class CaseService {
                 }],
                 text: data.diagnosisDisplay || previousCase.diagnosisDisplay,
             },
-            subject: {
-                type: 'Patient',
-                identifier: {
-                    system: CEZIH_IDENTIFIERS.MBO,
-                    value: patientMbo,
-                },
-            },
+            subject: (() => {
+                const { patientService } = require('./patient.service');
+                let patientRow: any = null;
+                try { patientRow = db.prepare('SELECT * FROM patients WHERE mbo = ? OR oib = ? OR cezihUniqueId = ?').get(patientMbo, patientMbo, patientMbo); } catch(e){}
+                const patIden = patientService.getPatientIdentifier(patientRow || { mbo: patientMbo });
+                return {
+                    type: 'Patient',
+                    identifier: { system: patIden.system, value: patIden.value || patientMbo || '999999423' },
+                };
+            })(),
             onsetDateTime: data.startDate || new Date().toISOString(),
             asserter: {
                 type: 'Practitioner',

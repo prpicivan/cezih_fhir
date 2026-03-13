@@ -160,11 +160,13 @@ class ClinicalDocumentService {
         }
 
         // Step 3: Build the FULL FHIR Document Bundle
-        // PDQm lookup: get CEZIH Patient Logical ID for inner document
-        let patientCezihId: string | undefined;
+        // PDQm lookup: get CEZIH Patient Logical ID for inner document (SAMO ZA MBO)
+        let patientCezihId = data.patientMbo; // Default na ono što imamo (za strance to je Unique ID)
         try {
-            const pdqmPatients = await patientService.searchRemoteByMbo(data.patientMbo, userToken);
-            if (pdqmPatients.length > 0 && pdqmPatients[0].id) patientCezihId = pdqmPatients[0].id;
+            if (/^\d{9}$/.test(data.patientMbo)) {
+                const pdqmPatients = await patientService.searchRemoteByMbo(data.patientMbo, userToken);
+                if (pdqmPatients.length > 0 && pdqmPatients[0].id) patientCezihId = pdqmPatients[0].id;
+            }
         } catch (e: any) { /* ignore */ }
 
         const documentBundle = this.buildFullDocumentBundle(data, documentOid, patient, visit, patientCezihId);
@@ -219,14 +221,29 @@ class ClinicalDocumentService {
         if (!data.encCezihId?.trim()) throw new Error('ID posjete (encCezihId) je obavezan — pokrenite TC12 prvo.');
         if (!data.condFhirId?.trim()) throw new Error('ID slučaja (condFhirId) je obavezan — pokrenite TC16 prvo.');
 
-        // Step 2: PDQm lookup — get CEZIH patient logical ID
-        const patients = await patientService.searchRemoteByMbo(data.patientMbo, userToken);
-        const patient = patients?.[0];
-        if (!patient) throw new Error(`Pacijent nije pronađen na CEZIH-u (MBO: ${data.patientMbo})`);
-        const patientCezihId = patient.id || '1118065'; // fallback
-
-        // Get full patient details from local DB
+        // Step 2: Dohvat pacijenta iz lokalne baze
         const localPatient = (await patientService.searchByMbo(data.patientMbo, userToken))[0];
+        if (!localPatient) throw new Error(`Pacijent nije pronađen u lokalnoj bazi.`);
+
+        // KORISTIMO NOVI HELPER DA ODREDIMO TOČAN IDENTIFIKATOR BLOK
+        const patientIdentifier = patientService.getPatientIdentifier(localPatient);
+        
+        let patientCezihId = localPatient.cezihId || localPatient.cezihUniqueId || (localPatient as any).id || data.patientMbo;
+        let remotePatient: any = null;
+
+        // Ako je helper odredio da je ovo MBO (Znači da NIJE stranac), ONDA i SAMO ONDA idemo na PDQm
+        if (patientIdentifier.system === 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO') {
+            console.log(`[sendDocumentFull] Domestic patient detected (MBO: ${patientIdentifier.value}), performing PDQm lookup...`);
+            try {
+                const patients = await patientService.searchRemoteByMbo(patientIdentifier.value, userToken);
+                remotePatient = patients?.[0];
+                if (remotePatient?.id) patientCezihId = remotePatient.id;
+            } catch (e) {
+                console.warn('[sendDocumentFull] PDQm pretraga nije uspjela, nastavljam s lokalnim podacima');
+            }
+        } else {
+            console.log(`[sendDocumentFull] Stranac detektiran (${patientIdentifier.value}), preskačem PDQm pretragu.`);
+        }
 
         // Step 2b: Resolve CEZIH Case ID — frontend may pass local UUID, we need cmmk... ID
         let resolvedCondFhirId = data.condFhirId;
@@ -242,13 +259,13 @@ class ClinicalDocumentService {
             console.warn('[sendDocumentFull] Case ID lookup failed, using as-is');
         }
 
-        // Step 3: Resolve CEZIH Visit ID — frontend may pass local UUID, we need cmmm... ID (TC12)
+        // Step 2c: Resolve CEZIH Visit ID — frontend šalje lokalni UUID
         let resolvedEncCezihId = data.encCezihId;
         try {
-            const localVisit = db.prepare('SELECT cezihVisitId FROM visits WHERE id = ?').get(data.encCezihId) as any;
-            if (localVisit?.cezihVisitId) {
-                console.log(`[sendDocumentFull] Resolved local visit ${data.encCezihId} → CEZIH ID: ${localVisit.cezihVisitId}`);
-                resolvedEncCezihId = localVisit.cezihVisitId;
+            const localVisit = db.prepare('SELECT cezihVisitId, cezihId FROM visits WHERE id = ?').get(data.encCezihId) as any;
+            if (localVisit?.cezihVisitId || localVisit?.cezihId) {
+                resolvedEncCezihId = localVisit.cezihVisitId || localVisit.cezihId;
+                console.log(`[sendDocumentFull] Resolved local visit ${data.encCezihId} → CEZIH ID: ${resolvedEncCezihId}`);
             } else {
                 console.log(`[sendDocumentFull] encCezihId ${data.encCezihId} — no cezihVisitId in DB, using as-is`);
             }
@@ -266,21 +283,26 @@ class ClinicalDocumentService {
 
         const { outer, innerBundle } = await buildMhdBundle({
             docOid,
-            patientMbo: data.patientMbo,
+            docType: data.type || '011',
+            patientIdentifier,
             patientName: {
-                family: localPatient?.name?.family || patient?.name?.family || 'NEPOZNATO',
-                given: [localPatient?.name?.given?.[0] || patient?.name?.given?.[0] || 'N']
+                family: localPatient?.name?.family || remotePatient?.name?.family || (localPatient as any)?.lastName || 'NEPOZNATO',
+                given: [localPatient?.name?.given?.[0] || remotePatient?.name?.given?.[0] || (localPatient as any)?.firstName || 'N']
             },
-            patientGender: localPatient?.gender || patient?.gender || 'unknown',
-            patientBirthDate: localPatient?.birthDate || patient?.birthDate || '1980-01-01',
+            patientGender: localPatient?.gender || remotePatient?.gender || 'unknown',
+            patientBirthDate: localPatient?.birthDate || remotePatient?.birthDate || '1980-01-01',
             patientCezihId,
             practitionerId: process.env.PRACTITIONER_ID || '4981825',
             practitionerOib: process.env.PRACTITIONER_OIB || '30160453873',
             practitionerName: { family: 'Prpic', given: ['Ivan'] },
             orgId: process.env.ORG_ID || '999001425',
             orgDisplay: 'WBS privatna ordinacija',
-            encCezihId: resolvedEncCezihId,
+            
+            // OVO JE KLJUČNO OVDJE:
+            encCezihId: resolvedEncCezihId, 
             condFhirId: resolvedCondFhirId,
+            // ------------------------
+
             diagnosisCode: data.diagnosisCode,
             anamnesis: data.anamnesis,
             signPin: data.signPin,
@@ -532,13 +554,15 @@ class ClinicalDocumentService {
         finalDocumentBundle: any,
         userToken: string
     ): Promise<any> {
-        // PDQm lookup: get CEZIH Patient Logical ID
+        // PDQm lookup: get CEZIH Patient Logical ID (SAMO ZA MBO)
         let patientLogicalId = data.patientMbo;
         try {
-            const pdqmPatients = await patientService.searchRemoteByMbo(data.patientMbo, userToken);
-            if (pdqmPatients.length > 0 && pdqmPatients[0].id) {
-                patientLogicalId = pdqmPatients[0].id;
-                console.log('[ClinicalDocumentService] Patient Logical ID:', patientLogicalId);
+            if (/^\d{9}$/.test(data.patientMbo)) {
+                const pdqmPatients = await patientService.searchRemoteByMbo(data.patientMbo, userToken);
+                if (pdqmPatients.length > 0 && pdqmPatients[0].id) {
+                    patientLogicalId = pdqmPatients[0].id;
+                    console.log('[ClinicalDocumentService] Patient Logical ID:', patientLogicalId);
+                }
             }
         } catch (pdqErr: any) {
             console.warn('[ClinicalDocumentService] PDQm fallback to MBO:', pdqErr.message);
@@ -775,12 +799,14 @@ class ClinicalDocumentService {
             console.error('[ClinicalDocumentService] DB Replace Error', dbError);
         }
 
-        // Step 2: PDQm lookup for Patient Logical ID
+        // Step 2: PDQm lookup for Patient Logical ID (SAMO ZA MBO)
         let patientCezihId = data.patientMbo;
         try {
-            const patients = await patientService.searchRemoteByMbo(data.patientMbo, userToken);
-            if (patients.length > 0 && patients[0].id) {
-                patientCezihId = patients[0].id;
+            if (/^\d{9}$/.test(data.patientMbo)) {
+                const patients = await patientService.searchRemoteByMbo(data.patientMbo, userToken);
+                if (patients.length > 0 && patients[0].id) {
+                    patientCezihId = patients[0].id;
+                }
             }
         } catch (e: any) { /* ignore */ }
 
@@ -806,6 +832,9 @@ class ClinicalDocumentService {
         // Step 4: Build & submit using shared MHD builder (same as TC18 + relatesTo)
         const { buildMhdBundle, submitMhdToGateway } = await import('./mhd-bundle.builder');
 
+        // KORISTIMO ISTI HELPER KAO U TC18 DA ODREDIMO TOČAN IDENTIFIKATOR BLOK
+        const patientIdentifier = patientService.getPatientIdentifier(localPatient);
+
         console.log(`[TC19] Replacing document ${originalDocumentOid} with new OID ${newDocumentOid}`);
 
         let responseData: any = null;
@@ -814,11 +843,10 @@ class ClinicalDocumentService {
         try {
             const { outer } = await buildMhdBundle({
                 docOid: `urn:oid:${newDocumentOid}`,
-                patientMbo: data.patientMbo,
-                // POPRAVLJENO: Koristimo dinamičke podatke iz baze
+                patientIdentifier,  // FIX: dodano — bez ovoga JCS potpis pada na undefined
                 patientName: { 
-                    family: localPatient?.name?.family || 'NEPOZNATO', 
-                    given: [localPatient?.name?.given?.[0] || 'N'] 
+                    family: localPatient?.name?.family || (localPatient as any)?.lastName || 'NEPOZNATO', 
+                    given: [localPatient?.name?.given?.[0] || (localPatient as any)?.firstName || 'N'] 
                 },
                 patientGender: localPatient?.gender || 'unknown',
                 patientBirthDate: localPatient?.birthDate || '1980-01-01',
@@ -830,8 +858,8 @@ class ClinicalDocumentService {
                 orgDisplay: 'WBS privatna ordinacija',
                 encCezihId,
                 condFhirId,
-                diagnosisCode: data.diagnosisCode || '',
-                anamnesis: data.anamnesis || '',
+                diagnosisCode: data.diagnosisCode || 'Z00.0',
+                anamnesis: data.anamnesis || 'Ažurirani dokument',
                 replacesOid: originalDocumentOid,  // TC19: relatesTo
             });
 
@@ -877,6 +905,8 @@ class ClinicalDocumentService {
         const { v4: uuidv4 } = require('uuid');
         const listUuid = uuidv4();
         const docRefUuid = uuidv4();
+        
+        // Ovdje NE mijenjamo originalni OID, on mora biti OID onog dokumenta kojeg poništavamo
         const oidValue = documentOid.startsWith('urn:oid:') ? documentOid : `urn:oid:${documentOid}`;
 
         // 1. Ažuriramo lokalnu bazu
@@ -893,19 +923,11 @@ class ClinicalDocumentService {
         const caseId = fullDoc?.caseId;
         const visitId = fullDoc?.visitId;
 
-        // Dohvat pacijenta uz podršku za Strance (TC11)
-        const patient = db.prepare('SELECT mbo, firstName, lastName, cezihId, passportNumber FROM patients WHERE mbo = ? OR cezihId = ?').get(patientMbo, patientMbo) as any;
-        const patientDisplay = patient ? `${patient.lastName} ${patient.firstName}`.toUpperCase() : '';
-        
-        // Pametno dodjeljivanje identifikatora (MBO vs Jedinstveni ID za strance)
-        let patientIdentifierBlock: any;
-        if (patient?.mbo && patient.mbo.length === 9) {
-            patientIdentifierBlock = { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO', value: patient.mbo };
-        } else if (patient?.cezihId) {
-            patientIdentifierBlock = { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/jedinstveni-identifikator-pacijenta', value: patient.cezihId };
-        } else {
-            patientIdentifierBlock = { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO', value: patientMbo };
-        }
+        // OVO JE JEDINA STVAR KOJU SMO PROMIJENILI U ODNOSU NA VAŠ STARI KOD!
+        const { patientService } = require('./patient.service');
+        const patient = db.prepare('SELECT * FROM patients WHERE mbo = ? OR oib = ? OR cezihUniqueId = ?').get(patientMbo, patientMbo, patientMbo) as any;
+        const patientIdentifierBlock = patientService.getPatientIdentifier(patient || { mbo: patientMbo });
+        const patientDisplay = patient ? `${patient.lastName || ''} ${patient.firstName || ''}`.trim().toUpperCase() : '';
 
         const visit = visitId ? db.prepare('SELECT * FROM visits WHERE id = ?').get(visitId) as any : null;
         const caseRow = caseId ? db.prepare('SELECT * FROM cases WHERE id = ?').get(caseId) as any : null;
@@ -917,10 +939,10 @@ class ClinicalDocumentService {
         const encounterEnd = visit?.endTime || docDate;
         const condFhirId = caseRow?.id || caseRow?.cezihCaseId || caseId || '';
 
-        const practHzjz = config.practitioner.hzjzId || config.practitioner.oib;
+        const practHzjz = config.practitioner.hzjzId || config.practitioner.oib || '4981825';
         const pName = config.practitioner.name as any;
         const practDisplay = (pName?.family) ? `${pName.given[0]} ${pName.family}` : (typeof pName === 'string' && pName ? pName : 'Ivan Prpic');
-        const orgId = config.organization.hzzoCode;
+        const orgId = config.organization.hzzoCode || '999001425';
         const orgDisplay = config.organization.name || 'WBS ordinacija';
 
         const DOC_TYPE_DISPLAY: Record<string, string> = {
@@ -930,7 +952,7 @@ class ClinicalDocumentService {
         };
         const docTypeDisplay = DOC_TYPE_DISPLAY[docType] || docType;
 
-        // 3. Gradimo Bundle IDENTIČAN vašem starom kodu koji je radio - BEZ META PROFILA I BEZ BINARYJA!
+        // 3. Gradimo Bundle IDENTIČAN vašem starom kodu koji je radio jučer!
         const cancelBundle: any = {
             resourceType: 'Bundle',
             type: 'transaction',
@@ -988,9 +1010,7 @@ class ClinicalDocumentService {
                             type: 'Organization', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije', value: orgId }, display: orgDisplay
                         },
                         description: docTypeDisplay,
-                        content: [{
-                            attachment: { contentType: 'application/fhir+json', language: 'hr', url: `urn:uuid:${uuidv4()}` }
-                        }],
+                        content: [{ attachment: { contentType: 'application/fhir+json', language: 'hr', url: `urn:uuid:${uuidv4()}` } }],
                         ...(encId ? {
                             context: {
                                 encounter: [{ type: 'Encounter', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-posjete', value: encId } }],
@@ -1273,6 +1293,7 @@ class ClinicalDocumentService {
         const compositionUuid = `urn:uuid:${uuidv4()}`;
 
         const entries: any[] = [];
+        const patientIdentifier = patientService.getPatientIdentifier(patient);
 
         // 1. Composition (must be first)
         entries.push({
@@ -1288,10 +1309,7 @@ class ClinicalDocumentService {
                 type: { coding: [this.getDocumentTypeCoding(data.type)] },
                 subject: {
                     reference: patientFullUrl,
-                    identifier: {
-                        system: CEZIH_IDENTIFIERS.MBO,
-                        value: data.patientMbo
-                    },
+                    identifier: patientIdentifier,
                     display: patient.name?.given
                         ? `${patient.name.given[0]} ${patient.name.family}`
                         : undefined
@@ -1317,7 +1335,7 @@ class ClinicalDocumentService {
             resource: {
                 resourceType: 'Patient',
                 id: patientCezihId || data.patientMbo,
-                identifier: [{ system: CEZIH_IDENTIFIERS.MBO, value: patient.mbo }],
+                identifier: [patientIdentifier],
                 name: patient.name?.given
                     ? [{ family: patient.name.family, given: patient.name.given }]
                     : [{ family: 'PACPRIVATNICI42', given: ['IVAN'] }]

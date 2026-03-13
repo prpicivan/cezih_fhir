@@ -88,8 +88,13 @@ class ValidationService {
 
         // 1. Validate Patient ID
         if (data.patientMbo) {
-            const res = this.validatePatientId(data.patientMbo, 'MBO');
-            if (!res.isValid) errors.push(...res.errors);
+            // Ako izgleda kao MBO (9 znamenki), validiraj strogo; inače propusti (stranac s CEZIH ID-jem)
+            if (/^\d{9}$/.test(data.patientMbo)) {
+                // Domaći pacijent — MBO format ispravan
+            } else if (data.patientMbo.trim().length < 3) {
+                errors.push('Identifikator pacijenta je prekratak ili neispravan.');
+            }
+            // Za sve ostale formate (CEZIH unique ID, putovnica, itd.) — propuštamo
         } else if (data.foreignerId && data.foreignerType) {
             const res = this.validatePatientId(data.foreignerId, data.foreignerType as any);
             if (!res.isValid) errors.push(...res.errors);

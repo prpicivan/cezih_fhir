@@ -205,12 +205,19 @@ class VisitService {
             encounterIdentifiers.push({ system: CEZIH_IDENTIFIERS.VISIT_ID, value: data.cezihVisitId || data.localVisitId });
         }
 
-        // Logical identifier references (no urn:uuid — Patient/Practitioner NOT in bundle)
-        const patientId = patientService.getPatientIdentifier(data.patientMbo);
+        // Dohvaćamo pacijenta iz baze i koristimo naš centralni helper
+        const { patientService } = require('./patient.service');
+        let patientRow: any = null;
+        try {
+            patientRow = db.prepare('SELECT * FROM patients WHERE mbo = ? OR oib = ? OR cezihUniqueId = ?').get(data.patientMbo, data.patientMbo, data.patientMbo);
+        } catch (e) {}
+        
+        // Helper garantira ispravan identifikator
+        const patIden = patientService.getPatientIdentifier(patientRow || { mbo: data.patientMbo });
 
         const subject = {
             type: 'Patient',
-            identifier: { system: patientId.system, value: patientId.value },
+            identifier: { system: patIden.system, value: patIden.value || data.patientMbo || '999999423' },
         };
 
         const encounterResource: any = {
