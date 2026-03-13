@@ -117,6 +117,7 @@ class PatientService {
         const local = await this.getLocalPatients(identifier);
         const match = local.find(p =>
             p.mbo === identifier ||
+            p.oib === identifier ||
             p.passportNumber === identifier ||
             p.euCardNumber === identifier ||
             p.cezihUniqueId === identifier
@@ -158,6 +159,32 @@ class PatientService {
         }
 
         return results[0];
+    }
+
+    /**
+     * Get the best identifier for FHIR references (e.g., MBO for locals, Unique ID for foreigners).
+     * Returns { system, value }
+     */
+    getPatientIdentifier(identifierValue: string): { system: string, value: string } {
+        try {
+            const patient = db.prepare('SELECT * FROM patients WHERE mbo = ? OR oib = ? OR cezihUniqueId = ?').get(identifierValue, identifierValue, identifierValue) as any;
+            if (patient) {
+                if (patient.cezihUniqueId) {
+                    return { system: CEZIH_IDENTIFIERS.UNIQUE_PATIENT_ID, value: patient.cezihUniqueId };
+                } else if (patient.mbo && /^\d{9}$/.test(patient.mbo)) {
+                    return { system: CEZIH_IDENTIFIERS.MBO, value: patient.mbo };
+                } else if (patient.euCardNumber) {
+                    return { system: CEZIH_IDENTIFIERS.EU_CARD, value: patient.euCardNumber };
+                } else if (patient.passportNumber) {
+                    return { system: CEZIH_IDENTIFIERS.PASSPORT, value: patient.passportNumber };
+                }
+            }
+        } catch (e) {
+            console.warn('[PatientService] DB lookup failed for identifier mapping', e);
+        }
+
+        // Default fallback (compatible with existing hardcoded logic)
+        return { system: CEZIH_IDENTIFIERS.MBO, value: identifierValue };
     }
 
     private async searchPatients(query: string, userToken: string, autoSave: boolean = true): Promise<PatientDemographics[]> {

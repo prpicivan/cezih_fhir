@@ -5,6 +5,7 @@
 import axios from 'axios';
 import { config } from '../config';
 import { authService } from './auth.service';
+import { patientService } from './patient.service';
 import { signatureService } from './signature.service';
 import {
     CEZIH_IDENTIFIERS,
@@ -71,10 +72,10 @@ class CaseService {
         return [];
     }
     private async searchRemoteCases(patientMbo: string, userToken: string): Promise<any[]> {
-        // TC15 uses IHE QEDm profile — Condition resources via qedm-svc (NOT health-issue-services)
+        const patientId = patientService.getPatientIdentifier(patientMbo);
         const url = `${config.cezih.gatewayBase}${config.cezih.services.qedm}/Condition`;
         const params: Record<string, string | number> = {
-            'patient:identifier': `${CEZIH_IDENTIFIERS.MBO}|${patientMbo}`,
+            'patient:identifier': `${patientId.system}|${patientId.value}`,
             _sort: '-onset-date',
             _count: 50,
         };
@@ -334,22 +335,25 @@ class CaseService {
                                 text: data.diagnosisDisplay,
                             },
                         } : {}),
-                        subject: data.patientFhirId
-                            ? {
-                                reference: `Patient/${data.patientFhirId}`,
-                                type: 'Patient',
-                                identifier: {
-                                    system: CEZIH_IDENTIFIERS.MBO,
-                                    value: data.patientMbo,
-                                },
-                            }
-                            : {
-                                type: 'Patient',
-                                identifier: {
-                                    system: CEZIH_IDENTIFIERS.MBO,
-                                    value: data.patientMbo,
-                                },
-                            },
+                        subject: (() => {
+                            const patientId = patientService.getPatientIdentifier(data.patientMbo);
+                            return data.patientFhirId
+                                ? {
+                                    reference: `Patient/${data.patientFhirId}`,
+                                    type: 'Patient',
+                                    identifier: {
+                                        system: patientId.system,
+                                        value: patientId.value,
+                                    },
+                                }
+                                : {
+                                    type: 'Patient',
+                                    identifier: {
+                                        system: patientId.system,
+                                        value: patientId.value,
+                                    },
+                                };
+                        })(),
                         onsetDateTime: data.startDate || new Date().toISOString(),
                         // recorder je max:0 u TC16 profilu — NE ŠALJEMO!
                         // recordedDate je max:0 u TC16 profilu — NE ŠALJEMO!
@@ -501,13 +505,16 @@ class CaseService {
                                 text: data.diagnosisDisplay,
                             },
                         } : {}),
-                        subject: {
-                            type: 'Patient',
-                            identifier: {
-                                system: CEZIH_IDENTIFIERS.MBO,
-                                value: data.patientMbo || '999999423',
-                            },
-                        },
+                        subject: (() => {
+                            const patientId = patientService.getPatientIdentifier(data.patientMbo || '999999423');
+                            return {
+                                type: 'Patient',
+                                identifier: {
+                                    system: patientId.system,
+                                    value: patientId.value,
+                                },
+                            };
+                        })(),
                         onsetDateTime: data.startDate || new Date().toISOString(),
                         ...(data.endDate ? { abatementDateTime: data.endDate } : {}),
                         asserter: {
@@ -659,13 +666,16 @@ class CaseService {
                 system: CEZIH_IDENTIFIERS.CASE_ID,
                 value: cezihCaseId,
             }],
-            subject: {
-                type: 'Patient',
-                identifier: {
-                    system: CEZIH_IDENTIFIERS.MBO,
-                    value: patientMbo,
-                },
-            },
+            subject: (() => {
+                const patientId = patientService.getPatientIdentifier(patientMbo);
+                return {
+                    type: 'Patient',
+                    identifier: {
+                        system: patientId.system,
+                        value: patientId.value,
+                    },
+                };
+            })(),
         };
 
         if (isDeleteProfile) {
@@ -993,8 +1003,9 @@ class CaseService {
         }
 
         return {
-            success: true,
+            success: !errorMessage,
             result: finalResponse ?? { cezihStatus: 'sent' },
+            error: errorMessage
         };
     }
     // TEMP: testira event kodove prema health-issue-services

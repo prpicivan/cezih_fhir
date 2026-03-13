@@ -6,6 +6,7 @@
 import axios from 'axios';
 import { config } from '../config';
 import { authService } from './auth.service';
+import { patientService } from './patient.service';
 import { signatureService } from './signature.service';
 import {
     CEZIH_IDENTIFIERS,
@@ -205,34 +206,11 @@ class VisitService {
         }
 
         // Logical identifier references (no urn:uuid — Patient/Practitioner NOT in bundle)
-        // Refactor: select the best identifier system based on patient data in local DB
-        let mboValue = data.patientMbo;
-        let mboSystem: string = CEZIH_IDENTIFIERS.MBO;
-
-        try {
-            const patient = db.prepare('SELECT * FROM patients WHERE mbo = ? OR oib = ? OR cezihUniqueId = ?').get(data.patientMbo, data.patientMbo, data.patientMbo) as any;
-            if (patient) {
-                if (patient.cezihUniqueId) {
-                    mboValue = patient.cezihUniqueId;
-                    mboSystem = CEZIH_IDENTIFIERS.UNIQUE_PATIENT_ID;
-                } else if (patient.mbo && /^\d{9}$/.test(patient.mbo)) {
-                    mboValue = patient.mbo;
-                    mboSystem = CEZIH_IDENTIFIERS.MBO;
-                } else if (patient.euCardNumber) {
-                    mboValue = patient.euCardNumber;
-                    mboSystem = CEZIH_IDENTIFIERS.EU_CARD;
-                } else if (patient.passportNumber) {
-                    mboValue = patient.passportNumber;
-                    mboSystem = CEZIH_IDENTIFIERS.PASSPORT;
-                }
-            }
-        } catch (e) {
-            console.warn('[VisitService] DB lookup failed for identifier mapping, falling back to MBO', e);
-        }
+        const patientId = patientService.getPatientIdentifier(data.patientMbo);
 
         const subject = {
             type: 'Patient',
-            identifier: { system: mboSystem, value: mboValue },
+            identifier: { system: patientId.system, value: patientId.value },
         };
 
         const encounterResource: any = {

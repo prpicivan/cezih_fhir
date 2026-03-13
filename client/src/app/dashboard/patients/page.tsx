@@ -33,7 +33,7 @@ export default function PatientsPage() {
 
     const [isRegModalOpen, setIsRegModalOpen] = useState(false);
     const [regMbo, setRegMbo] = useState('');
-    const [regSearchType, setRegSearchType] = useState<'mbo' | 'passport' | 'eu-card'>('mbo');
+    const [regSearchType, setRegSearchType] = useState<'mbo' | 'oib' | 'passport' | 'eu-card'>('mbo');
     const [remotePatient, setRemotePatient] = useState<any>(null);
     const [regLoading, setRegLoading] = useState(false);
     const [regError, setRegError] = useState<string | null>(null);
@@ -47,9 +47,11 @@ export default function PatientsPage() {
         setRegError(null);
         try {
             // If MBO, use search-remote (standard PDQm). If passport/EKZO, use identifier search.
-            const url = regSearchType === 'mbo' 
-                ? `/api/patient/search-remote?mbo=${regMbo}` 
-                : `/api/patient/search?identifier=${encodeURIComponent(regMbo)}`;
+            // Mapping searching to appropriate API
+            let url = '';
+            if (regSearchType === 'mbo') url = `/api/patient/search-remote?mbo=${regMbo}`;
+            else if (regSearchType === 'oib') url = `/api/patient/search?oib=${regMbo}`;
+            else url = `/api/patient/search?identifier=${encodeURIComponent(regMbo)}`;
 
             const res = await fetch(url);
             const data = await res.json();
@@ -161,7 +163,7 @@ export default function PatientsPage() {
                                 <>
                                     <div className="space-y-4">
                                         <div className="flex gap-2 p-1 bg-slate-100 rounded-xl">
-                                            {(['mbo', 'passport', 'eu-card'] as const).map((type) => (
+                                            {(['mbo', 'oib', 'passport', 'eu-card'] as const).map((type) => (
                                                 <button
                                                     key={type}
                                                     onClick={() => setRegSearchType(type)}
@@ -171,22 +173,22 @@ export default function PatientsPage() {
                                                         : 'text-slate-500 hover:text-slate-700'
                                                     }`}
                                                 >
-                                                    {type === 'mbo' ? 'MBO' : type === 'passport' ? 'PUTOVNICA' : 'EKZO'}
+                                                    {type === 'mbo' ? 'MBO' : type === 'oib' ? 'OIB' : type === 'passport' ? 'PUTOVNICA' : 'EKZO'}
                                                 </button>
                                             ))}
                                         </div>
                                         
                                         <div className="space-y-1">
                                             <label className="text-xs font-bold text-slate-500 uppercase">
-                                                {regSearchType === 'mbo' ? 'MBO (9 znamenki)' : regSearchType === 'passport' ? 'Broj putovnice' : 'Broj EKZO kartice'}
+                                                {regSearchType === 'mbo' ? 'MBO (9 znamenki)' : regSearchType === 'oib' ? 'OIB (11 znamenki)' : regSearchType === 'passport' ? 'Broj putovnice' : 'Broj EKZO kartice'}
                                             </label>
                                             <div className="flex gap-2">
                                                 <input
                                                     type="text"
                                                     className="flex-1 border rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono"
-                                                    placeholder={regSearchType === 'mbo' ? 'npr. 123456789' : 'Unesite broj...'}
+                                                    placeholder={regSearchType === 'mbo' ? 'npr. 123456789' : regSearchType === 'oib' ? 'npr. 12345678901' : 'Unesite broj...'}
                                                     value={regMbo}
-                                                    onChange={(e) => setRegMbo(regSearchType === 'mbo' ? e.target.value.replace(/\D/g, '') : e.target.value)}
+                                                    onChange={(e) => setRegMbo((regSearchType === 'mbo' || regSearchType === 'oib') ? e.target.value.replace(/\D/g, '') : e.target.value)}
                                                 />
                                                 <button
                                                     onClick={handleRemoteLookup}
