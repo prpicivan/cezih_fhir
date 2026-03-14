@@ -628,6 +628,13 @@ router.get('/auth/health-check', async (_req: Request, res: Response) => {
     });
 });
 
+// Full session diagnostics — use this to debug session issues!
+router.get('/auth/diagnostics', (_req: Request, res: Response) => {
+    const diag = authService.getDiagnostics();
+    console.log(`[AuthService] 📊 Diagnostics requested:`, JSON.stringify(diag, null, 2));
+    res.json(diag);
+});
+
 // Return gateway session headers (for use in test scripts / remote signing)
 router.get('/auth/gateway-token', (_req: Request, res: Response) => {
     try {
@@ -1317,6 +1324,18 @@ router.post('/document/send/complete', async (req: Request, res: Response) => {
         const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
         const { documentOid, transactionCode } = req.body;
         const result = await clinicalDocumentService.completeRemoteSigning(documentOid, transactionCode, userToken);
+        res.json({ success: true, result });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Smart Card signing: signs locally via PKCS#11 and submits to CEZIH
+router.post('/document/smartcard-sign', async (req: Request, res: Response) => {
+    try {
+        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
+        const { documentOid, signPin } = req.body;
+        const result = await clinicalDocumentService.completeSmartCardSigning(documentOid, '', userToken, signPin);
         res.json({ success: true, result });
     } catch (error: any) {
         res.status(500).json({ error: error.message });

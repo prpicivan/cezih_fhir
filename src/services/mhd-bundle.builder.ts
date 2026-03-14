@@ -164,13 +164,19 @@ export function buildInnerBundle(p: MhdDocumentParams): any {
     };
 }
 
-export async function buildMhdBundle(p: MhdDocumentParams): Promise<{ outer: any; innerBundle: any }> {
+// DODALI SMO DRUGI ARGUMENT: preSignedB64
+export async function buildMhdBundle(p: MhdDocumentParams, preSignedB64?: string): Promise<{ outer: any; innerBundle: any }> {
     const innerBundle = buildInnerBundle(p);
     const outerDate = cezihTimestamp();
 
-    const signedResult = await signatureService.signBundle(innerBundle, `urn:uuid:${innerBundle.entry[2].fullUrl.split(':').pop()}`, '', p.signPin);
-    const signedBundle = signedResult.bundle;
-    const signedB64 = Buffer.from(JSON.stringify(signedBundle), 'utf8').toString('base64').replace(/\n/g, '').replace(/\r/g, '');
+    // AKO IMAMO GOTOV POTPIS OD CERTILIE, KORISTIMO NJEGA!
+    let signedB64 = preSignedB64;
+    
+    // Ako nemamo (Automatski TC18 flow), potpisujemo ga lokalno
+    if (!signedB64) {
+        const signedResult = await signatureService.signBundle(innerBundle, `urn:uuid:${innerBundle.entry[2].fullUrl.split(':').pop()}`, '', p.signPin);
+        signedB64 = Buffer.from(JSON.stringify(signedResult.bundle), 'utf8').toString('base64').replace(/\n/g, '').replace(/\r/g, '');
+    }
 
     const listUuid = uuidv4(), docRefUuid = uuidv4(), binUuid = uuidv4();
     const subOidRaw = await oidService.generateSingleOid();

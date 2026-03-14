@@ -55,7 +55,18 @@ class AuthService {
     // --- Keep-Alive ---
     private keepAliveInterval: NodeJS.Timeout | null = null;
 
+    // --- Diagnostics ---
+    private readonly bootTimestamp = Date.now();
+    private readonly bootId = Math.random().toString(36).substring(2, 8);
+    private keepAliveSuccessCount = 0;
+    private keepAliveFailCount = 0;
+    private lastKeepAliveAt: number | null = null;
+    private lastKeepAliveStatus: 'success' | 'fail' | null = null;
+    private sessionRestoredFromDb = false;
+    private sessionLostReason: string | null = null;
+
     constructor() {
+        console.log(`[AuthService] ====== BOOT ====== instance=${this.bootId} pid=${process.pid} time=${new Date().toISOString()}`);
         // Obnovi sesiju iz SQLite ako postoji (preživljava tsx watch restart)
         this.restoreSessionFromDb();
     }
@@ -65,15 +76,20 @@ class AuthService {
             const row = db.prepare("SELECT value FROM settings WHERE key = 'gateway_session'").get() as any;
             if (row?.value) {
                 const saved = JSON.parse(row.value) as GatewaySession;
+                const ageMs = Date.now() - saved.createdAt;
+                const ageMin = Math.round(ageMs / 60000);
                 const maxAge = 4 * 60 * 60 * 1000; // 4h
-                if (Date.now() - saved.createdAt < maxAge) {
+                if (ageMs < maxAge) {
                     this.gatewaySession = saved;
-                    console.log('[AuthService] ✅ Gateway sesija obnovljena iz DB (stara', Math.round((Date.now() - saved.createdAt) / 60000), 'min)');
+                    this.sessionRestoredFromDb = true;
+                    console.log(`[AuthService] ✅ Gateway sesija obnovljena iz DB (stara ${ageMin} min, cookies: ${saved.cookies.length}, boot: ${this.bootId})`);
                     this.startKeepAlive();
                 } else {
-                    console.log('[AuthService] DB sesija je istekla, ignoriramo.');
+                    console.log(`[AuthService] ⚠️ DB sesija je istekla (stara ${ageMin} min > 240 min max), ignoriramo. boot=${this.bootId}`);
                     db.prepare("DELETE FROM settings WHERE key = 'gateway_session'").run();
                 }
+            } else {
+                console.log(`[AuthService] Nema spremljene sesije u DB. boot=${this.bootId}`);
             }
         } catch (e: any) {
             console.warn('[AuthService] Ne mogu obnoviti sesiju iz DB:', e.message);
@@ -213,7 +229,15 @@ class AuthService {
             sessionToken,
             userClaims: detectedClaims,
         };
-        console.log('[AuthService] ✅ Gateway session stored');
+        // Reset diagnostics on new session
+        this.keepAliveSuccessCount = 0;
+        this.keepAliveFailCount = 0;
+        this.lastKeepAliveAt = null;
+        this.lastKeepAliveStatus = null;
+        this.sessionLostReason = null;
+        this.sessionRestoredFromDb = false;
+
+        console.log(`[AuthService] ✅ Gateway session stored (boot=${this.bootId}, pid=${process.pid})`);
         console.log('[AuthService] Cookies:', cookies.length);
         if (sessionToken) {
             console.log('[AuthService] Session token:', sessionToken.substring(0, 20) + '...');
@@ -314,45 +338,126 @@ class AuthService {
         // Ako već postoji aktivan ping, očisti ga da nemamo duplikate
         this.stopKeepAlive();
 
-        console.log('[AuthService] 🕒 Pokrećem automatsko održavanje sesije (ping svakih 5 min)...');
+        const intervalMs = 4 * 60 * 1000; // 4 minuta (CEZIH session timeout ~15min, pingamo svakih 4)
+        console.log(`[AuthService] 🕒 Pokrećem keep-alive (interval=${intervalMs/1000}s, boot=${this.bootId}, pid=${process.pid})`);
 
-        // Postavljamo interval na 5 minuta (300,000 milisekundi)
         this.keepAliveInterval = setInterval(async () => {
             if (!this.hasGatewaySession()) {
+                console.warn(`[AuthService] ⚠️ Keep-alive interval: nema aktivne sesije! Zaustavljam. (boot=${this.bootId})`);
                 this.stopKeepAlive();
                 return;
             }
+
+            const sessionAgeMin = Math.round((Date.now() - (this.gatewaySession?.createdAt || 0)) / 60000);
 
             try {
                 const headers = this.getGatewayAuthHeaders();
                 // Gađamo bezazlen endpoint (/metadata vraća FHIR CapabilityStatement i ne radi audit log)
                 const url = `${config.cezih.gatewayBase}${config.cezih.services.patient}/metadata`;
 
-                await axios.get(url, { headers, timeout: 10000 });
-                console.log(`[AuthService] 🟢 Keep-alive ping uspješan (${new Date().toLocaleTimeString()}). Sesija produžena.`);
-            } catch (error: any) {
-                console.warn('[AuthService] 🔴 Keep-alive ping pao! Sesija je vjerojatno istekla na CEZIH strani.');
+                const response = await axios.get(url, {
+                    headers,
+                    timeout: 10000,
+                    validateStatus: () => true,  // Ne bacaj exception na non-2xx
+                });
 
-                // Očisti lokalnu sesiju da sustav zna da smo odlogirani
+                this.lastKeepAliveAt = Date.now();
+
+                if (response.status >= 200 && response.status < 500 && response.status !== 401 && response.status !== 403) {
+                    // 2xx, 3xx, 404 = gateway is alive and session is valid
+                    // 404 is normal for /metadata — CEZIH gateway returns it but also sends Set-Cookie
+                    this.keepAliveSuccessCount++;
+                    this.lastKeepAliveStatus = 'success';
+                    console.log(`[AuthService] 🟢 Keep-alive OK (${new Date().toLocaleTimeString()}) status=${response.status} sessionAge=${sessionAgeMin}min success#${this.keepAliveSuccessCount} boot=${this.bootId}`);
+                } else {
+                    // 401/403 = session is truly dead
+                    this.keepAliveFailCount++;
+                    this.lastKeepAliveStatus = 'fail';
+                    const bodyPreview = typeof response.data === 'string'
+                        ? response.data.substring(0, 300)
+                        : JSON.stringify(response.data).substring(0, 300);
+                    console.error(`[AuthService] 🔴 Keep-alive FAIL! status=${response.status} sessionAge=${sessionAgeMin}min fail#${this.keepAliveFailCount} boot=${this.bootId}`);
+                    console.error(`[AuthService] 🔴 Response body preview: ${bodyPreview}`);
+                    console.error(`[AuthService] 🔴 Response headers:`, JSON.stringify(response.headers));
+
+                    this.sessionLostReason = `keep-alive got HTTP ${response.status} at ${new Date().toISOString()}`;
+                    this.clearSession();
+                    this.stopKeepAlive();
+                }
+            } catch (error: any) {
+                this.keepAliveFailCount++;
+                this.lastKeepAliveAt = Date.now();
+                this.lastKeepAliveStatus = 'fail';
+                console.error(`[AuthService] 🔴 Keep-alive EXCEPTION! error=${error.message} sessionAge=${sessionAgeMin}min fail#${this.keepAliveFailCount} boot=${this.bootId}`);
+                if (error.response) {
+                    console.error(`[AuthService] 🔴 Error response status=${error.response.status}`);
+                    const bodyPreview = typeof error.response.data === 'string'
+                        ? error.response.data.substring(0, 300)
+                        : JSON.stringify(error.response.data).substring(0, 300);
+                    console.error(`[AuthService] 🔴 Error body: ${bodyPreview}`);
+                }
+                if (error.code) {
+                    console.error(`[AuthService] 🔴 Error code=${error.code}`);
+                }
+
+                this.sessionLostReason = `keep-alive exception: ${error.message} at ${new Date().toISOString()}`;
                 this.clearSession();
                 this.stopKeepAlive();
             }
-        }, 5 * 60 * 1000); // 5 minuta
+        }, intervalMs);
     }
 
     public stopKeepAlive() {
         if (this.keepAliveInterval) {
             clearInterval(this.keepAliveInterval);
             this.keepAliveInterval = null;
-            console.log('[AuthService] 🛑 Keep-alive ping zaustavljen.');
+            console.log(`[AuthService] 🛑 Keep-alive zaustavljen (boot=${this.bootId}, successes=${this.keepAliveSuccessCount}, fails=${this.keepAliveFailCount})`);
         }
     }
 
     public clearSession() {
+        const hadSession = !!this.gatewaySession;
         this.gatewaySession = null;
         try {
             db.prepare("DELETE FROM settings WHERE key = 'gateway_session'").run();
         } catch (_) { }
+        if (hadSession) {
+            console.log(`[AuthService] 🗑️ Sesija obrisana (boot=${this.bootId}, reason=${this.sessionLostReason || 'manual'})`);
+        }
+    }
+
+    /**
+     * Get full diagnostics for debugging session issues.
+     */
+    public getDiagnostics() {
+        const now = Date.now();
+        return {
+            bootId: this.bootId,
+            pid: process.pid,
+            bootTimestamp: new Date(this.bootTimestamp).toISOString(),
+            uptimeMinutes: Math.round((now - this.bootTimestamp) / 60000),
+            session: this.gatewaySession ? {
+                hasSession: true,
+                ageMinutes: Math.round((now - this.gatewaySession.createdAt) / 60000),
+                createdAt: new Date(this.gatewaySession.createdAt).toISOString(),
+                cookieCount: this.gatewaySession.cookies.length,
+                hasSessionToken: !!this.gatewaySession.sessionToken,
+                hasUserClaims: !!this.gatewaySession.userClaims,
+                restoredFromDb: this.sessionRestoredFromDb,
+            } : {
+                hasSession: false,
+                lostReason: this.sessionLostReason,
+            },
+            keepAlive: {
+                active: !!this.keepAliveInterval,
+                successCount: this.keepAliveSuccessCount,
+                failCount: this.keepAliveFailCount,
+                lastPingAt: this.lastKeepAliveAt ? new Date(this.lastKeepAliveAt).toISOString() : null,
+                lastPingAgoMinutes: this.lastKeepAliveAt ? Math.round((now - this.lastKeepAliveAt) / 60000) : null,
+                lastStatus: this.lastKeepAliveStatus,
+            },
+            systemToken: this.getSystemTokenStatus(),
+        };
     }
 
     // ============================================================

@@ -4,6 +4,7 @@
   "description": "CEZIH FHIR R4 Integration Service for Private Clinic Certification",
   "main": "dist/server.js",
   "scripts": {
+    "predev": "npx kill-port 3010 || exit 0",
     "dev": "tsx watch src/server.ts",
     "dev:client": "cd client && npm run dev -- -p 3011",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:client\"",
@@ -42,6 +43,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/uuid": "^10.0.0",
     "concurrently": "^9.2.1",
+    "kill-port": "^2.0.1",
     "nodemon": "^3.1.11",
     "playwright": "^1.58.2",
     "ts-node": "^10.9.2",

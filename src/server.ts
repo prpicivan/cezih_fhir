@@ -7,6 +7,21 @@ import { config } from './config';
 import { apiRoutes } from './routes';
 import { initDatabase } from './db';
 
+// ============================================================
+// ROCK-SOLID ZAŠTITA OD PADA — server se nikad neće srušiti
+// ============================================================
+process.on('uncaughtException', (error) => {
+    console.error('🔥 [CRITICAL] Neuhvaćena greška (Uncaught Exception):', error.message);
+    if (error.stack) console.error(error.stack);
+    // NE ubijamo proces! Server nastavlja raditi.
+});
+
+process.on('unhandledRejection', (reason: any, promise) => {
+    console.error('🔥 [CRITICAL] Neobrađeno odbijanje (Unhandled Rejection):', reason?.message || reason);
+    if (reason?.stack) console.error(reason.stack);
+    // Node.js po defaultu gasi server kod ovakvih grešaka. Ovim to sprječavamo.
+});
+
 const app = express();
 
 // Initialize Database
@@ -236,6 +251,12 @@ app.get('/api/debug/signing-status', async (_req, res) => {
 });
 
 
+// Serve Certilia prototype from backend (same origin = no CORS issues)
+app.get('/certilia', (_req, res) => {
+    const path = require('path');
+    res.sendFile(path.join(process.cwd(), 'scripts', 'certilia-prototype.html'));
+});
+
 app.get('/', (_req, res) => {
     res.json({
         service: 'WBS_FHIR',
@@ -243,8 +264,10 @@ app.get('/', (_req, res) => {
     });
 });
 
-// Start server
-app.listen(config.port, '127.0.0.1', () => {
+// ============================================================
+// ROCK-SOLID POKRETANJE SERVERA
+// ============================================================
+const server = app.listen(config.port, '127.0.0.1', () => {
     console.log(`
 ╔══════════════════════════════════════════════════╗
 ║     CEZIH FHIR Integration Service              ║
@@ -255,6 +278,35 @@ app.listen(config.port, '127.0.0.1', () => {
   `);
     console.log('All 22 test cases mapped to API endpoints.');
     console.log('Visit http://localhost:' + config.port + ' for endpoint documentation.');
+});
+
+// ============================================================
+// KONTROLIRANO GAŠENJE (Graceful Shutdown)
+// Sprječava nastanak "fantomskih procesa" — prisilno oslobađa port
+// ============================================================
+const gracefulShutdown = (signal: string) => {
+    console.log(`\n🛑 Primljen signal ${signal}. Započinjem kontrolirano gašenje servera...`);
+
+    server.close(() => {
+        console.log('✅ Port oslobođen. Node proces sigurno završava.');
+        process.exit(0);
+    });
+
+    // Osigurač: Ako se server ne uspije ugasiti unutar 3 sekunde, ubij ga prisilno
+    setTimeout(() => {
+        console.error('⚠️ Prisilno gašenje (timeout od 3 sekunde istekao).');
+        process.exit(1);
+    }, 3000);
+};
+
+process.on('SIGINT',  () => gracefulShutdown('SIGINT'));   // Ctrl+C
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM')); // Gašenje sustava
+
+// Specifični popravak za nodemon/tsx fantomske procese
+process.once('SIGUSR2', () => {
+    server.close(() => {
+        process.kill(process.pid, 'SIGUSR2');
+    });
 });
 
 export default app;

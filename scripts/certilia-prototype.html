@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TC18 Potpis Prototip — Certilia & Smart Card</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f1f5f9; margin: 0; padding: 40px; color: #334155; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        h1 { margin-top: 0; color: #0f172a; border-bottom: 1px solid #e2e8f0; padding-bottom: 15px; font-size: 22px; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 14px; }
+        input, textarea, select { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-family: inherit; box-sizing: border-box; }
+
+        .btn-row { display: flex; gap: 12px; margin-top: 10px; }
+        .btn-sign { flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 15px; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: bold; cursor: pointer; transition: 0.3s; }
+        .btn-sign:hover { transform: translateY(-1px); }
+        .btn-sign:disabled { background: #94a3b8 !important; cursor: not-allowed; box-shadow: none; transform: none; }
+        .btn-certilia { background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); box-shadow: 0 4px 12px rgba(99,102,241,0.3); }
+        .btn-certilia:hover { background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
+        .btn-smartcard { background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%); box-shadow: 0 4px 12px rgba(8,145,178,0.3); }
+        .btn-smartcard:hover { background: linear-gradient(135deg, #0e7490 0%, #155e75 100%); }
+        
+        /* Modal Styles */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(15, 23, 42, 0.9); z-index: 100; align-items: center; justify-content: center; backdrop-filter: blur(5px); }
+        .modal-content { background: #1e293b; width: 100%; max-width: 400px; border-radius: 20px; padding: 30px; text-align: center; color: white; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); border: 1px solid rgba(255,255,255,0.1); }
+        .step-badge { display: inline-block; background: rgba(99,102,241,0.2); color: #a5b4fc; padding: 4px 12px; border-radius: 20px; font-size: 10px; font-weight: 800; letter-spacing: 1px; margin-bottom: 15px; }
+        
+        /* Phone Animation */
+        .phone-mock { width: 160px; height: 300px; background: linear-gradient(160deg,#1e1b4b 0%,#0f172a 100%); border-radius: 28px; border: 2px solid rgba(139,92,246,0.4); margin: 20px auto; position: relative; display: flex; flex-direction: column; align-items: center; overflow: hidden; box-shadow: 0 0 40px rgba(99,102,241,0.25); }
+        .phone-notch { width: 48px; height: 8px; background: #0f172a; border-radius: 4px; margin-top: 12px; }
+        .certilia-banner { width: 100%; background: linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%); padding: 10px; margin-top: 15px; color: white; font-weight: bold; font-size: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; box-sizing: border-box; }
+        .phone-body { flex: 1; display: flex; flex-direction: column; justify-content: center; width: 100%; padding: 15px; box-sizing: border-box; }
+        .btn-approve { background: linear-gradient(135deg,rgba(20,184,166,0.3),rgba(16,217,160,0.3)); border: 1px solid rgba(20,184,166,0.5); color: #2dd4bf; padding: 10px; border-radius: 8px; font-weight: bold; font-size: 11px; margin-top: 10px; }
+        
+        .spinner { border: 3px solid rgba(255,255,255,0.1); width: 30px; height: 30px; border-radius: 50%; border-left-color: #818cf8; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .log-box { background: #0f172a; color: #38bdf8; font-family: monospace; font-size: 11px; padding: 15px; border-radius: 8px; margin-top: 20px; height: 150px; overflow-y: auto; text-align: left; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🏥 TC18 Potpis — Certilia & Smart Card</h1>
+    <p>Otvara posjetu (TC12), kreira slučaj (TC16), potpisuje i šalje na CEZIH (TC18).</p>
+
+    <div class="form-group">
+        <label>MBO Pacijenta</label>
+        <input type="text" id="patientMbo" value="999999423">
+    </div>
+    
+    <div class="form-group">
+        <label>Tip dokumenta</label>
+        <select id="docType">
+            <option value="011">Izvješće nakon pregleda (011)</option>
+            <option value="012">Specijalistički nalaz (012)</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label>Anamneza</label>
+        <textarea id="anamnesis" rows="3">Testiranje end-to-end potpisa koristeći čisti TC18 flow.</textarea>
+    </div>
+
+    <div class="form-group">
+        <label>Dijagnoza (MKB-10)</label>
+        <input type="text" id="diagnosisCode" value="Z00.0">
+    </div>
+
+    <div class="btn-row">
+        <button class="btn-sign btn-certilia" id="certiliaBtn" onclick="startCertiliaFlow()">
+            📱 Certilia (Mobitel)
+        </button>
+        <button class="btn-sign btn-smartcard" id="smartcardBtn" onclick="startSmartCardFlow()">
+            💳 Smart Card (PKCS#11)
+        </button>
+    </div>
+
+    <div class="log-box" id="devLog">Sustav spreman...</div>
+</div>
+
+<div class="modal-overlay" id="signModal">
+    <div class="modal-content">
+        <div id="step1" style="display: block;">
+            <div class="step-badge">KORAK 1: ODOBRENJE</div>
+            <h3 style="margin-top: 0;">Zahtjev poslan na mobitel</h3>
+            <p style="font-size: 12px; color: #94a3b8;">Otvorite Certilia aplikaciju i pritisnite <strong>POTPIŠI</strong></p>
+            
+            <div class="phone-mock">
+                <div class="phone-notch"></div>
+                <div class="certilia-banner">🛡️ Certilia</div>
+                <div class="phone-body">
+                    <div style="font-size: 10px; margin-bottom: 10px; color: #cbd5e1;">Medicinski nalaz</div>
+                    <div class="btn-approve">POTPIŠI</div>
+                </div>
+            </div>
+            
+            <p style="font-size: 10px; color: #64748b;" id="txnDisplay">TXN: Čekam...</p>
+        </div>
+
+        <div id="step2" style="display: none;">
+            <div class="step-badge" style="background: rgba(56,189,248,0.2); color: #7dd3fc;">KORAK 2: CEZIH</div>
+            <h3 style="margin-top: 0;">Šaljem na CEZIH...</h3>
+            <p style="font-size: 12px; color: #94a3b8;" id="step2text">Pakiram MHD Bundle i šaljem na CEZIH gateway...</p>
+            <div class="spinner"></div>
+        </div>
+
+        <div id="step3" style="display: none;">
+            <div class="step-badge" style="background: rgba(74,222,128,0.2); color: #86efac;">ZAVRŠENO</div>
+            <h3 style="margin-top: 0; color: #4ade80;">Dokument je poslan!</h3>
+            <p style="font-size: 12px; color: #94a3b8;" id="finalOid">OID: ...</p>
+            <button onclick="closeModal()" style="margin-top: 20px; width: 100%; padding: 12px; background: #334155; border: none; border-radius: 8px; color: white; cursor: pointer;">Zatvori</button>
+        </div>
+        
+        <div id="stepError" style="display: none;">
+            <div class="step-badge" style="background: rgba(239,68,68,0.2); color: #fca5a5;">GREŠKA</div>
+            <h3 style="margin-top: 0; color: #f87171;">Došlo je do greške</h3>
+            <p style="font-size: 12px; color: #94a3b8;" id="errorText">...</p>
+            <button onclick="closeModal()" style="margin-top: 20px; width: 100%; padding: 12px; background: #334155; border: none; border-radius: 8px; color: white; cursor: pointer;">Zatvori</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const API_BASE = 'http://localhost:3010/api';
+    let pollInterval;
+
+    function log(msg) {
+        const logBox = document.getElementById('devLog');
+        const time = new Date().toLocaleTimeString();
+        logBox.innerHTML += `<br>[${time}] ${msg}`;
+        logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    function showStep(stepId) {
+        ['step1', 'step2', 'step3', 'stepError'].forEach(id => {
+            document.getElementById(id).style.display = id === stepId ? 'block' : 'none';
+        });
+    }
+
+    function closeModal() {
+        document.getElementById('signModal').style.display = 'none';
+        document.getElementById('certiliaBtn').disabled = false;
+        document.getElementById('smartcardBtn').disabled = false;
+        if(pollInterval) clearInterval(pollInterval);
+    }
+
+    function disableButtons() {
+        document.getElementById('certiliaBtn').disabled = true;
+        document.getElementById('smartcardBtn').disabled = true;
+    }
+
+    // ============================================================
+    // ZAJEDNIČKI DIO: TC12 + TC16 + sendDocument
+    // ============================================================
+    async function prepareDocument() {
+        const mbo = document.getElementById('patientMbo').value;
+        const type = document.getElementById('docType').value;
+        const anamnesis = document.getElementById('anamnesis').value;
+        const diagnosisCode = document.getElementById('diagnosisCode').value;
+
+        // 0. Provjera autentikacije
+        log('Provjeravam sesiju...');
+        const authRes = await fetch(`${API_BASE}/auth/status`);
+        const authData = await authRes.json();
+        if (!authData.authenticated) {
+            throw new Error('Sesija je istekla! Prijavite se na React dashboard (http://localhost:3011) pa se vratite ovdje.');
+        }
+        log('✅ Sesija aktivna');
+
+        // A. Kreiraj posjetu (TC12)
+        log('Kreiram posjetu na CEZIH-u...');
+        const visitRes = await fetch(`${API_BASE}/visit/create`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ patientMbo: mbo, startDate: new Date().toISOString(), class: 'AMB' })
+        });
+        const visitData = await visitRes.json();
+        const visitId = visitData.result?.localVisitId;
+        log(`✅ Posjeta otvorena: ${visitId}`);
+
+        // B. Kreiraj slučaj (TC16)
+        log('Kreiram slučaj na CEZIH-u...');
+        const caseRes = await fetch(`${API_BASE}/case/create`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ patientMbo: mbo, title: 'Slučaj: ' + diagnosisCode, diagnosisCode, startDate: new Date().toISOString() })
+        });
+        const caseData = await caseRes.json();
+        const caseId = caseData.result?.localCaseId || caseData.result?.cezihCaseId;
+        log(`✅ Slučaj otvoren: ${caseId}`);
+
+        // C. Kreiraj dokument (sendDocument → buildInnerBundle)
+        log('Kreiram dokument...');
+        const prepRes = await fetch(`${API_BASE}/document/send`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ patientMbo: mbo, visitId, caseId, type, anamnesis, diagnosisCode, title: 'Nalaz' })
+        });
+        const prepData = await prepRes.json();
+        if(!prepData.success) throw new Error(prepData.error || 'Greška pri kreiranju');
+        const docOid = prepData.result?.documentOid || prepData.documentOid;
+        if(!docOid) throw new Error('Server nije vratio documentOid');
+        log(`✅ Dokument generiran. OID: ${docOid}`);
+
+        return docOid;
+    }
+
+    // ============================================================
+    // CERTILIA FLOW (Remote Sign → Mobitel)
+    // ============================================================
+    async function startCertiliaFlow() {
+        disableButtons();
+        document.getElementById('devLog').innerHTML = '📱 Certilia flow...';
+
+        try {
+            const docOid = await prepareDocument();
+
+            // Otvori Modal — korak 1 (čekanje na mobitelu)
+            document.getElementById('signModal').style.display = 'flex';
+            showStep('step1');
+
+            // 2. Slanje na Certiliu
+            log('Šaljem zahtjev na Certilia mobileID...');
+            const signRes = await fetch(`${API_BASE}/document/certilia-sign`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ documentOid: docOid })
+            });
+            const signData = await signRes.json();
+
+            if(!signData.success) throw new Error(signData.error || 'Certilia API odbio zahtjev');
+            const txCode = signData.transactionCode;
+            document.getElementById('txnDisplay').innerText = `TXN: ${txCode}`;
+            log(`Push poslan! Čekam POTPIS na mobitelu...`);
+
+            // 3. Polling
+            let pollCount = 0;
+            pollInterval = setInterval(async () => {
+                pollCount++;
+                try {
+                    log(`Poll #${pollCount} — provjeravam status...`);
+                    const pollRes = await fetch(`${API_BASE}/document/remote-sign/status/${txCode}`);
+                    const pollData = await pollRes.json();
+                    
+                    if (pollData.success && pollData.isSigned) {
+                        clearInterval(pollInterval);
+                        log('✅ Korisnik je POTPISAO na mobitelu!');
+                        
+                        showStep('step2');
+                        document.getElementById('step2text').innerText = 'Pakiram MHD Bundle i šaljem na CEZIH gateway...';
+                        log('Završavam i šaljem TC18 MHD Bundle na CEZIH...');
+                        
+                        const completeRes = await fetch(`${API_BASE}/document/send/complete`, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ transactionCode: txCode, documentOid: docOid })
+                        });
+                        const completeData = await completeRes.json();
+                        
+                        if(completeData.success) {
+                            log('✅ CEZIH JE PRIHVATIO DOKUMENT!');
+                            document.getElementById('finalOid').innerText = `Oid: ${docOid}`;
+                            showStep('step3');
+                        } else {
+                            const errMsg = completeData.error || completeData.cezihError || 'CEZIH odbio dokument';
+                            log(`❌ GREŠKA pri slanju: ${errMsg}`);
+                            document.getElementById('errorText').innerText = errMsg;
+                            showStep('stepError');
+                        }
+                    }
+                } catch (pollErr) {
+                    log(`⚠️ Poll greška: ${pollErr.message}`);
+                }
+            }, 3000);
+
+        } catch (error) {
+            log(`❌ GREŠKA: ${error.message}`);
+            document.getElementById('errorText').innerText = error.message;
+            document.getElementById('signModal').style.display = 'flex';
+            showStep('stepError');
+        }
+    }
+
+    // ============================================================
+    // SMART CARD FLOW (PKCS#11 → lokalni potpis)
+    // ============================================================
+    async function startSmartCardFlow() {
+        // Prompt za SIGN PIN
+        const signPin = prompt('🔐 Unesite SIGN PIN za smart karticu:');
+        if (!signPin) {
+            log('❌ Otkazano — PIN nije unesen.');
+            return;
+        }
+
+        disableButtons();
+        document.getElementById('devLog').innerHTML = '💳 Smart Card flow...';
+
+        try {
+            const docOid = await prepareDocument();
+
+            // Otvori Modal — korak 2 (potpis + slanje)
+            document.getElementById('signModal').style.display = 'flex';
+            showStep('step2');
+            document.getElementById('step2text').innerText = 'Potpisujem lokalno putem smart kartice (PKCS#11) i šaljem na CEZIH...';
+            log('Potpisujem putem smart kartice i šaljem na CEZIH...');
+
+            const signRes = await fetch(`${API_BASE}/document/smartcard-sign`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ documentOid: docOid, signPin })
+            });
+            const signData = await signRes.json();
+            log(`Odgovor: ${JSON.stringify(signData).substring(0, 300)}`);
+
+            if(signData.success) {
+                log('✅ CEZIH JE PRIHVATIO DOKUMENT!');
+                document.getElementById('finalOid').innerText = `Oid: ${docOid}`;
+                showStep('step3');
+            } else {
+                const errMsg = signData.error || 'CEZIH odbio dokument';
+                log(`❌ GREŠKA: ${errMsg}`);
+                document.getElementById('errorText').innerText = errMsg;
+                showStep('stepError');
+            }
+
+        } catch (error) {
+            log(`❌ GREŠKA: ${error.message}`);
+            document.getElementById('errorText').innerText = error.message;
+            document.getElementById('signModal').style.display = 'flex';
+            showStep('stepError');
+        }
+    }
+</script>
+</body>
+</html>

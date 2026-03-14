@@ -74,6 +74,8 @@ export interface CezihNotification {
 
 class RemoteSignService {
     private httpClient: AxiosInstance;
+    // Cache signed documents to avoid CEZIH's "already downloaded" error
+    private signedDocsCache: Map<string, GetSignedDocumentsResponse> = new Map();
 
     // The external signer base URL
     // Confirmed working: https://certws2.cezih.hr:8443/services-router/gateway/extsigner/api/sign
@@ -169,6 +171,7 @@ class RemoteSignService {
             // Notification endpoint is not available on this gateway.
             // Instead, poll getSignedDocuments directly — it returns signatureStatus.
             const result = await this.getSignedDocuments(transactionCode, userToken);
+            console.log(`[RemoteSign] Poll result: signatureStatus=${result.signatureStatus}, docs=${result.signedDocuments?.length || 0}`);
             if (result.signatureStatus === 'FULLY_SIGNED') {
                 console.log(`[RemoteSign] ✅ Potpis detektiran via getSignedDocuments!`);
                 return true;
@@ -176,11 +179,21 @@ class RemoteSignService {
             console.log(`[RemoteSign] ⏳ Signature status: ${result.signatureStatus}`);
             return false;
         } catch (error: any) {
+            const errMsg = error.message || '';
+            console.log(`[RemoteSign] Poll error: status=${error.response?.status}, msg=${errMsg.substring(0, 200)}`);
+            
+            // CRITICAL: "Documents have already been downloaded" means signing WAS successful
+            // but documents were already consumed by a previous poll. Treat as signed!
+            if (errMsg.includes('already been downloaded')) {
+                console.log(`[RemoteSign] ✅ "Already downloaded" = potpis je bio uspješan! Treating as signed.`);
+                return true;
+            }
+            
             // 404 or 4XX = document not yet signed, keep polling
             if (error.response?.status === 404 || error.response?.status === 400) {
                 return false;
             }
-            console.warn(`[RemoteSign] Poll error: ${error.message}`);
+            console.warn(`[RemoteSign] Poll error: ${errMsg}`);
             return false;
         }
     }
@@ -193,11 +206,17 @@ class RemoteSignService {
         transactionCode: string,
         userToken: string
     ): Promise<GetSignedDocumentsResponse> {
-        console.log(`[RemoteSign] Dohvaćanje potpisanih dokumenata (tx: ${transactionCode})...`);
+        // Check cache first — CEZIH only allows ONE download per transaction!
+        const cached = this.signedDocsCache.get(transactionCode);
+        if (cached) {
+            console.log(`[RemoteSign] ✅ Serving signed documents from cache (tx: ${transactionCode.substring(0, 20)}...)`);
+            return cached;
+        }
+
+        console.log(`[RemoteSign] Dohvaćanje potpisanih dokumenata (tx: ${transactionCode.substring(0, 20)}...)...`);
 
         const url = this.baseSignUrl.replace('/api/sign', '/api/getSignedDocuments');
         console.log(`[RemoteSign] GET ${url}`);
-
 
         try {
             const response = await this.httpClient.get<GetSignedDocumentsResponse>(
@@ -211,7 +230,11 @@ class RemoteSignService {
             const result = response.data;
 
             if (result.signatureStatus === 'FULLY_SIGNED') {
-                console.log(`[RemoteSign] ✅ ${result.signedDocuments.length} dokument(a) potpisano!`);
+                console.log(`[RemoteSign] ✅ ${result.signedDocuments.length} dokument(a) potpisano! Caching result.`);
+                // Cache so completeRemoteSigning can retrieve it without hitting CEZIH again
+                this.signedDocsCache.set(transactionCode, result);
+                // Auto-clean cache after 10 minutes
+                setTimeout(() => this.signedDocsCache.delete(transactionCode), 10 * 60 * 1000);
             } else {
                 console.log(`[RemoteSign] ⚠️ Status potpisa: ${result.signatureStatus}`);
             }

@@ -106,6 +106,7 @@ class ClinicalDocumentService {
     // ============================================================
 
     async sendDocument(data: ClinicalDocumentData, userToken: string): Promise<any> {
+        console.log(`[ClinicalDocumentService] sendDocument received: visitId=${data.visitId}, caseId=${data.caseId}, type=${data.type}, patientMbo=${data.patientMbo}`);
         // Step 0: Validate Data
         const validation = validationService.validateDocument(data);
         if (!validation.isValid) {
@@ -134,9 +135,9 @@ class ClinicalDocumentService {
                     id, patientMbo, visitId, type, status, 
                     anamnesis, status_text, finding, recommendation, 
                     diagnosisCode, diagnosisDisplay, content, 
-                    createdAt, sentAt
+                    createdAt, sentAt, caseId
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `);
             stmt.run(
                 documentOid,
@@ -152,14 +153,15 @@ class ClinicalDocumentService {
                 data.diagnosisDisplay || null,
                 data.content || null,
                 new Date().toISOString(),
-                new Date().toISOString()
+                new Date().toISOString(),
+                data.caseId || null
             );
             console.log('[ClinicalDocumentService] Saved document to local DB:', documentOid);
         } catch (dbError: any) {
             console.error('[ClinicalDocumentService] DB Error:', dbError.message);
         }
 
-        // Step 3: Build the FULL FHIR Document Bundle
+        // Step 3: Build the FULL FHIR Document Bundle using TC18's buildInnerBundle
         // PDQm lookup: get CEZIH Patient Logical ID for inner document (SAMO ZA MBO)
         let patientCezihId = data.patientMbo; // Default na ono što imamo (za strance to je Unique ID)
         try {
@@ -169,7 +171,32 @@ class ClinicalDocumentService {
             }
         } catch (e: any) { /* ignore */ }
 
-        const documentBundle = this.buildFullDocumentBundle(data, documentOid, patient, visit, patientCezihId);
+        // Resolve case from DB for CEZIH case ID
+        const caseRow = data.caseId ? db.prepare('SELECT * FROM cases WHERE id = ?').get(data.caseId) as any : null;
+        const patientIdentifier = patientService.getPatientIdentifier(patient);
+
+        const { buildInnerBundle } = await import('./mhd-bundle.builder');
+        const documentBundle = buildInnerBundle({
+            docOid: `urn:oid:${documentOid}`,
+            docType: data.type || '011',
+            patientIdentifier,
+            patientName: { family: patient?.name?.family || (patient as any)?.lastName || 'NEPOZNATO', given: [patient?.name?.given?.[0] || (patient as any)?.firstName || 'N'] },
+            patientGender: patient?.gender || 'unknown',
+            patientBirthDate: patient?.birthDate || '1980-01-01',
+            patientCezihId,
+            practitionerId: data.practitionerId || config.practitioner.hzjzId,
+            practitionerOib: config.practitioner.oib,
+            practitionerName: { family: 'Prpic', given: ['Ivan'] },
+            orgId: data.organizationId || config.organization.hzzoCode,
+            orgDisplay: 'WBS privatna ordinacija',
+            encCezihId: visit?.cezihVisitId || visit?.cezihId || data.visitId || '',
+            condFhirId: caseRow?.cezihCaseId || caseRow?.id || data.caseId || '',
+            diagnosisCode: data.diagnosisCode || 'Z00.0',
+            anamnesis: data.anamnesis || 'Medicinski nalaz',
+            finding: data.finding,
+            status: data.status,
+            recommendation: data.recommendation,
+        });
 
         // Note: visit closing (REALIZATION) is handled by G9 app's document/route.ts
         // Do NOT call closeVisit here to avoid duplicate REALIZATION in audit log
@@ -426,7 +453,7 @@ class ClinicalDocumentService {
 
     /**
      * Completes the remote signing flow after user approval.
-     * Fetches the signed bundle and submits it to CEZIH.
+     * Fetches the signed bundle, builds the outer MHD via TC18 flow, and submits to CEZIH.
      */
     async completeRemoteSigning(
         documentOid: string,
@@ -436,53 +463,103 @@ class ClinicalDocumentService {
         console.log('[ClinicalDocumentService] Completing remote signing for document:', documentOid);
 
         try {
-            // 1. Fetch signed documents from CEZIH
-            const result = await remoteSignService.getSignedDocuments(transactionCode, userToken);
-
-            if (result.signatureStatus !== 'FULLY_SIGNED') {
-                throw new Error(`Potpis nije uspješan. Status: ${result.signatureStatus}`);
+            // 1. Dohvat potpisanog dokumenta s CEZIH Certilie (ili iz cache-a)
+            let signedB64: string;
+            try {
+                const result = await remoteSignService.getSignedDocuments(transactionCode, userToken);
+                if (result.signatureStatus !== 'FULLY_SIGNED') {
+                    throw new Error(`Potpis nije uspješan. Status: ${result.signatureStatus}`);
+                }
+                signedB64 = result.signedDocuments[0].base64Document;
+            } catch (fetchError: any) {
+                // "Already downloaded" = potpis JE bio uspješan ali CEZIH ne da ponovo
+                // Fallback: koristimo lokalni bundleJson (koji sadrži potpis iz initiateRemoteSigning koraka)
+                if (fetchError.message?.includes('already been downloaded') || fetchError.message?.includes('already downloaded')) {
+                    console.log('[ClinicalDocumentService] CEZIH says "already downloaded" — using local bundleJson as signed B64');
+                    const localDocFallback = this.getDocument(documentOid);
+                    if (!localDocFallback?.bundleJson) {
+                        throw new Error('Dokument potpisan ali nema lokalno pohranjenog bundlea za slanje.');
+                    }
+                    signedB64 = Buffer.from(localDocFallback.bundleJson, 'utf-8').toString('base64');
+                } else {
+                    throw fetchError;
+                }
             }
 
-            const signedDoc = result.signedDocuments[0];
-            const finalDocumentBundle = JSON.parse(
-                Buffer.from(signedDoc.base64Document, 'base64').toString('utf-8')
-            );
-
-            // 2. Fetch original data from DB to rebuild context if needed
-            // Actually, we just need to submit the final bundle
+            // 2. Dohvat originalnih podataka iz lokalne baze
             const localDoc = this.getDocument(documentOid);
             if (!localDoc) throw new Error('Dokument nije pronađen u lokalnoj bazi.');
 
-            // Reconstruct minimal data object for submission helper
-            const data: ClinicalDocumentData = {
-                type: localDoc.type as ClinicalDocumentType,
-                patientMbo: localDoc.patientMbo,
+            const localPatient = (await patientService.searchByMbo(localDoc.patientMbo, userToken))[0] || { mbo: localDoc.patientMbo };
+            const patientIdentifier = patientService.getPatientIdentifier(localPatient);
+            let patientCezihId = localPatient.cezihId || localPatient.cezihUniqueId || localDoc.patientMbo;
+
+            if (patientIdentifier.system === 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO') {
+                try {
+                    const pdqmPatients = await patientService.searchRemoteByMbo(localDoc.patientMbo, userToken);
+                    if (pdqmPatients.length > 0 && pdqmPatients[0].id) patientCezihId = pdqmPatients[0].id;
+                } catch (e) {}
+            }
+
+            const visit = localDoc.visitId ? db.prepare('SELECT * FROM visits WHERE id = ?').get(localDoc.visitId) as any : null;
+            const caseRow = localDoc.caseId ? db.prepare('SELECT * FROM cases WHERE id = ?').get(localDoc.caseId) as any : null;
+
+            // 3. KORISTIMO IDENTIČAN TC18 FLOW! Samo mu proslijedimo gotov Certilia potpis.
+            const { buildMhdBundle, submitMhdToGateway } = await import('./mhd-bundle.builder');
+            
+            const { outer } = await buildMhdBundle({
+                docOid: `urn:oid:${documentOid}`,
+                docType: localDoc.type || '011',
+                patientIdentifier,
+                patientName: { family: (localPatient as any)?.lastName || localPatient?.name?.family || 'NEPOZNATO', given: [(localPatient as any)?.firstName || localPatient?.name?.given?.[0] || 'N'] },
+                patientGender: localPatient?.gender || 'unknown',
+                patientBirthDate: localPatient?.birthDate || '1980-01-01',
+                patientCezihId,
                 practitionerId: config.practitioner.hzjzId,
-                organizationId: config.organization.hzzoCode,
+                practitionerOib: config.practitioner.oib,
+                practitionerName: { family: 'Prpic', given: ['Ivan'] },
+                orgId: config.organization.hzzoCode,
+                orgDisplay: 'WBS privatna ordinacija',
+                encCezihId: visit?.cezihVisitId || visit?.cezihId || localDoc.visitId || '',
+                condFhirId: caseRow?.cezihCaseId || caseRow?.id || localDoc.caseId || '',
+                diagnosisCode: localDoc.diagnosisCode || 'Z00.0',
+                anamnesis: localDoc.anamnesis || 'Medicinski nalaz'
+            }, signedB64); // <-- Ovdje ubacujemo potpis!
+
+            // 4. Slanje na CEZIH Gateway
+            const submissionResult = await submitMhdToGateway(outer);
+
+            // 5. Ažuriranje baze i Audit log!
+            if (submissionResult.success) {
+                db.prepare('UPDATE documents SET status = ?, sentAt = ? WHERE id = ?')
+                    .run('signed and submitted', new Date().toISOString(), documentOid);
+            }
+
+            await auditService.log({
                 visitId: localDoc.visitId,
-                title: 'Medicinski nalaz',
-                date: localDoc.createdAt
-            };
+                patientMbo: localDoc.patientMbo,
+                action: 'SEND_DOCUMENT_CERTILIA',
+                direction: 'OUTGOING_CEZIH',
+                status: submissionResult.success ? 'SUCCESS' : 'ERROR',
+                payload_req: JSON.stringify({ documentOid, transactionCode }),
+                payload_res: JSON.stringify(submissionResult),
+                error_msg: submissionResult.error || undefined,
+            });
 
-            // 3. Submit to CEZIH MHD
-            const bundleId = uuidv4();
-            const submissionResult = await this.submitToCezih(data, documentOid, bundleId, finalDocumentBundle, userToken);
+            if (!submissionResult.success) {
+                throw new Error(submissionResult.error || submissionResult.data?.cezihError || 'CEZIH odbio dokument');
+            }
 
-            // 4. Update local DB status to final
-            db.prepare('UPDATE documents SET status = ?, sentAt = ? WHERE id = ?')
-                .run('signed and submitted', new Date().toISOString(), documentOid);
-
-            return { ...submissionResult, documentOid };
+            return { success: true, documentOid };
         } catch (error: any) {
             console.error('[ClinicalDocumentService] Completion failed:', error.message);
-            // If it failed, it stays in pending_signature or we could move it back to draft
             throw error;
         }
     }
 
     /**
      * Completes document signing using a local smart card (PKCS#11).
-     * Signs the pending bundle locally and submits to CEZIH.
+     * Uses the unified TC18 buildMhdBundle flow — signing happens inside via signPin.
      */
     async completeSmartCardSigning(
         documentOid: string,
@@ -497,40 +574,70 @@ class ClinicalDocumentService {
             const localDoc = this.getDocument(documentOid);
             if (!localDoc) throw new Error('Dokument nije pronađen u lokalnoj bazi.');
 
-            // 2. Retrieve the pending bundle (stored as JSON in DB)
-            let pendingBundle: any;
-            if (localDoc.bundleJson) {
-                pendingBundle = JSON.parse(localDoc.bundleJson);
-            } else {
-                throw new Error('Nema pohranjenog bundlea za potpis.');
+            // 2. Resolve patient, visit, case — same as completeRemoteSigning
+            const localPatient = (await patientService.searchByMbo(localDoc.patientMbo, userToken))[0] || { mbo: localDoc.patientMbo };
+            const patientIdentifier = patientService.getPatientIdentifier(localPatient);
+            let patientCezihId = localPatient.cezihId || localPatient.cezihUniqueId || localDoc.patientMbo;
+
+            if (patientIdentifier.system === 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO') {
+                try {
+                    const pdqmPatients = await patientService.searchRemoteByMbo(localDoc.patientMbo, userToken);
+                    if (pdqmPatients.length > 0 && pdqmPatients[0].id) patientCezihId = pdqmPatients[0].id;
+                } catch (e) {}
             }
 
-            // 3. Sign locally using PKCS#11 (smart card)
-            console.log('[ClinicalDocumentService] Signing bundle via PKCS#11...');
-            const signedResult = await signatureService.signBundle(pendingBundle, undefined, userToken, signPin);
-            const finalDocumentBundle = signedResult.bundle;
+            const visit = localDoc.visitId ? db.prepare('SELECT * FROM visits WHERE id = ?').get(localDoc.visitId) as any : null;
+            const caseRow = localDoc.caseId ? db.prepare('SELECT * FROM cases WHERE id = ?').get(localDoc.caseId) as any : null;
 
-            // 4. Reconstruct minimal data for submission
-            const data: ClinicalDocumentData = {
-                type: localDoc.type as ClinicalDocumentType,
-                patientMbo: localDoc.patientMbo,
+            // 3. KORISTIMO TC18 FLOW — signPin se prosljeđuje, potpis se radi unutar buildMhdBundle
+            const { buildMhdBundle, submitMhdToGateway } = await import('./mhd-bundle.builder');
+
+            const { outer } = await buildMhdBundle({
+                docOid: `urn:oid:${documentOid}`,
+                docType: localDoc.type || '011',
+                patientIdentifier,
+                patientName: { family: (localPatient as any)?.lastName || localPatient?.name?.family || 'NEPOZNATO', given: [(localPatient as any)?.firstName || localPatient?.name?.given?.[0] || 'N'] },
+                patientGender: localPatient?.gender || 'unknown',
+                patientBirthDate: localPatient?.birthDate || '1980-01-01',
+                patientCezihId,
                 practitionerId: config.practitioner.hzjzId,
-                organizationId: config.organization.hzzoCode,
+                practitionerOib: config.practitioner.oib,
+                practitionerName: { family: 'Prpic', given: ['Ivan'] },
+                orgId: config.organization.hzzoCode,
+                orgDisplay: 'WBS privatna ordinacija',
+                encCezihId: visit?.cezihVisitId || visit?.cezihId || localDoc.visitId || '',
+                condFhirId: caseRow?.cezihCaseId || caseRow?.id || localDoc.caseId || '',
+                diagnosisCode: localDoc.diagnosisCode || 'Z00.0',
+                anamnesis: localDoc.anamnesis || 'Medicinski nalaz',
+                signPin,
+            }); // signPin → buildMhdBundle poziva PKCS#11 potpis
+
+            // 4. Slanje na CEZIH Gateway
+            const submissionResult = await submitMhdToGateway(outer);
+
+            // 5. Ažuriranje baze SAMO ako CEZIH prihvati + Audit log
+            if (submissionResult.success) {
+                db.prepare('UPDATE documents SET status = ?, sentAt = ? WHERE id = ?')
+                    .run('signed and submitted', new Date().toISOString(), documentOid);
+                console.log('[ClinicalDocumentService] ✅ Smart card signing complete for:', documentOid);
+            }
+
+            await auditService.log({
                 visitId: localDoc.visitId,
-                title: 'Medicinski nalaz',
-                date: localDoc.createdAt
-            };
+                patientMbo: localDoc.patientMbo,
+                action: 'SEND_DOCUMENT_SMARTCARD',
+                direction: 'OUTGOING_CEZIH',
+                status: submissionResult.success ? 'SUCCESS' : 'ERROR',
+                payload_req: JSON.stringify({ documentOid, transactionCode }),
+                payload_res: JSON.stringify(submissionResult),
+                error_msg: submissionResult.error || undefined,
+            });
 
-            // 5. Submit to CEZIH MHD
-            const bundleId = uuidv4();
-            const submissionResult = await this.submitToCezih(data, documentOid, bundleId, finalDocumentBundle, userToken);
+            if (!submissionResult.success) {
+                throw new Error(submissionResult.error || submissionResult.data?.cezihError || 'CEZIH odbio dokument');
+            }
 
-            // 6. Update local DB status
-            db.prepare('UPDATE documents SET status = ?, sentAt = ? WHERE id = ?')
-                .run('signed and submitted', new Date().toISOString(), documentOid);
-
-            console.log('[ClinicalDocumentService] ✅ Smart card signing complete for:', documentOid);
-            return { ...submissionResult, documentOid };
+            return { success: true, documentOid };
         } catch (error: any) {
             console.error('[ClinicalDocumentService] Smart card signing failed:', error.message);
             throw error;
@@ -544,158 +651,7 @@ class ClinicalDocumentService {
         return remoteSignService.pollForSignatureNotification(transactionCode, userToken, config.organization.hzzoCode);
     }
 
-    /**
-     * Shared helper to submit a (signed) bundle to CEZIH MHD endpoint.
-     */
-    private async submitToCezih(
-        data: ClinicalDocumentData,
-        documentOid: string,
-        bundleId: string,
-        finalDocumentBundle: any,
-        userToken: string
-    ): Promise<any> {
-        // PDQm lookup: get CEZIH Patient Logical ID (SAMO ZA MBO)
-        let patientLogicalId = data.patientMbo;
-        try {
-            if (/^\d{9}$/.test(data.patientMbo)) {
-                const pdqmPatients = await patientService.searchRemoteByMbo(data.patientMbo, userToken);
-                if (pdqmPatients.length > 0 && pdqmPatients[0].id) {
-                    patientLogicalId = pdqmPatients[0].id;
-                    console.log('[ClinicalDocumentService] Patient Logical ID:', patientLogicalId);
-                }
-            }
-        } catch (pdqErr: any) {
-            console.warn('[ClinicalDocumentService] PDQm fallback to MBO:', pdqErr.message);
-        }
-
-        // Look up CEZIH visit ID for DocumentReference.context
-        let cezihVisitId = data.visitId;
-        if (data.visitId) {
-            const localVisit = visitService.getVisit(data.visitId);
-            if (localVisit?.cezihVisitId) {
-                cezihVisitId = localVisit.cezihVisitId;
-                console.log('[ClinicalDocumentService] CEZIH Visit ID:', cezihVisitId);
-            }
-        }
-
-        // Step 5: Build the MHD Provide Document Bundle (ITI-65 transaction)
-        const docRefUuid = `urn:uuid:${uuidv4()}`;
-        const submissionSetUuid = `urn:uuid:${uuidv4()}`;
-        const binaryUuid = `urn:uuid:${uuidv4()}`;
-
-        const mhdBundle = {
-            resourceType: 'Bundle',
-            type: 'transaction',
-
-            entry: [
-                {
-                    fullUrl: submissionSetUuid,
-                    resource: {
-                        resourceType: 'List',
-
-                        status: 'current',
-                        mode: 'working',
-                        code: { coding: [{ system: 'http://ihe.net/fhir/ihe.formatcode.assignment/CodeSystem/formatcodes', code: 'urn:ihe:iti:xds:2001:post-hoc-submission-set' }] },
-
-                        subject: { identifier: { system: CEZIH_IDENTIFIERS.MBO, value: data.patientMbo } },
-                        // REQUIRED: entry links SubmissionSet → DocumentReference
-                        entry: [
-                            { item: { reference: docRefUuid } }
-                        ]
-                    },
-                    request: { method: 'POST', url: 'List' }
-                },
-                {
-                    fullUrl: docRefUuid,
-                    resource: {
-                        resourceType: 'DocumentReference',
-
-                        masterIdentifier: { system: 'urn:ietf:rfc:3986', value: `urn:oid:${documentOid}` },
-                        status: 'current',
-
-                        type: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/document-type', code: data.type || '011' }] },
-                        subject: { identifier: { system: CEZIH_IDENTIFIERS.MBO, value: data.patientMbo } },
-                        author: [{ identifier: { system: CEZIH_IDENTIFIERS.HZJZ_WORKER_NUMBER, value: data.practitionerId } }],
-                        content: [{ attachment: { contentType: 'application/fhir+json', url: binaryUuid } }]
-                    },
-                    request: { method: 'POST', url: 'DocumentReference' }
-                },
-                {
-                    fullUrl: binaryUuid,
-                    resource: {
-                        resourceType: 'Binary',
-                        meta: { profile: ['http://hl7.org/fhir/StructureDefinition/Binary'] },
-                        contentType: 'application/fhir+json',
-                        data: Buffer.from(JSON.stringify(finalDocumentBundle)).toString('base64'),
-                    },
-                    request: { method: 'POST', url: 'Binary' },
-                },
-            ],
-        };
-
-        let responseData: any = null;
-        let errorMessage: string | undefined;
-
-        try {
-            let headers: Record<string, string>;
-            try {
-                headers = await authService.getSystemAuthHeaders();
-            } catch (tokenErr: any) {
-                headers = authService.getUserAuthHeaders(userToken);
-            }
-
-            const gatewayHeaders = authService.hasGatewaySession() ? authService.getGatewayAuthHeaders() : {};
-            const combinedHeaders = {
-                ...headers,
-                ...(gatewayHeaders.Cookie ? { Cookie: gatewayHeaders.Cookie } : {}),
-                'Content-Type': 'application/fhir+json',
-                'Accept': 'application/fhir+json',
-            };
-
-            const url = `${config.cezih.gatewayBase}${config.cezih.services.document}/iti-65-service`;
-            console.log('[ClinicalDocumentService] Submitting MHD Bundle to:', url);
-            console.log('[ClinicalDocumentService] Headers:', JSON.stringify(Object.keys(combinedHeaders)));
-            console.log('[ClinicalDocumentService] MHD Bundle entries:', mhdBundle.entry.map((e: any) => e.resource?.resourceType).join(', '));
-            console.log('[ClinicalDocumentService] Full MHD Bundle:', JSON.stringify(mhdBundle).substring(0, 2000));
-            const response = await axios.post(url, mhdBundle, { headers: combinedHeaders });
-
-            responseData = response.data;
-        } catch (error: any) {
-            console.warn('[ClinicalDocumentService] CEZIH send failed:', error.message);
-            console.warn('[ClinicalDocumentService] Response status:', error.response?.status);
-            console.warn('[ClinicalDocumentService] Response data:', JSON.stringify(error.response?.data)?.substring(0, 500));
-            console.warn('[ClinicalDocumentService] Response headers:', JSON.stringify(error.response?.headers)?.substring(0, 500));
-            errorMessage = error.message;
-
-            const cezihDetail = error.response?.data?.issue?.[0]?.diagnostics
-                || error.response?.data?.issue?.[0]?.details?.text
-                || JSON.stringify(error.response?.data)
-                || error.message;
-
-            responseData = {
-                success: true,
-                localOnly: true,
-                cezihStatus: 'failed',
-                cezihError: error.response?.status
-                    ? `HTTP ${error.response.status}: ${cezihDetail}`
-                    : error.message,
-                documentOid,
-            };
-        } finally {
-            await auditService.log({
-                visitId: data.visitId,
-                patientMbo: data.patientMbo,
-                action: 'SEND_FINDING',
-                direction: 'OUTGOING_CEZIH',
-                status: errorMessage ? 'ERROR' : 'SUCCESS',
-                payload_req: mhdBundle,
-                payload_res: responseData,
-                error_msg: errorMessage
-            });
-        }
-
-        return responseData;
-    }
+    // submitToCezih OBRISANA — sada koristimo buildMhdBundle + submitMhdToGateway iz mhd-bundle.builder.ts
 
     /**
      * RAW MHD submission: takes a pre-built MHD bundle and sends it directly
@@ -775,7 +731,12 @@ class ClinicalDocumentService {
         const localPatient = (await patientService.searchByMbo(data.patientMbo, userToken))[0];
         if (!localPatient) throw new Error(`Pacijent nije pronađen (MBO: ${data.patientMbo})`);
 
-        // Step 1: Update Local DB
+        // Step 1: Dohvaćamo originalni dokument za nasljeđivanje visitId/caseId
+        const originalDoc = db.prepare('SELECT * FROM documents WHERE id = ?').get(originalDocumentOid) as any;
+        const finalVisitId = data.visitId || originalDoc?.visitId;
+        const finalCaseId = data.caseId || originalDoc?.caseId;
+
+        // Step 2: Update Local DB
         try {
             db.prepare('UPDATE documents SET status = ? WHERE id = ?').run('replaced', originalDocumentOid);
             const stmt = db.prepare(`
@@ -787,19 +748,19 @@ class ClinicalDocumentService {
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `);
             stmt.run(
-                newDocumentOid, data.patientMbo, data.visitId || null,
+                newDocumentOid, data.patientMbo, finalVisitId || null,
                 data.type, 'sent',
                 data.anamnesis || null, data.status || null,
                 data.finding || null, data.recommendation || null,
                 data.diagnosisCode || null, data.diagnosisDisplay || null,
                 data.content || null, new Date().toISOString(), new Date().toISOString(),
-                data.caseId || null // Dodan caseId koji je nedostajao u SQL-u
+                finalCaseId || null // ISPRAVLJENO: Sada nasljeđuje ID slučaja!
             );
         } catch (dbError) {
             console.error('[ClinicalDocumentService] DB Replace Error', dbError);
         }
 
-        // Step 2: PDQm lookup for Patient Logical ID (SAMO ZA MBO)
+        // Step 3: PDQm lookup for Patient Logical ID (SAMO ZA MBO)
         let patientCezihId = data.patientMbo;
         try {
             if (/^\d{9}$/.test(data.patientMbo)) {
@@ -810,23 +771,25 @@ class ClinicalDocumentService {
             }
         } catch (e: any) { /* ignore */ }
 
-        // Step 3: Get encounter/case IDs from local visit data
-        // NOVO: Dohvaćamo originalni dokument iz baze kako bismo "naslijedili" ID posjete i slučaja
-        const originalDoc = db.prepare('SELECT * FROM documents WHERE id = ?').get(originalDocumentOid) as any;
-        
-        // Ako u 'data' nismo dobili visitId/caseId, uzimamo ih iz starog dokumenta
-        const finalVisitId = data.visitId || originalDoc?.visitId;
-        const finalCaseId = data.caseId || originalDoc?.caseId;
+        // Step 4: Get encounter/case IDs from local visit data
 
         const visit = finalVisitId ? visitService.getVisit(finalVisitId) : null;
         
         // Postavljamo CEZIH identifikatore
-        const encCezihId = visit?.cezihVisitId || visit?.id || finalVisitId || '';
-        const condFhirId = visit?.caseId || finalCaseId || '';
+        const encCezihId = visit?.cezihVisitId || visit?.cezihId || visit?.id || finalVisitId || '';
+        
+        // Dohvaćamo pravi CEZIH case ID iz cases tablice
+        const caseRow = finalCaseId ? db.prepare('SELECT * FROM cases WHERE id = ?').get(finalCaseId) as any : null;
+        const condFhirId = caseRow?.cezihCaseId || caseRow?.id || finalCaseId || '';
+
+        // ISTI POPRAVAK KAO U cancelDocument: filtriramo lokalne UUID-ove
+        const isUuid = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+        const validEncCezihId = encCezihId && !isUuid(encCezihId) ? encCezihId : '';
+        const validCondFhirId = condFhirId && !isUuid(condFhirId) ? condFhirId : '';
 
         // Sigurnosni osigurač u konzoli da znamo ako nam i dalje fale ID-jevi
-        if (!encCezihId || !condFhirId) {
-             console.warn('[TC19 UPOZORENJE] encCezihId ili condFhirId su prazni! CEZIH će vjerojatno baciti grešku.');
+        if (!validEncCezihId || !validCondFhirId) {
+             console.warn('[TC19 UPOZORENJE] encCezihId ili condFhirId su prazni ili UUID! CEZIH će ih ignorirati.');
         }
 
         // Step 4: Build & submit using shared MHD builder (same as TC18 + relatesTo)
@@ -856,8 +819,8 @@ class ClinicalDocumentService {
                 practitionerName: { family: 'Prpic', given: ['Ivan'] },
                 orgId: process.env.ORG_ID || config.organization.hzzoCode,
                 orgDisplay: 'WBS privatna ordinacija',
-                encCezihId,
-                condFhirId,
+                encCezihId: validEncCezihId,
+                condFhirId: validCondFhirId,
                 diagnosisCode: data.diagnosisCode || 'Z00.0',
                 anamnesis: data.anamnesis || 'Ažurirani dokument',
                 replacesOid: originalDocumentOid,  // TC19: relatesTo
@@ -905,7 +868,7 @@ class ClinicalDocumentService {
         const { v4: uuidv4 } = require('uuid');
         const listUuid = uuidv4();
         const docRefUuid = uuidv4();
-        
+
         // Ovdje NE mijenjamo originalni OID, on mora biti OID onog dokumenta kojeg poništavamo
         const oidValue = documentOid.startsWith('urn:oid:') ? documentOid : `urn:oid:${documentOid}`;
 
@@ -923,21 +886,44 @@ class ClinicalDocumentService {
         const caseId = fullDoc?.caseId;
         const visitId = fullDoc?.visitId;
 
-        // OVO JE JEDINA STVAR KOJU SMO PROMIJENILI U ODNOSU NA VAŠ STARI KOD!
         const { patientService } = require('./patient.service');
         const patient = db.prepare('SELECT * FROM patients WHERE mbo = ? OR oib = ? OR cezihUniqueId = ?').get(patientMbo, patientMbo, patientMbo) as any;
         const patientIdentifierBlock = patientService.getPatientIdentifier(patient || { mbo: patientMbo });
         const patientDisplay = patient ? `${patient.lastName || ''} ${patient.firstName || ''}`.trim().toUpperCase() : '';
 
-        const visit = visitId ? db.prepare('SELECT * FROM visits WHERE id = ?').get(visitId) as any : null;
-        const caseRow = caseId ? db.prepare('SELECT * FROM cases WHERE id = ?').get(caseId) as any : null;
+        // Dohvaćamo encounter i case ID-jeve
+        let visit = visitId ? db.prepare('SELECT * FROM visits WHERE id = ?').get(visitId) as any : null;
+        // Fallback: visitId može biti CEZIH ID (cmmXXX) umjesto lokalnog UUID-a
+        if (!visit && visitId) {
+            visit = db.prepare('SELECT * FROM visits WHERE cezihVisitId = ?').get(visitId) as any;
+        }
+        let caseRow = caseId ? db.prepare('SELECT * FROM cases WHERE id = ?').get(caseId) as any : null;
+        // Fallback: caseId može biti CEZIH ID
+        if (!caseRow && caseId) {
+            caseRow = db.prepare('SELECT * FROM cases WHERE cezihCaseId = ?').get(caseId) as any;
+        }
+
+        // AUTO-OPORAVAK: Ako caseId fali (zbog prijašnjeg buga u TC19), dohvati zadnji aktivni slučaj pacijenta!
+        if (!caseRow && patientMbo) {
+            console.log('[ClinicalDocumentService] Nedostaje caseId, pokušavam auto-oporavak iz zadnjeg slučaja...');
+            caseRow = db.prepare('SELECT * FROM cases WHERE patientMbo = ? ORDER BY rowid DESC LIMIT 1').get(patientMbo) as any;
+        }
 
         const nowIso = new Date().toISOString();
         const docDate = fullDoc?.sentAt || fullDoc?.createdAt || nowIso;
+
         const encId = visit?.cezihId || visit?.cezihVisitId || visitId || '';
+        const condFhirId = caseRow?.cezihCaseId || caseRow?.id || caseId || '';
+
+        // KLJUČNI POPRAVAK ZA STORNO S KARTICOM/CERTILIOM:
+        // CEZIH Validator puca (Reference_REF_CantResolve) ako mu u Storno pošaljemo lokalne UUID-ove za posjetu ili slučaj!
+        // Uklanjamo ih iz payload-a ako nisu pravi CEZIH identifikatori (koji obično kreću s 'cmm' ili nemaju crtice).
+        const isUuid = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+        const validEncId = encId && !isUuid(encId) ? encId : undefined;
+        const validCondId = condFhirId && !isUuid(condFhirId) ? condFhirId : undefined;
+
         const encounterStart = visit?.startTime || docDate;
         const encounterEnd = visit?.endTime || docDate;
-        const condFhirId = caseRow?.id || caseRow?.cezihCaseId || caseId || '';
 
         const practHzjz = config.practitioner.hzjzId || config.practitioner.oib || '4981825';
         const pName = config.practitioner.name as any;
@@ -952,15 +938,17 @@ class ClinicalDocumentService {
         };
         const docTypeDisplay = DOC_TYPE_DISPLAY[docType] || docType;
 
-        // 3. Gradimo Bundle IDENTIČAN vašem starom kodu koji je radio jučer!
+        // 3. Gradimo Bundle (S filtriranim contextom)
         const cancelBundle: any = {
             resourceType: 'Bundle',
             type: 'transaction',
+            meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/HRMinimalProvideDocumentBundle'] },
             entry: [
                 {
                     fullUrl: `urn:uuid:${listUuid}`,
                     resource: {
                         resourceType: 'List',
+                        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-document-submissionset'] },
                         extension: [{
                             url: 'https://profiles.ihe.net/ITI/MHD/StructureDefinition/ihe-sourceId',
                             valueIdentifier: { system: 'urn:ietf:rfc:3986', value: `urn:uuid:${uuidv4()}` }
@@ -972,16 +960,10 @@ class ClinicalDocumentService {
                         status: 'current',
                         mode: 'working',
                         code: { coding: [{ system: 'https://profiles.ihe.net/ITI/MHD/CodeSystem/MHDlistTypes', code: 'submissionset' }] },
-                        subject: {
-                            type: 'Patient',
-                            identifier: patientIdentifierBlock
-                        },
+                        subject: { type: 'Patient', identifier: patientIdentifierBlock },
                         date: nowIso,
-                        source: {
-                            type: 'Practitioner',
-                            identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika', value: practHzjz }
-                        },
-                        entry: [{ item: { reference: `urn:uuid:${docRefUuid}` } }]
+                        source: { type: 'Practitioner', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika', value: practHzjz } },
+                        entry: [{ item: { type: 'DocumentReference', reference: `urn:uuid:${docRefUuid}` } }]
                     },
                     request: { method: 'POST', url: 'List' }
                 },
@@ -989,6 +971,7 @@ class ClinicalDocumentService {
                     fullUrl: `urn:uuid:${docRefUuid}`,
                     resource: {
                         resourceType: 'DocumentReference',
+                        meta: { profile: ['http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-document-reference'] },
                         masterIdentifier: { use: 'usual', system: 'urn:ietf:rfc:3986', value: oidValue },
                         identifier: [{ use: 'official', system: 'urn:ietf:rfc:3986', value: `urn:uuid:${docRefUuid}` }],
                         status: 'entered-in-error',
@@ -1003,20 +986,16 @@ class ClinicalDocumentService {
                             { type: 'Practitioner', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika', value: practHzjz }, display: practDisplay },
                             { type: 'Organization', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije', value: orgId }, display: orgDisplay }
                         ],
-                        authenticator: {
-                            type: 'Practitioner', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika', value: practHzjz }, display: practDisplay
-                        },
-                        custodian: {
-                            type: 'Organization', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije', value: orgId }, display: orgDisplay
-                        },
+                        authenticator: { type: 'Practitioner', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika', value: practHzjz }, display: practDisplay },
+                        custodian: { type: 'Organization', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije', value: orgId }, display: orgDisplay },
                         description: docTypeDisplay,
                         content: [{ attachment: { contentType: 'application/fhir+json', language: 'hr', url: `urn:uuid:${uuidv4()}` } }],
-                        ...(encId ? {
+                        ...(validEncId || validCondId ? {
                             context: {
-                                encounter: [{ type: 'Encounter', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-posjete', value: encId } }],
+                                ...(validEncId ? { encounter: [{ type: 'Encounter', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-posjete', value: validEncId } }] } : {}),
                                 period: { start: encounterStart, end: encounterEnd },
                                 practiceSetting: { coding: [{ system: 'http://fhir.cezih.hr/specifikacije/CodeSystem/djelatnosti-zz', code: '1010000', display: 'Opca/obiteljska medicina' }] },
-                                ...(condFhirId ? { related: [{ type: 'Condition', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja', value: condFhirId } }] } : {})
+                                ...(validCondId ? { related: [{ type: 'Condition', identifier: { system: 'http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja', value: validCondId } }] } : {})
                             }
                         } : {})
                     },
@@ -1029,34 +1008,17 @@ class ClinicalDocumentService {
         let errorMessage: string | undefined;
 
         try {
-            console.log('[ClinicalDocumentService] TC20: Slanje Storna preko submitMhdToGateway...');
-            
+            console.log(`[ClinicalDocumentService] TC20: Slanje Storna za original: ${oidValue}...`);
             const { submitMhdToGateway } = await import('./mhd-bundle.builder');
             const result = await submitMhdToGateway(cancelBundle);
-            
             responseData = result;
-            if (result.success) {
-                console.log('[ClinicalDocumentService] ✅ TC20 Cancel uspješno prihvaćen!');
-            } else {
-                errorMessage = result.error || result.data?.cezihError || 'CEZIH odbio storno';
-                console.warn(`[ClinicalDocumentService] TC20 Cancel greška: ${errorMessage}`);
-            }
+            if (result.success) console.log('[ClinicalDocumentService] ✅ TC20 Cancel USPJEŠAN!');
+            else errorMessage = result.error || result.data?.cezihError || 'CEZIH odbio storno';
         } catch (error: any) {
             errorMessage = error.message;
-            responseData = {
-                success: false, localOnly: true, cezihStatus: 'failed', cezihError: error.message,
-                id: documentOid, status: 'cancelled',
-            };
+            responseData = { success: false, localOnly: true, cezihStatus: 'failed', cezihError: error.message, id: documentOid, status: 'cancelled' };
         } finally {
-            auditService.log({
-                patientMbo,
-                action: 'CANCEL_DOCUMENT',
-                direction: 'OUTGOING_CEZIH',
-                status: errorMessage ? 'ERROR' : 'SUCCESS',
-                payload_req: cancelBundle,
-                payload_res: responseData,
-                error_msg: errorMessage,
-            });
+            auditService.log({ patientMbo, action: 'CANCEL_DOCUMENT', direction: 'OUTGOING_CEZIH', status: errorMessage ? 'ERROR' : 'SUCCESS', payload_req: cancelBundle, payload_res: responseData, error_msg: errorMessage });
         }
         return responseData;
     }
