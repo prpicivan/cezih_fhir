@@ -1154,6 +1154,17 @@ router.post('/visit/:id/close', async (req: Request, res: Response) => {
     }
 });
 
+// GET /api/visit/remote/:mbo - Dohvat posjeta s CEZIH-a
+router.get('/visit/remote/:mbo', async (req: Request, res: Response) => {
+    try {
+        const token = req.headers.authorization?.replace('Bearer ', '') || '';
+        const visits = await visitService.searchRemoteVisits(req.params.mbo as string, token);
+        res.json({ success: true, visits });
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // ============================================================
 // Settings Routes
 // ============================================================

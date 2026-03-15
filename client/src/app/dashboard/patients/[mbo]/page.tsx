@@ -46,6 +46,12 @@ export default function PatientChartPage() {
     const [visitsCollapsed, setVisitsCollapsed] = useState(true);
     const [visitActionInProgress, setVisitActionInProgress] = useState<string | null>(null);
 
+    // CEZIH visits tab
+    const [visitTab, setVisitTab] = useState<'local' | 'cezih'>('local');
+    const [cezihVisits, setCezihVisits] = useState<any[]>([]);
+    const [cezihVisitsLoading, setCezihVisitsLoading] = useState(false);
+    const [cezihVisitsLoaded, setCezihVisitsLoaded] = useState(false);
+
     // IDEN Modal state
     const [idenModal, setIdenModal] = useState<{ open: boolean; label: string; fn: (() => Promise<{ success: boolean; error?: string }>) | null }>({ open: false, label: '', fn: null });
     const openIden = (label: string, fn: () => Promise<{ success: boolean; error?: string }>) =>
@@ -213,6 +219,33 @@ export default function PatientChartPage() {
         setCaseTab(tab);
         if (tab === 'cezih' && !cezihCasesLoaded) {
             fetchCezihCases();
+        }
+    };
+
+    // Fetch visits from CEZIH
+    const fetchCezihVisits = async () => {
+        setCezihVisitsLoading(true);
+        try {
+            const res = await fetch(`/api/visit/remote/${mbo}`);
+            const data = await res.json();
+            if (data.success) {
+                setCezihVisits(data.visits || []);
+            } else {
+                showToast('error', data.error || 'Greška pri dohvatu posjeta s CEZIH-a.');
+            }
+        } catch (err) {
+            console.error('Failed to fetch CEZIH visits', err);
+            showToast('error', 'Greška u komunikaciji s poslužiteljem.');
+        } finally {
+            setCezihVisitsLoading(false);
+            setCezihVisitsLoaded(true);
+        }
+    };
+
+    const handleSwitchVisitTab = (tab: 'local' | 'cezih') => {
+        setVisitTab(tab);
+        if (tab === 'cezih' && !cezihVisitsLoaded) {
+            fetchCezihVisits();
         }
     };
 
@@ -1082,126 +1115,190 @@ export default function PatientChartPage() {
                         </div>
 
                         {!visitsCollapsed && (
-                            <div className="p-3 space-y-2">
-                                {allVisits.length > 0 ? (
-                                    allVisits.map((v: any) => {
-                                        const isActive = v.status === 'in-progress' || v.status === 'arrived';
-                                        const isFinished = v.status === 'finished';
-                                        const isPlanned = v.status === 'planned';
-                                        const isCancelled = v.status === 'cancelled';
+                            <>
+                                {/* TABOVI: Lokalni / CEZIH */}
+                                <div className="flex border-b border-slate-100">
+                                    <button
+                                        onClick={() => handleSwitchVisitTab('local')}
+                                        className={`flex-1 py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 border-b-2 transition-all ${visitTab === 'local'
+                                            ? 'text-violet-700 border-violet-600 bg-violet-50/50'
+                                            : 'text-slate-400 border-transparent hover:text-slate-600 hover:bg-slate-50'
+                                            }`}
+                                    >
+                                        <FolderOpen className="w-3.5 h-3.5" />
+                                        Lokalni
+                                        <span className={`text-[10px] font-black px-1.5 py-0 rounded-full ${visitTab === 'local' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-500'
+                                            }`}>
+                                            {allVisits?.length || 0}
+                                        </span>
+                                    </button>
+                                    <button
+                                        onClick={() => handleSwitchVisitTab('cezih')}
+                                        className={`flex-1 py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 border-b-2 transition-all ${visitTab === 'cezih'
+                                            ? 'text-violet-700 border-violet-600 bg-violet-50/50'
+                                            : 'text-slate-400 border-transparent hover:text-slate-600 hover:bg-slate-50'
+                                            }`}
+                                    >
+                                        <Globe className="w-3.5 h-3.5" />
+                                        CEZIH
+                                        <span className={`text-[10px] font-black px-1.5 py-0 rounded-full ${visitTab === 'cezih' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-500'
+                                            }`}>
+                                            {cezihVisitsLoaded ? cezihVisits.length : '—'}
+                                        </span>
+                                    </button>
+                                </div>
 
-                                        let statusLabel = v.status;
-                                        let statusBadgeClass = 'bg-slate-300 text-white';
-                                        if (isActive) { statusLabel = 'u tijeku'; statusBadgeClass = 'bg-emerald-500 text-white'; }
-                                        else if (isFinished) { statusLabel = 'završen'; statusBadgeClass = 'bg-slate-300 text-white'; }
-                                        else if (isPlanned) { statusLabel = 'planirano'; statusBadgeClass = 'bg-blue-500 text-white'; }
-                                        else if (isCancelled) { statusLabel = 'otkazan'; statusBadgeClass = 'bg-rose-400 text-white'; }
+                                {/* CEZIH toolbar */}
+                                {visitTab === 'cezih' && (
+                                    <div className="flex items-center justify-between px-3 py-2 bg-violet-50 border-b border-violet-100">
+                                        <span className="text-[10px] font-semibold text-violet-600">Posjete s nacionalnog sustava (QEDm)</span>
+                                        <button
+                                            onClick={fetchCezihVisits}
+                                            disabled={cezihVisitsLoading}
+                                            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-white border border-violet-200 text-violet-600 hover:bg-violet-100 transition-all disabled:opacity-50"
+                                        >
+                                            <RefreshCw className={`w-3 h-3 ${cezihVisitsLoading ? 'animate-spin' : ''}`} />
+                                            Osvježi
+                                        </button>
+                                    </div>
+                                )}
 
-                                        const cardBorder = isActive
-                                            ? 'border-emerald-100 bg-emerald-50/30 hover:border-emerald-300'
-                                            : isPlanned
-                                                ? 'border-blue-100 bg-blue-50/20 hover:border-blue-300'
-                                                : isCancelled
-                                                    ? 'border-rose-100 bg-rose-50/20'
-                                                    : 'border-slate-100 bg-slate-50/30 hover:border-slate-200';
+                                <div className="p-3 space-y-2">
+                                    {visitTab === 'local' ? (
+                                        /* ── LOKALNE POSJETE ── */
+                                        allVisits.length > 0 ? (
+                                            allVisits.map((v: any) => {
+                                                const isActive = v.status === 'in-progress' || v.status === 'arrived';
+                                                const isFinished = v.status === 'finished';
+                                                const isPlanned = v.status === 'planned';
+                                                const isCancelled = v.status === 'cancelled';
 
-                                        return (
-                                            <div
-                                                key={v.id}
-                                                className={`p-4 rounded-2xl border transition-all ${cardBorder} ${isFinished || isCancelled ? 'opacity-75' : ''}`}
-                                            >
-                                                <div className="flex justify-between items-start gap-2">
-                                                    <div className="min-w-0">
-                                                        <div className="flex items-center gap-2 mb-1">
-                                                            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${statusBadgeClass}`}>
-                                                                {statusLabel}
-                                                            </span>
-                                                            <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">
-                                                                {v.type || 'AMB'}
-                                                            </span>
+                                                let statusLabel = v.status;
+                                                let statusBadgeClass = 'bg-slate-300 text-white';
+                                                if (isActive) { statusLabel = 'u tijeku'; statusBadgeClass = 'bg-emerald-500 text-white'; }
+                                                else if (isFinished) { statusLabel = 'završen'; statusBadgeClass = 'bg-slate-300 text-white'; }
+                                                else if (isPlanned) { statusLabel = 'planirano'; statusBadgeClass = 'bg-blue-500 text-white'; }
+                                                else if (isCancelled) { statusLabel = 'otkazan'; statusBadgeClass = 'bg-rose-400 text-white'; }
+
+                                                const cardBorder = isActive
+                                                    ? 'border-emerald-100 bg-emerald-50/30 hover:border-emerald-300'
+                                                    : isPlanned
+                                                        ? 'border-blue-100 bg-blue-50/20 hover:border-blue-300'
+                                                        : isCancelled
+                                                            ? 'border-rose-100 bg-rose-50/20'
+                                                            : 'border-slate-100 bg-slate-50/30 hover:border-slate-200';
+
+                                                return (
+                                                    <div key={v.id} className={`p-4 rounded-2xl border transition-all ${cardBorder} ${isFinished || isCancelled ? 'opacity-75' : ''}`}>
+                                                        <div className="flex justify-between items-start gap-2">
+                                                            <div className="min-w-0">
+                                                                <div className="flex items-center gap-2 mb-1">
+                                                                    <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${statusBadgeClass}`}>
+                                                                        {statusLabel}
+                                                                    </span>
+                                                                    <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">
+                                                                        {v.type || 'AMB'}
+                                                                    </span>
+                                                                </div>
+                                                                <p className={`font-bold text-sm tracking-tight ${isActive ? 'text-slate-900' : 'text-slate-500'}`}>
+                                                                    {v.startDateTime ? new Date(v.startDateTime).toLocaleDateString('hr-HR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'}
+                                                                    {v.startDateTime && ` — ${new Date(v.startDateTime).toLocaleTimeString('hr-HR', { hour: '2-digit', minute: '2-digit' })}`}
+                                                                </p>
+                                                                <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">
+                                                                    {v.doctorName || 'Dr. Ivan Prpić'}
+                                                                </p>
+                                                            </div>
+                                                            {isActive && (
+                                                                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse flex-shrink-0 mt-2"></div>
+                                                            )}
                                                         </div>
-                                                        <p className={`font-bold text-sm tracking-tight ${isActive ? 'text-slate-900' : 'text-slate-500'}`}>
-                                                            {v.startDateTime ? new Date(v.startDateTime).toLocaleDateString('hr-HR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'}
-                                                            {v.startDateTime && ` — ${new Date(v.startDateTime).toLocaleTimeString('hr-HR', { hour: '2-digit', minute: '2-digit' })}`}
-                                                        </p>
-                                                        <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">
-                                                            {v.doctorName || 'Dr. Ivan Prpić'}
-                                                        </p>
-                                                        {v.reasonCode && (
-                                                            <div className="flex items-center gap-1.5 mt-1">
-                                                                <span className="text-[10px] font-black font-mono text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-100">
-                                                                    {v.reasonCode}
-                                                                </span>
-                                                                {v.reasonDisplay && (
-                                                                    <span className="text-[10px] text-slate-500">{v.reasonDisplay}</span>
-                                                                )}
+                                                        {isActive && (
+                                                            <div className="mt-3 flex gap-2 justify-center">
+                                                                <button
+                                                                    onClick={() => {
+                                                                        if (!confirm('Zatvori posjet? Ova akcija šalje TC14 na CEZIH.')) return;
+                                                                        openIden('Zatvaranje posjete (TC 14)', async () => {
+                                                                            setVisitActionInProgress(v.id);
+                                                                            try {
+                                                                                const r = await fetch(`/api/visit/${v.id}/close`, {
+                                                                                    method: 'POST',
+                                                                                    headers: { 'Content-Type': 'application/json' },
+                                                                                    body: JSON.stringify({ endDate: new Date().toISOString(), patientMbo: mbo }),
+                                                                                });
+                                                                                const d = await r.json();
+                                                                                if (d.success) { fetchChartData(); return { success: true }; }
+                                                                                return { success: false, error: d.error };
+                                                                            } finally { setVisitActionInProgress(null); }
+                                                                        });
+                                                                    }}
+                                                                    disabled={visitActionInProgress === v.id}
+                                                                    className="py-1.5 px-6 bg-white border border-rose-200 rounded-lg text-xs font-black text-rose-500 hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all disabled:opacity-50"
+                                                                >
+                                                                    Zatvori
+                                                                </button>
                                                             </div>
                                                         )}
                                                     </div>
-                                                    {isActive && (
-                                                        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse flex-shrink-0 mt-2"></div>
-                                                    )}
-                                                </div>
-
-                                                {/* Action buttons for active visits */}
-                                                {isActive && (
-                                                    <div className="mt-3 flex gap-2 justify-center">
-                                                        <button
-                                                            onClick={() => {
-                                                                if (!confirm('Zatvori posjet? Ova akcija šalje TC14 na CEZIH.')) return;
-                                                                openIden('Zatvaranje posjete (TC 14)', async () => {
-                                                                    setVisitActionInProgress(v.id);
-                                                                    try {
-                                                                        const r = await fetch(`/api/visit/${v.id}/close`, {
-                                                                            method: 'POST',
-                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                            body: JSON.stringify({ endDate: new Date().toISOString(), patientMbo: mbo }),
-                                                                        });
-                                                                        const d = await r.json();
-                                                                        if (d.success) { fetchChartData(); return { success: true }; }
-                                                                        return { success: false, error: d.error };
-                                                                    } finally { setVisitActionInProgress(null); }
-                                                                });
-                                                            }}
-                                                            disabled={visitActionInProgress === v.id}
-                                                            className="py-1.5 px-6 bg-white border border-rose-200 rounded-lg text-xs font-black text-rose-500 hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all disabled:opacity-50"
-                                                        >
-                                                            Zatvori
-                                                        </button>
-                                                    </div>
-                                                )}
-
-                                                {/* Cancel button for planned visits */}
-                                                {isPlanned && (
-                                                    <div className="mt-3 flex gap-2">
-                                                        <button
-                                                            onClick={() => {
-                                                                if (!confirm('Otkaži planirani posjet?')) return;
-                                                                setVisitActionInProgress(v.id);
-                                                                fetch(`/api/visit/${v.id}/cancel`, {
-                                                                    method: 'POST',
-                                                                    headers: { 'Content-Type': 'application/json' },
-                                                                    body: JSON.stringify({ patientMbo: mbo }),
-                                                                })
-                                                                    .then(r => r.json())
-                                                                    .then(d => { if (d.success) { showToast('success', 'Posjet otkazan.'); fetchChartData(); } else showToast('error', d.error || 'Greška'); })
-                                                                    .catch(() => showToast('error', 'Greška komunikacije'))
-                                                                    .finally(() => setVisitActionInProgress(null));
-                                                            }}
-                                                            disabled={visitActionInProgress === v.id}
-                                                            className="flex-1 py-1.5 bg-white border border-rose-200 rounded-lg text-xs font-black text-rose-500 hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-all disabled:opacity-50"
-                                                        >
-                                                            ❌ Otkaži termin
-                                                        </button>
-                                                    </div>
-                                                )}
+                                                );
+                                            })
+                                        ) : (
+                                            <p className="text-center py-4 text-xs text-slate-400 italic">Nema zabilježenih posjeta.</p>
+                                        )
+                                    ) : (
+                                        /* ── CEZIH POSJETE ── */
+                                        cezihVisitsLoading ? (
+                                            <div className="flex items-center justify-center py-6 gap-2">
+                                                <div className="animate-spin rounded-full h-4 w-4 border-2 border-violet-500 border-t-transparent"></div>
+                                                <span className="text-xs text-slate-400">Dohvaćam s CEZIH-a...</span>
                                             </div>
-                                        );
-                                    })
-                                ) : (
-                                    <p className="text-center py-4 text-xs text-slate-400 italic">Nema zabilježenih posjeta.</p>
-                                )}
-                            </div>
+                                        ) : cezihVisits.length > 0 ? (
+                                            cezihVisits.map((cv: any) => {
+                                                const isActive = cv.status === 'in-progress' || cv.status === 'arrived';
+                                                const isFinished = cv.status === 'finished';
+                                                
+                                                let statusLabel = cv.status;
+                                                let statusBadgeClass = 'bg-slate-300 text-white';
+                                                if (isActive) { statusLabel = 'aktivan'; statusBadgeClass = 'bg-emerald-500 text-white'; }
+                                                else if (isFinished) { statusLabel = 'završen'; statusBadgeClass = 'bg-slate-300 text-white'; }
+                                                
+                                                const cardBorder = isActive 
+                                                    ? 'border-emerald-100 bg-emerald-50/30' 
+                                                    : 'border-slate-100 bg-slate-50/30';
+
+                                                return (
+                                                    <div key={cv.id} className={`p-4 rounded-2xl border transition-all ${cardBorder} ${isFinished ? 'opacity-75' : ''}`}>
+                                                        <div className="flex justify-between items-start gap-2">
+                                                            <div className="min-w-0">
+                                                                <div className="flex items-center gap-2 mb-1">
+                                                                    <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${statusBadgeClass}`}>
+                                                                        {statusLabel}
+                                                                    </span>
+                                                                    <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">
+                                                                        {cv.class || 'AMB'}
+                                                                    </span>
+                                                                    <div className="w-2 h-2 bg-blue-400 rounded-full flex-shrink-0 ml-1" title="CEZIH izvor"></div>
+                                                                </div>
+                                                                <p className={`font-bold text-sm tracking-tight ${isActive ? 'text-slate-900' : 'text-slate-500'}`}>
+                                                                    {cv.startTime ? new Date(cv.startTime).toLocaleDateString('hr-HR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : 'Nepoznat datum'}
+                                                                    {cv.startTime && ` — ${new Date(cv.startTime).toLocaleTimeString('hr-HR', { hour: '2-digit', minute: '2-digit' })}`}
+                                                                </p>
+                                                                <div className="text-[10px] font-bold text-slate-400 mt-1">
+                                                                    CEZIH ID: <span className="font-mono">{cv.cezihVisitId || cv.id}</span>
+                                                                </div>
+                                                            </div>
+                                                            {isActive && (
+                                                                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse flex-shrink-0 mt-2"></div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })
+                                        ) : (
+                                            <p className="text-center py-4 text-xs text-slate-400 italic">Nema aktivnih posjeta na CEZIH-u.</p>
+                                        )
+                                    )}
+                                </div>
+                            </>
                         )}
                     </section>
                 </aside>

@@ -227,6 +227,9 @@ function ClinicalWorkspace() {
     const [cezihVisitId, setCezihVisitId] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
 
+    // Remote CEZIH visits
+    const [patientVisits, setPatientVisits] = useState<any[]>([]);
+
     // Structured Findings State
     const [anamnesis, setAnamnesis] = useState('');
     const [physicalStatus, setPhysicalStatus] = useState('');
@@ -391,6 +394,25 @@ function ClinicalWorkspace() {
     };
 
     const addLog = (msg: string) => { }; // Legacy no-op, we use database-backed Audit Logs
+
+    // Fetch remote visits from CEZIH
+    const fetchRemoteVisits = async () => {
+        if (!effectiveMbo) return;
+        try {
+            showToast('info', 'Dohva\u0107am posjete s CEZIH-a...');
+            const res = await fetch(`/api/visit/remote/${effectiveMbo}`);
+            const data = await res.json();
+            if (data.success) {
+                setPatientVisits(data.visits);
+                showToast('success', `Dohva\u0107eno ${data.visits.length} posjeta.`);
+            } else {
+                showToast('error', data.error || 'Gre\u0161ka pri dohvatu posjeta.');
+            }
+        } catch (err) {
+            console.error(err);
+            showToast('error', 'Gre\u0161ka u komunikaciji sa serverom.');
+        }
+    };
 
     // TC 12: Create Visit — opens IDEN modal
     const startVisit = async () => {
@@ -1082,10 +1104,36 @@ function ClinicalWorkspace() {
                                 <Activity className="w-4 h-4 text-blue-600" />
                                 Životni ciklus posjeta
                             </div>
+                            <button
+                                onClick={fetchRemoteVisits}
+                                disabled={!effectiveMbo}
+                                className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                                <ArrowDownLeft className="w-3 h-3" />
+                                Dohvati posjete s CEZIH-a
+                            </button>
                             <span className="text-[10px] text-slate-400 font-mono">#{visitId?.substring(0, 8) || '---'}</span>
                         </div>
 
                         <div className="p-6">
+                            {/* Remote CEZIH Visits */}
+                            {patientVisits.length > 0 && (
+                                <div className="mb-4 p-3 bg-indigo-50 border border-indigo-100 rounded-lg">
+                                    <p className="text-xs font-bold text-indigo-700 mb-2">Posjete s CEZIH-a ({patientVisits.length})</p>
+                                    <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                                        {patientVisits.map((v: any, i: number) => (
+                                            <div key={i} className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-md border border-indigo-100 text-[11px]">
+                                                <div className="flex items-center gap-2">
+                                                    <span className={`inline-block w-1.5 h-1.5 rounded-full ${v.status === 'in-progress' ? 'bg-emerald-500' : v.status === 'finished' ? 'bg-slate-400' : 'bg-amber-400'}`} />
+                                                    <span className="font-medium text-slate-700">{v.classDisplay || v.class}</span>
+                                                    <span className="text-slate-400">{v.startTime ? new Date(v.startTime).toLocaleDateString('hr') : '—'}</span>
+                                                </div>
+                                                <span className="text-[9px] font-mono text-indigo-400">{v.cezihVisitId?.substring(0, 12)}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                             <div className="space-y-8 relative">
                                 {/* Vertical Line Connection */}
                                 <div className="absolute left-[15px] top-2 bottom-2 w-0.5 bg-slate-100" />

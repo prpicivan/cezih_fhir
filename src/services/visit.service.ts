@@ -628,6 +628,76 @@ class VisitService {
         }
         return finalResponse;
     }
+
+    // ============================================================
+    // Search Remote Visits from CEZIH (FHIR Search)
+    // ============================================================
+
+    /**
+     * Dohvaća posjete (Encounter) s CEZIH-a za određenog pacijenta.
+     */
+    async searchRemoteVisits(patientMbo: string, userToken: string): Promise<any[]> {
+        console.log(`[VisitService] Dohvaćam posjete s CEZIH-a za MBO: ${patientMbo}`);
+        
+        try {
+            // Use gateway session auth (same as sendMessage)
+            let headers: Record<string, string>;
+            if (authService.hasGatewaySession()) {
+                const gatewayHeaders = authService.getGatewayAuthHeaders();
+                headers = {
+                    ...(gatewayHeaders.Cookie ? { Cookie: gatewayHeaders.Cookie } : {}),
+                    'Accept': 'application/fhir+json',
+                };
+            } else {
+                headers = {
+                    ...authService.getUserAuthHeaders(userToken),
+                    'Accept': 'application/fhir+json',
+                };
+            }
+            
+            // Build search URL — QEDm servis (IHE QEDm) za pretragu Encountera
+            const servicePath = config.cezih.services.qedm;
+            const baseUrl = `${config.cezih.gatewayBase}${servicePath}/Encounter`;
+            
+            // FHIR Search upit po MBO-u, sortirano od najnovijeg
+            const mboSystem = 'http://fhir.cezih.hr/specifikacije/identifikatori/MBO';
+            const url = `${baseUrl}?patient.identifier=${encodeURIComponent(`${mboSystem}|${patientMbo}`)}&_sort=-date`;
+
+            console.log(`[VisitService] Search URL: ${url}`);
+            const response = await axios.get(url, { headers });
+            const bundle = response.data;
+
+            // Ako nam CEZIH vrati Bundle, mapiramo ga u čistiji format za frontend
+            if (bundle.resourceType === 'Bundle' && bundle.entry) {
+                const visits = bundle.entry.map((e: any) => {
+                    const resource = e.resource;
+                    return {
+                        id: resource.id,
+                        cezihVisitId: resource.identifier?.find((i: any) => i.system?.includes('identifikator-posjete'))?.value || resource.id,
+                        status: resource.status,
+                        class: resource.class?.code || resource.class?.coding?.[0]?.code,
+                        classDisplay: resource.class?.display || resource.class?.coding?.[0]?.display,
+                        startTime: resource.period?.start,
+                        endTime: resource.period?.end,
+                        practitionerId: resource.participant?.[0]?.individual?.identifier?.value,
+                        isRemote: true,
+                    };
+                });
+                
+                console.log(`[VisitService] ✅ Pronađeno ${visits.length} posjeta.`);
+                return visits;
+            }
+            
+            console.log(`[VisitService] ✅ Odgovor bez entry-a, bundle:`, JSON.stringify(bundle).slice(0, 500));
+            return [];
+        } catch (error: any) {
+            const status = error.response?.status;
+            const body = error.response?.data;
+            console.error(`[VisitService] ❌ Greška pri dohvatu posjeta: HTTP ${status || '?'}: ${error.message}`);
+            if (body) console.error('[VisitService] Response body:', JSON.stringify(body)?.slice(0, 1000));
+            throw new Error(body?.issue?.[0]?.diagnostics || error.message);
+        }
+    }
 }
 
 export const visitService = new VisitService();
