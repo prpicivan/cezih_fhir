@@ -1355,28 +1355,7 @@ router.put('/document/:oid/bundle', async (req: Request, res: Response) => {
     }
 });
 
-// Smart card signing: sign using PKCS#11 (local smart card) instead of Certilia remote
-router.post('/document/smartcard-sign', async (req: Request, res: Response) => {
-    try {
-        const userToken = req.headers.authorization?.replace('Bearer ', '') || '';
-        const { transactionCode, documentOid } = req.body;
 
-        if (!transactionCode || !documentOid) {
-            return res.status(400).json({ error: 'Missing transactionCode or documentOid' });
-        }
-
-        console.log(`[SmartCard Sign] Starting PKCS#11 signing for doc=${documentOid}, txn=${transactionCode}`);
-
-        // Use the existing clinical document service to complete with local PKCS#11 signing
-        // The signatureService will use the 'pkcs11' or 'bridge' mode depending on config
-        const result = await clinicalDocumentService.completeSmartCardSigning(documentOid, transactionCode, userToken);
-
-        res.json({ success: true, result });
-    } catch (error: any) {
-        console.error('[SmartCard Sign] Error:', error.message);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
 
 // Sign-only: sign bundle locally and return Base64 WITHOUT submitting to CEZIH
 // Used for TC18 to get a signed B64 for a custom outer MHD wrapper

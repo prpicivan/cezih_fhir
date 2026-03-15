@@ -405,8 +405,8 @@ class Pkcs11Service {
      * We use an ATOMIC SWAP: logout Iden → sign with Sign → restore Iden.
      */
     signWithSignToken(signingInput: string, finalAlg: string, pin?: string): Buffer {
-        // For CKU=1 login on Sign slot, use the env SIGN_PIN (not user-provided pin)
-        const cku1Pin = this.signPinSaved;
+        // For CKU=1 login on Sign slot, use user-provided PIN or fall back to env SIGN_PIN
+        const cku1Pin = pin || this.signPinSaved;
         // For CKU=2 (context-specific), use user-provided PIN or fall back to saved
         const cku2Pin = pin || this.signPinSaved;
         if (!this.signSlotSaved || !cku1Pin || !this.pkcs11Module) {
