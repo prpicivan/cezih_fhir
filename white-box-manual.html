@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>White Box | Interni Priručnik za Održavanje</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0f172a; color: #cbd5e1; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+        .sidebar { width: 280px; position: fixed; height: 100vh; overflow-y: auto; border-right: 1px solid #1e293b; background: #0b1120; padding: 24px; }
+        .content { margin-left: 280px; padding: 48px; max-width: 1200px; }
+        
+        .nav-link { display: block; padding: 8px 12px; color: #94a3b8; text-decoration: none; border-radius: 6px; font-size: 13px; font-weight: 500; transition: all 0.2s; }
+        .nav-link:hover, .nav-link.active { background-color: #1e293b; color: #38bdf8; }
+        .nav-header { font-size: 11px; font-weight: 800; color: #475569; text-transform: uppercase; letter-spacing: 1px; margin: 24px 0 8px 12px; }
+
+        h1 { color: #f8fafc; font-size: 2.25rem; font-weight: 900; margin-bottom: 1rem; }
+        h2 { color: #f1f5f9; font-size: 1.5rem; font-weight: 800; margin-top: 2.5rem; margin-bottom: 1rem; border-bottom: 1px solid #1e293b; padding-bottom: 0.5rem; }
+        h3 { color: #e2e8f0; font-size: 1.1rem; font-weight: 700; margin-top: 1.5rem; margin-bottom: 0.75rem; }
+        p { margin-bottom: 1rem; line-height: 1.7; }
+        ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1rem; space-y: 0.5rem; }
+        li { margin-bottom: 0.5rem; }
+
+        .alert-box { padding: 16px; border-radius: 8px; margin: 24px 0; border-left: 4px solid; }
+        .alert-danger { background: rgba(225, 29, 72, 0.1); border-color: #e11d48; color: #fda4af; }
+        .alert-warning { background: rgba(217, 119, 6, 0.1); border-color: #d97706; color: #fcd34d; }
+        .alert-info { background: rgba(56, 189, 248, 0.1); border-color: #38bdf8; color: #bae6fd; }
+
+        .code-inline { background: #1e293b; color: #38bdf8; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.85em; }
+        pre { background: #020617; padding: 16px; border-radius: 8px; border: 1px solid #1e293b; overflow-x: auto; color: #a5b4fc; font-family: monospace; font-size: 13px; margin-bottom: 1rem; }
+
+        .flow-box { display: flex; align-items: center; gap: 12px; background: #1e293b; padding: 12px 16px; border-radius: 8px; margin-bottom: 8px; font-weight: bold; border: 1px solid #334155; }
+        .flow-arrow { color: #64748b; font-weight: bold; margin: 0 12px; }
+        .badge-tc { background: #38bdf8; color: #0f172a; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-black; letter-spacing: 0.5px; }
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <div class="flex items-center gap-3 mb-8">
+        <div class="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-900 font-bold text-xl">W</div>
+        <span class="font-black text-lg text-white tracking-tight">White Box</span>
+    </div>
+
+    <div class="nav-header">Arhitektura</div>
+    <a href="#overview" class="nav-link">Pregled sustava</a>
+    
+    <div class="nav-header text-sky-400">Poslovna Logika (CORE)</div>
+    <a href="#logic-state" class="nav-link font-bold text-sky-300">CEZIH State Machine</a>
+    <a href="#logic-flow" class="nav-link">Sveti redoslijed (TC flow)</a>
+    <a href="#logic-storno" class="nav-link text-rose-400">Zamke: Storno i Replace</a>
+
+    <div class="nav-header">FHIR Magija</div>
+    <a href="#fhir-bundle" class="nav-link">MHD Builder</a>
+    <a href="#fhir-oids" class="nav-link">Upravljanje OID-ovima</a>
+
+    <div class="nav-header">Kriptografija</div>
+    <a href="#crypto-pkcs" class="nav-link">PKCS#11 / Pametne kartice</a>
+    <a href="#crypto-certilia" class="nav-link">Certilia integracija</a>
+
+    <div class="nav-header">Troubleshooting</div>
+    <a href="#ts-logs" class="nav-link">Audit i Crash logovi</a>
+    <a href="#ts-errors" class="nav-link">Dešifriranje FHIR grešaka</a>
+</div>
+
+<div class="content">
+
+    <div id="overview">
+        <h1 class="flex items-center gap-4">
+            <span>White Box Priručnik</span>
+            <span class="bg-rose-500/20 text-rose-400 text-sm font-black px-3 py-1 rounded-full border border-rose-500/30 uppercase tracking-widest">Samo za Maintainere</span>
+        </h1>
+        <p class="text-xl text-slate-400 mb-8">Ovaj dokument opisuje internu mehaniku CEZIH FHIR Bridge middlewarea. Ako G9 developerima ovaj sustav predstavlja "crnu kutiju" koja magično rješava CEZIH, ovaj priručnik je rendgenska slika te kutije.</p>
+        
+        <h2>Arhitektura na prvi pogled</h2>
+        <p>Sustav je Node.js/Express aplikacija koja djeluje kao lokalni proxy (prevoditelj). Zašto ne samo običan proxy? Jer CEZIH komunikacija zahtijeva <strong>održavanje stanja (State)</strong>, generiranje OID-ova koji moraju biti sekvencijalni, i asinkrono čekanje na vanjske aktere (poput pacijenta koji stišće "Odobri" na mobitelu).</p>
+        <ul>
+            <li><strong>Lokalna SQLite baza:</strong> Koristi se za pamćenje otvorenih posjeta, dodjeljivanje ispravnih `cmm...` identifikatora, pamćenje zadnjeg korištenog OID-a i sistemski Audit.</li>
+            <li><strong>Asinkroni procesi:</strong> Certilia potpis (TC18) može potrajati i do 2 minute. Middleware zaprima zahtjev, pokreće polling (`remote-sign.service.ts`) i oslobađa G9 klijenta čekanja.</li>
+        </ul>
+    </div>
+
+    <div id="logic-state" class="mt-16">
+        <h1 class="text-sky-400">Poslovna logika CEZIH-a</h1>
+        <p class="text-lg">Ovo je najvažniji dio priručnika. CEZIH nije običan REST API gdje samo "pošaljete PDF". CEZIH je <strong>State Machine (Stroj stanja)</strong> s drakonskim pravilima validacije.</p>
+
+        <div class="alert-info">
+            <strong>Mentalni model:</strong> Na CEZIH-u ne možete poslati dokument ako pacijent u tom trenutku ne "sjedi u ordinaciji", i ako se taj pregled ne vodi pod nekim "Slučajem" (bolešću).
+        </div>
+
+        <h3 id="logic-flow">Sveti redoslijed (TC Flow)</h3>
+        <p>Da bi jedan običan medicinski nalaz uspješno prošao kroz CEZIH Gateway, middleware mora izvršiti sljedeći slijed akcija. Ako preskočite jedan korak, CEZIH će baciti opskurnu grešku poput `CantResolve Reference`.</p>
+
+        <div class="flex flex-col gap-2 my-6">
+            <div class="flow-box">
+                <span class="badge-tc">TC 12</span> <strong>Otvaranje posjete (Encounter)</strong>
+                <span class="text-sm font-normal text-slate-400 ml-auto">"Pacijent je ušao u ordinaciju"</span>
+            </div>
+            <div class="text-center text-slate-600 font-bold">↓ (Sustav pamti cmm... identifikator)</div>
+            
+            <div class="flow-box border-amber-900/50 bg-amber-950/20">
+                <span class="badge-tc bg-amber-500">TC 16</span> <strong class="text-amber-100">Kreiranje slučaja (Condition)</strong>
+                <span class="text-sm font-normal text-amber-500/70 ml-auto">"Liječimo ga od Dijagnoze Z00.0"</span>
+            </div>
+            <div class="text-center text-slate-600 font-bold">↓ (Sustav veže Slučaj na Posjetu)</div>
+            
+            <div class="flow-box border-emerald-900/50 bg-emerald-950/20">
+                <span class="badge-tc bg-emerald-500">TC 18</span> <strong class="text-emerald-100">Slanje Nalaza (DocumentReference)</strong>
+                <span class="text-sm font-normal text-emerald-500/70 ml-auto">Potpisani Bundle s uključenim ID-jevima TC12 i TC16</span>
+            </div>
+        </div>
+
+        <p>G9 developer ovog redoslijeda nije svjestan. On šalje samo jedan JSON na naš <code>/send-full</code>, a naša klasa <code>clinical-document.service.ts</code> u pozadini orkestrira TC16, čeka 5 sekundi (zbog CEZIH indeksiranja), te zatim šalje TC18.</p>
+    </div>
+
+    <div id="logic-storno">
+        <h2 class="text-rose-400">Najveće zamke: Storno (TC 20) i Replace (TC 19)</h2>
+        <p>Ovo je dio na kojem najčešće pada CEZIH validacija. Pažljivo čitajte!</p>
+
+        <div class="alert-danger">
+            <strong>BUG: "Unable to resolve resource with reference Condition..." kod Storna</strong><br><br>
+            <strong>Problem:</strong> CEZIH očekuje da u Storno paketu (TC20) u bloku <code>context.related</code> pošaljete ID slučaja. ALI, ako pošaljete lokalni UUID (koji ste generirali za vrijeme rada), CEZIH će srušiti cijeli paket jer taj UUID ne postoji u njegovoj bazi!<br><br>
+            <strong>Rješenje u kodu:</strong> Pogledajte <code>cancelDocument</code> metodu. Ugrađen je RegEx koji detektira je li ID u obliku UUID-a. Ako jest, mi taj podatak <strong>nasilno brišemo</strong> iz JSON-a prije slanja Storna. CEZIH će prihvatiti Storno i bez njega. Šaljemo samo ako imamo pravi <code>cmm...</code> identifikator.
+        </div>
+
+        <div class="alert-warning">
+            <strong>BUG: Gubitak konteksta kod Zamjene (TC 19)</strong><br><br>
+            <strong>Problem:</strong> Kada liječnik mijenja dokument (TC 19 Replace), novi dokument mora "naslijediti" <code>visitId</code> i <code>caseId</code> od starog dokumenta. Ako prilikom upisa u lokalnu bazu zaboravite prepisati <code>caseId</code> sa starog na novi, kasniji pokušaj storna tog novog dokumenta će pasti jer nema vezani Slučaj.<br><br>
+            <strong>Rješenje u kodu:</strong> Funkcija <code>replaceDocument</code> automatski izvlači <code>finalCaseId</code> iz baze starog dokumenta i injectira ga u novi. Ako slučajno i tamo fali, ugrađen je <em>Auto-recovery</em> mehanizam koji pretražuje bazu za zadnjim aktivnim slučajem tog pacijenta.
+        </div>
+    </div>
+
+    <div id="fhir-bundle" class="mt-16">
+        <h2>Anatomija FHIR Magije (MHD Builder)</h2>
+        <p>Klasa <code>mhd-bundle.builder.ts</code> je srce ovog sustava. Ona pretvara ravni JSON u masivni IHE MHD STU3 XML/JSON.</p>
+        <ul>
+            <li><strong>Minimal Provide Document Bundle:</strong> Zahtijeva točno definiranu strukturu <code>entry</code> niza.</li>
+            <li>Prvi entry je UVIJEK <code>SubmissionSet</code> (tip: List).</li>
+            <li>Drugi entry je <code>DocumentReference</code>.</li>
+            <li>Treći entry (unutar DocumentReference) sadrži sam tekst nalaza (Anamneza, Status) zamotan u <code>Composition</code> resurs (FHIR Document).</li>
+        </ul>
+        <p><strong>Pravilo C14N:</strong> Unutarnji FHIR Bundle mora biti kanoniziran (C14N XML) prije potpisivanja. To znači da funkcija za potpisivanje doslovno sortira atribute abecedno i miče praznine. Ako rukom prčkate po XML-u nakon potpisa, hash (DigestValue) pada, a CEZIH vraća HTTP 400.</p>
+    </div>
+
+    <div id="crypto-certilia" class="mt-16">
+        <h2>Certilia Integracija i Polling</h2>
+        <p>Certilia API (Mobile.ID) je asinkron. Naš middleware komunicira s njim na sljedeći način:</p>
+        <ol class="list-decimal pl-5 space-y-2 mb-4 text-slate-300">
+            <li><code>initiateRemoteSigning()</code> - Šalje hashirani base64 FHIR dokument na Certiliu. Vraća <code>transactionCode</code>. G9 klijentu šaljemo HTTP 200 s tim kodom.</li>
+            <li>Klijent otvara UI Widget koji svakih 3 sekunde pinga <code>/status/:txCode</code> na našem middlewareu.</li>
+            <li>Naš middleware pinga CEZIH Certilia proxy. Kad korisnik na mobitelu stisne "Odobri", CEZIH vraća status <code>FULLY_SIGNED</code>.</li>
+            <li>Naša metoda <code>completeRemoteSigning()</code> preuzima taj potpisani base64 s CEZIH-a, ubacuje ga u vanjski omotač (Outer MHD Bundle) i šalje na konačni repozitorij (ITI-65).</li>
+        </ol>
+    </div>
+
+    <div id="ts-errors" class="mt-16">
+        <h2>Troubleshooting: Dešifriranje CEZIH Grešaka</h2>
+        <p>Kada CEZIH odbije paket, vratit će <code>OperationOutcome</code>. Evo prijevoda najčešćih:</p>
+        
+        <div class="space-y-4">
+            <div class="bg-slate-800 p-4 rounded border border-slate-700">
+                <div class="text-rose-400 font-bold mb-1">Validation_VAL_Profile_NotSlice</div>
+                <div class="text-sm">Ovo NE znači da vam fali "slice". Ovo znači da je cijeli JSON loše formatiran (često fali neko obavezno polje, poput <code>context.related</code> ili krivo napisanog UUID-a). Pogledajte u kojem redu (Line/Col) se greška dogodila.</div>
+            </div>
+            
+            <div class="bg-slate-800 p-4 rounded border border-slate-700">
+                <div class="text-rose-400 font-bold mb-1">Reference_REF_CantResolve</div>
+                <div class="text-sm">Poslali ste referencu (npr. ID posjete ili slučaja) koja ne postoji u CEZIH bazi. Nikad ne šaljite lokalne UUID-ove za posjetu/slučaj u CEZIH!</div>
+            </div>
+            
+            <div class="bg-slate-800 p-4 rounded border border-slate-700">
+                <div class="text-rose-400 font-bold mb-1">Potpis nije validan (C14N)</div>
+                <div class="text-sm">Dogodila se modifikacija Inner Bundlea nakon što je potpisan. Provjerite <code>mhd-bundle.builder.ts</code> i liniju gdje se spaja <code>preSignedB64</code>. Ako je dodan makar i jedan prazan red iza base64 stringa, potpis pada.</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-20 pt-8 border-t border-slate-800 text-center text-slate-500 text-sm">
+        Ovaj dokument služi isključivo za interno održavanje sustava. Zabranjeno dijeljenje s klijentima.
+    </div>
+
+</div>
+
+</body>
+</html>

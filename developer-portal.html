@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CEZIH FHIR Bridge | API Dokumentacija</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #334155; }
+        .code-block { background-color: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 16px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; overflow-x: auto; margin-top: 12px; margin-bottom: 24px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.5); border: 1px solid #1e293b; }
+        .string { color: #a5b4fc; }
+        .number { color: #fca5a5; }
+        .boolean { color: #fde047; }
+        .key { color: #7dd3fc; }
+        .method-post { background-color: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; margin-right: 8px; }
+        .method-get { background-color: #3b82f6; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; margin-right: 8px; }
+        
+        /* Layout */
+        .layout { display: flex; min-height: 100vh; }
+        .sidebar { width: 280px; background-color: #ffffff; border-right: 1px solid #e2e8f0; position: fixed; height: 100vh; overflow-y: auto; padding: 24px; }
+        .content { margin-left: 280px; flex: 1; padding: 48px; max-w-7xl; }
+        .section { display: flex; gap: 48px; margin-bottom: 64px; border-bottom: 1px solid #e2e8f0; padding-bottom: 64px; }
+        .section-desc { flex: 1; min-width: 0; }
+        .section-code { width: 450px; flex-shrink: 0; }
+
+        .nav-link { display: block; padding: 6px 12px; color: #64748b; text-decoration: none; border-radius: 6px; font-size: 13px; font-weight: 500; transition: all 0.2s; }
+        .nav-link:hover { background-color: #f1f5f9; color: #0f172a; }
+        .nav-header { font-size: 11px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin: 24px 0 8px 12px; }
+        .empty-body { background: #f1f5f9; color: #94a3b8; font-family: monospace; font-size: 12px; padding: 12px; border-radius: 8px; text-align: center; border: 1px dashed #cbd5e1; margin-bottom: 24px; }
+        
+        .lifecycle-box { background: #f8fafc; border: 1px solid #cbd5e1; padding: 12px; border-radius: 8px; font-size: 13px; margin-bottom: 8px; }
+        .lifecycle-arrow { text-align: center; color: #94a3b8; font-weight: bold; padding: 4px 0; }
+    </style>
+</head>
+<body>
+
+<div class="layout">
+    <div class="sidebar">
+        <div class="flex items-center gap-3 mb-8">
+            <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">C</div>
+            <span class="font-black text-lg text-slate-800 tracking-tight">FHIR Bridge</span>
+        </div>
+
+        <div class="nav-header">Uvod</div>
+        <a href="#overview" class="nav-link">Pregled & Arhitektura</a>
+
+        <div class="nav-header">Pacijenti (PDQm / PAM)</div>
+        <a href="#patient-search" class="nav-link">Dohvat pacijenata</a>
+        <a href="#patient-foreigner" class="nav-link">Registracija stranca</a>
+
+        <div class="nav-header">Posjete (Encounters)</div>
+        <a href="#visit-fetch" class="nav-link">Dohvat aktivnih posjeta</a>
+        <a href="#visit-create" class="nav-link">Otvaranje posjete</a>
+        <a href="#visit-close" class="nav-link">Zatvaranje posjete</a>
+
+        <div class="nav-header text-amber-600">Slučajevi (Conditions)</div>
+        <a href="#case-concept" class="nav-link font-bold">Životni ciklus slučaja</a>
+        <a href="#case-fetch" class="nav-link">Dohvat slučajeva</a>
+        <a href="#case-create" class="nav-link">Kreiranje (Nova bolest)</a>
+        <a href="#case-update" class="nav-link">Ažuriranje statusa (TC 17)</a>
+
+        <div class="nav-header text-blue-600">Klinički Nalazi (Documents)</div>
+        <a href="#doc-types" class="nav-link font-bold">Vrste dokumenata (011-013)</a>
+        <a href="#doc-search" class="nav-link">Pretraživanje nalaza</a>
+        <a href="#doc-send" class="nav-link">Slanje nacrta nalaza</a>
+        <a href="#doc-sign" class="nav-link text-blue-600 font-bold">UI Widget za potpisivanje</a>
+        <a href="#doc-cancel" class="nav-link">Storniranje nalaza</a>
+    </div>
+
+    <div class="content">
+        
+        <div id="overview" class="mb-16">
+            <h1 class="text-4xl font-black text-slate-900 mb-4">CEZIH Integracija (G9 Middleware)</h1>
+            <p class="text-lg text-slate-600 leading-relaxed mb-6 max-w-3xl">
+                Dobrodošli u dokumentaciju za <strong>CEZIH FHIR Bridge</strong>. Vaša G9 aplikacija ovdje komunicira putem jednostavnih REST API poziva. Middleware se brine o izgradnji FHIR HL7 STU3 paketa, kanonizaciji i potpisivanju.
+            </p>
+        </div>
+
+        <div class="border-b border-slate-200 mb-12 pb-4"><h1 class="text-3xl font-black text-slate-800">1. Pacijenti</h1></div>
+        
+        <div id="patient-search" class="section">
+            <div class="section-desc">
+                <h2 class="text-2xl font-bold text-slate-900 mb-2">Dohvat pacijenata iz CEZIH-a</h2>
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="method-get">GET</span><code class="text-sm font-bold text-slate-700 bg-slate-200 px-2 py-1 rounded">/api/patient/search/{mbo}</code>
+                </div>
+            </div>
+            <div class="section-code"><div class="empty-body">Nema JSON body-ja</div></div>
+        </div>
+
+        <div class="border-b border-slate-200 mb-12 pb-4"><h1 class="text-3xl font-black text-slate-800">2. Posjete (Encounters)</h1></div>
+        
+        <div id="visit-create" class="section">
+            <div class="section-desc">
+                <h2 class="text-2xl font-bold text-slate-900 mb-2">Otvaranje (TC 12) i Zatvaranje (TC 14)</h2>
+                <p class="text-slate-600 mb-4">Važno: Klasa posjete mora odgovarati tipu dokumenta koji ćete kasnije slati. Za ambulantne nalaze koristite <code>AMB</code>, za bolničke (otpusna pisma) koristite <code>IMP</code>.</p>
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="method-post">POST</span><code class="text-sm font-bold text-slate-700 bg-slate-200 px-2 py-1 rounded">/api/visit/create</code>
+                </div>
+            </div>
+            <div class="section-code">
+                <div class="code-block mt-0">
+{
+  <span class="key">"patientMbo"</span>: <span class="string">"999999423"</span>,
+  <span class="key">"class"</span>: <span class="string">"AMB"</span>,
+  <span class="key">"startDate"</span>: <span class="string">"2026-03-15T08:00:00Z"</span>
+}
+                </div>
+            </div>
+        </div>
+
+        <div class="border-b border-slate-200 mb-12 pb-4"><h1 class="text-3xl font-black text-amber-600">3. Zdravstveni Slučajevi (Conditions)</h1></div>
+
+        <div id="case-concept" class="mb-16">
+            <h2 class="text-2xl font-bold text-slate-900 mb-4">Kako funkcioniraju Slučajevi?</h2>
+            <p class="text-slate-600 mb-4 max-w-3xl">
+                Slučaj (Condition) ne predstavlja samo jedan dolazak, već <strong>cjelokupni tijek liječenja jedne bolesti</strong> (npr. Liječenje hipertenzije). CEZIH strogo prati "Stroj stanja" (State Machine) za svaki slučaj. 
+            </p>
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-6 max-w-3xl mb-8">
+                <h3 class="font-bold text-amber-800 mb-2">Zlatno pravilo povezivanja:</h3>
+                <p class="text-sm text-amber-700 mb-4">
+                    Ako pacijent već ima otvoren slučaj na CEZIH-u za određenu MKB-10 dijagnozu (npr. "I10 - Hipertenzija"), <strong>NE SMIJETE</strong> otvarati novi slučaj. Morate dohvatiti taj postojeći slučaj i njegov <code>caseId</code> proslijediti prilikom slanja nalaza.
+                </p>
+                <div class="bg-white p-4 rounded border border-amber-200 text-sm">
+                    <strong>Ispravan flow za kronične bolesti:</strong><br>
+                    1. Dohvati slučajeve (GET) -> 2. Odaberi postojeći <code>caseId</code> -> 3. Otvori novu Posjetu (TC 12) -> 4. Pošalji Nalaz (TC 18) vezan uz tu posjetu i stari <code>caseId</code>.
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-8 max-w-4xl">
+                <div>
+                    <h4 class="font-bold text-slate-800 mb-3">Životni ciklus Slučaja:</h4>
+                    <div class="lifecycle-box border-l-4 border-l-emerald-500">
+                        <strong class="text-emerald-700">1. AKTIVAN (Nova bolest)</strong>
+                        <p class="text-xs text-slate-500 mt-1">Stvara se preko `/api/case/create`.</p>
+                    </div>
+                    <div class="lifecycle-arrow">↓ 2.3 Remisija ↓</div>
+                    <div class="lifecycle-box border-l-4 border-l-blue-500">
+                        <strong class="text-blue-700">2. REMISIJA (Bolest miruje)</strong>
+                        <p class="text-xs text-slate-500 mt-1">Slučaj je i dalje otvoren, ali pacijent nema simptome.</p>
+                    </div>
+                    <div class="flex justify-between">
+                        <div class="w-1/2 lifecycle-arrow text-left pl-4">↙ 2.5 Relaps ↙</div>
+                        <div class="w-1/2 lifecycle-arrow text-right pr-4">↘ 2.4 Zatvaranje ↘</div>
+                    </div>
+                    <div class="flex gap-2">
+                        <div class="lifecycle-box border-l-4 border-l-orange-500 flex-1">
+                            <strong class="text-orange-700">RELAPS</strong>
+                            <p class="text-[10px] text-slate-500">Vraća u AKTIVAN</p>
+                        </div>
+                        <div class="lifecycle-box border-l-4 border-l-slate-400 flex-1 bg-slate-100">
+                            <strong class="text-slate-600">ZATVOREN</strong>
+                            <p class="text-[10px] text-slate-500">Izliječen / Gotovo</p>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <h4 class="font-bold text-slate-800 mb-3">Šifrarnik Akcija (TC 17):</h4>
+                    <ul class="text-sm space-y-3">
+                        <li class="bg-slate-50 p-2 rounded border border-slate-200"><code>2.4</code> - <strong>Zatvaranje slučaja</strong> (Pacijent izliječen ili je obrada završena).</li>
+                        <li class="bg-slate-50 p-2 rounded border border-slate-200"><code>2.3</code> - <strong>Proglašenje remisije</strong> (Bolest miruje).</li>
+                        <li class="bg-slate-50 p-2 rounded border border-slate-200"><code>2.5</code> - <strong>Relaps/Recidiv</strong> (Povratak bolesti iz stanja remisije).</li>
+                        <li class="bg-slate-50 p-2 rounded border border-slate-200"><code>2.8</code> - <strong>Ponovno otvaranje</strong> (Vraćanje greškom zatvorenog slučaja u Aktivno stanje).</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div id="case-create" class="section">
+            <div class="section-desc">
+                <h2 class="text-2xl font-bold text-slate-900 mb-2">Otvaranje novog slučaja (TC 16)</h2>
+                <p class="text-slate-600 mb-4">Pozivate <strong>samo ako</strong> pacijent nema već aktivan slučaj za ovu dijagnozu na CEZIH-u.</p>
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="method-get">GET</span><code class="text-sm font-bold text-slate-700 bg-slate-200 px-2 py-1 rounded">/api/case/remote/{mbo}</code> <span class="text-xs text-slate-500">(Dohvat)</span>
+                </div>
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="method-post">POST</span><code class="text-sm font-bold text-slate-700 bg-slate-200 px-2 py-1 rounded">/api/case/create</code> <span class="text-xs text-slate-500">(Kreiranje)</span>
+                </div>
+            </div>
+            <div class="section-code">
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Request (Kreiranje slučaja)</p>
+                <div class="code-block mt-0">
+{
+  <span class="key">"patientMbo"</span>: <span class="string">"999999423"</span>,
+  <span class="key">"diagnosisCode"</span>: <span class="string">"I10"</span>,
+  <span class="key">"title"</span>: <span class="string">"Hipertenzija"</span>
+}
+                </div>
+            </div>
+        </div>
+
+        <div id="case-update" class="section">
+            <div class="section-desc">
+                <h2 class="text-2xl font-bold text-slate-900 mb-2">Ažuriranje statusa slučaja (TC 17)</h2>
+                <p class="text-slate-600 mb-4">Mijenja status kroz stroj stanja. Prosljeđujete ID slučaja i šifru akcije.</p>
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="method-post">POST</span>
+                    <code class="text-sm font-bold text-slate-700 bg-slate-200 px-2 py-1 rounded">/api/case/{id}/action</code>
+                </div>
+            </div>
+            <div class="section-code">
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Request (Zatvaranje slučaja)</p>
+                <div class="code-block mt-0">
+{
+  <span class="key">"patientMbo"</span>: <span class="string">"999999423"</span>,
+  <span class="key">"action"</span>: <span class="string">"2.4"</span>,
+  <span class="key">"reason"</span>: <span class="string">"Terapija uspješno završena."</span>
+}
+                </div>
+            </div>
+        </div>
+
+        <div class="border-b border-slate-200 mb-12 pb-4"><h1 class="text-3xl font-black text-blue-700">4. Klinički Nalazi (Dokumenti)</h1></div>
+
+        <div id="doc-types" class="mb-16">
+            <h2 class="text-2xl font-bold text-slate-900 mb-4">Tipovi dokumenata i pravila</h2>
+            <p class="text-slate-600 mb-4 max-w-3xl">
+                Prilikom slanja dokumenta na <code>/api/document/send</code>, morate točno definirati parametar <code>type</code>. Svaki tip dokumenta ima svoja pravila i zahtijeva specifičnu Klasu posjete (Encounter Class).
+            </p>
+            <div class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm max-w-4xl">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-slate-50 text-slate-600 border-b border-slate-200">
+                        <tr>
+                            <th class="p-3 font-bold">Šifra (type)</th>
+                            <th class="p-3 font-bold">Naziv dokumenta</th>
+                            <th class="p-3 font-bold">Klasa Posjete (TC12)</th>
+                            <th class="p-3 font-bold">Opis / Korištenje</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        <tr>
+                            <td class="p-3 font-mono font-bold text-blue-600">011</td>
+                            <td class="p-3 font-semibold text-slate-800">Izvješće nakon pregleda u ambulanti</td>
+                            <td class="p-3"><span class="bg-emerald-100 text-emerald-700 px-2 py-1 rounded text-xs font-bold font-mono">AMB</span> (Ambulatory)</td>
+                            <td class="p-3 text-slate-600">Standardni pregled kod liječnika opće prakse ili privatnika.</td>
+                        </tr>
+                        <tr>
+                            <td class="p-3 font-mono font-bold text-blue-600">012</td>
+                            <td class="p-3 font-semibold text-slate-800">Specijalistički nalaz</td>
+                            <td class="p-3"><span class="bg-emerald-100 text-emerald-700 px-2 py-1 rounded text-xs font-bold font-mono">AMB</span> (Ambulatory)</td>
+                            <td class="p-3 text-slate-600">Nalaz liječnika specijaliste nakon uputnice ili konzultacije.</td>
+                        </tr>
+                        <tr>
+                            <td class="p-3 font-mono font-bold text-rose-600">013</td>
+                            <td class="p-3 font-semibold text-slate-800">Otpusno pismo</td>
+                            <td class="p-3"><span class="bg-rose-100 text-rose-700 px-2 py-1 rounded text-xs font-bold font-mono">IMP</span> (Inpatient)</td>
+                            <td class="p-3 text-slate-600">Izdaje se isključivo pacijentima nakon stacionarnog liječenja (ležanja u ustanovi).</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-xs text-rose-500 mt-2 font-bold">⚠️ CEZIH će ODBITI dokument ako pošaljete Otpusno pismo (013), a posjeta na koju se vežete je označena kao AMB (Ambulantna)!</p>
+        </div>
+
+        <div id="doc-search" class="section">
+            <div class="section-desc">
+                <h2 class="text-2xl font-bold text-slate-900 mb-2">Pretraživanje nalaza (TC 22)</h2>
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="method-get">GET</span><code class="text-sm font-bold text-slate-700 bg-slate-200 px-2 py-1 rounded">/api/document/search-remote?patientMbo={mbo}</code>
+                </div>
+            </div>
+            <div class="section-code"><div class="empty-body">Nema JSON body-ja</div></div>
+        </div>
+
+        <div id="doc-send" class="section">
+            <div class="section-desc">
+                <h2 class="text-2xl font-bold text-slate-900 mb-2">Slanje nacrta nalaza (TC 18)</h2>
+                <p class="text-slate-600 mb-4">Šaljete sadržaj nalaza, zajedno s ID-jem posjete (iz TC12) i ID-jem slučaja (iz TC16 ili dohvaćenim sa CEZIH-a). Dobivate `documentOid`.</p>
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="method-post">POST</span><code class="text-sm font-bold text-slate-700 bg-slate-200 px-2 py-1 rounded">/api/document/send</code>
+                </div>
+            </div>
+            <div class="section-code">
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Primjer Requesta</p>
+                <div class="code-block mt-0">
+{
+  <span class="key">"patientMbo"</span>: <span class="string">"999999423"</span>,
+  <span class="key">"visitId"</span>: <span class="string">"cmmqr24hp0..."</span>,
+  <span class="key">"caseId"</span>: <span class="string">"cmmz82x..."</span>,
+  <span class="key">"type"</span>: <span class="string">"011"</span>,
+  <span class="key">"diagnosisCode"</span>: <span class="string">"Z00.0"</span>,
+  <span class="key">"anamnesis"</span>: <span class="string">"Redovni pregled..."</span>,
+  <span class="key">"finding"</span>: <span class="string">"Fizikalni status uredan."</span>
+}
+                </div>
+            </div>
+        </div>
+
+        <div id="doc-sign" class="section border-l-4 border-blue-500 pl-8 bg-white rounded-r-2xl shadow-sm">
+            <div class="section-desc">
+                <h2 class="text-2xl font-black text-blue-700 mb-2">Završni korak: UI Widget za potpisivanje</h2>
+                <p class="text-slate-600 mb-4">Ovo je vaša najveća ušteda vremena. Ne morate implementirati rad s pametnim karticama, C++ DLL bibliotekama niti Certilia polling sustavom. Samo otvorite naš gotovi UI widget.</p>
+                <p class="text-sm font-bold text-slate-800 mb-2">Kako integrirati:</p>
+                <ol class="list-decimal pl-5 text-sm text-slate-600 space-y-2 mb-6">
+                    <li>Kada pozovete <code class="bg-slate-200 px-1">/api/document/send</code> dobit ćete <code class="bg-slate-200 px-1">documentOid</code>.</li>
+                    <li>U vašoj G9 aplikaciji otvorite Iframe ili Popup prozor na URL:<br><code class="bg-blue-50 text-blue-700 p-1 rounded font-bold block mt-1">http://localhost:3010/sign-widget.html?oid={documentOid}</code></li>
+                    <li>Liječnik u widgetu upiše PIN pametne kartice ili odobri na mobitelu. Widget sve rješava u pozadini s CEZIH-om.</li>
+                    <li>Widget šalje <code>window.postMessage</code> vašoj aplikaciji kada je CEZIH prihvatio dokument kako biste zatvorili prozor.</li>
+                </ol>
+            </div>
+        </div>
+
+        <div id="doc-cancel" class="section border-none">
+            <div class="section-desc">
+                <h2 class="text-2xl font-bold text-slate-900 mb-2">Storniranje nalaza (TC 20)</h2>
+                <p class="text-slate-600 mb-4">Ako je dokument poslan greškom, Middleware ga može poništiti na CEZIH-u slanjem samo njegovog OID-a.</p>
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="method-post">POST</span><code class="text-sm font-bold text-slate-700 bg-slate-200 px-2 py-1 rounded">/api/document/cancel</code>
+                </div>
+            </div>
+            <div class="section-code">
+                <div class="code-block mt-0">
+{
+  <span class="key">"documentOid"</span>: <span class="string">"urn:oid:2.16.840.1..."</span>
+}
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+</body>
+</html>

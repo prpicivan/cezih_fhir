@@ -1084,35 +1084,76 @@ class ClinicalDocumentService {
             const headers = { ...rawHeaders, 'Accept': 'application/fhir+json' };
             const baseUrl = `${config.cezih.gatewayBase}${config.cezih.services.document}/DocumentReference`;
             
-            let url = `${baseUrl}?patient.identifier=${encodeURIComponent(`${CEZIH_IDENTIFIERS.MBO}|${params.patientMbo}`)}&status=current&_count=100`;
+            let url = `${baseUrl}?patient.identifier=${encodeURIComponent(`${CEZIH_IDENTIFIERS.MBO}|${params.patientMbo}`)}&status=current&_sort=-date&_count=100`;
 
             console.log(`[TC21] GET ${url}`);
             
             let allRemoteDocs: any[] = [];
             let nextUrl: string | undefined = url;
+            let pageNum = 0;
 
             while (nextUrl) {
-                const response: AxiosResponse = await axios.get(nextUrl, { headers });
-                const bundle: any = response.data;
-                
-                if (bundle.entry) {
-                    const mapped = bundle.entry.map((e: any) => this.mapRemoteDocument(e.resource));
-                    allRemoteDocs = [...allRemoteDocs, ...mapped];
-                }
+                pageNum++;
+                try {
+                    const response: AxiosResponse = await axios.get(nextUrl, { headers });
+                    const bundle: any = response.data;
+                    
+                    if (bundle.entry) {
+                        const mapped = bundle.entry.map((e: any) => this.mapRemoteDocument(e.resource));
+                        allRemoteDocs = [...allRemoteDocs, ...mapped];
+                    }
 
-                // Check for next page
-                const nextLink: any = bundle.link?.find((l: any) => l.relation === 'next');
-                nextUrl = nextLink ? nextLink.url : undefined;
-                
-                if (nextUrl) {
-                    console.log(`[TC21] Fetching next page: ${nextUrl}`);
+                    console.log(`[TC21] Page ${pageNum}: ${bundle.entry?.length || 0} entries (total so far: ${allRemoteDocs.length})`);
+
+                    // Check for next page
+                    const nextLink: any = bundle.link?.find((l: any) => l.relation === 'next');
+                    if (nextLink?.url) {
+                        // CEZIH returns next URLs with un-encoded pipe characters in
+                        // query params like type=...CodeSystem/document-type|001,...
+                        // We need to properly encode the query parameter values.
+                        nextUrl = this.fixCezihNextUrl(nextLink.url);
+                        console.log(`[TC21] Fetching next page: ${nextUrl}`);
+                    } else {
+                        nextUrl = undefined;
+                    }
+                } catch (pageError: any) {
+                    // If pagination fails (e.g. CEZIH returns 400 on page 2+),
+                    // return what we already have instead of throwing everything away
+                    console.warn(`[TC21] Pagination failed on page ${pageNum}: ${pageError.message} (status: ${pageError.response?.status})`);
+                    console.warn(`[TC21] Returning ${allRemoteDocs.length} documents fetched so far.`);
+                    break;
                 }
             }
 
+            console.log(`[TC21] Total documents fetched: ${allRemoteDocs.length}`);
             return allRemoteDocs;
         } catch (error: any) {
             console.warn('[TC21] CEZIH remote search failed:', error.message);
+            console.warn('[TC21] Response status:', error.response?.status);
+            console.warn('[TC21] Response data:', JSON.stringify(error.response?.data)?.substring(0, 2000));
             throw error;
+        }
+    }
+
+    /**
+     * Fix CEZIH next page URLs that contain un-encoded pipe characters.
+     * CEZIH returns URLs like: ...?type=http://...document-type|001,...|002&_offset=100
+     * The pipe chars in query values need to be encoded to %7C.
+     */
+    private fixCezihNextUrl(rawUrl: string): string {
+        try {
+            const urlObj = new URL(rawUrl);
+            const fixedParams = new URLSearchParams();
+            
+            for (const [key, value] of urlObj.searchParams.entries()) {
+                fixedParams.set(key, value);
+            }
+            
+            urlObj.search = fixedParams.toString();
+            return urlObj.toString();
+        } catch {
+            // If URL parsing fails, return as-is
+            return rawUrl;
         }
     }
 
@@ -1129,8 +1170,17 @@ class ClinicalDocumentService {
             isRemote: true,
             contentUrl: resource.content?.[0]?.attachment?.url,
             diagnosisCode: '',
-            diagnosisDisplay: ''
+            diagnosisDisplay: '',
         };
+
+        // Extract author (doctor) — first Practitioner in author array
+        const practAuthor = resource.author?.find((a: any) => a.type === 'Practitioner' || !a.type);
+        doc.authorName = practAuthor?.display || practAuthor?.identifier?.value || '';
+
+        // Extract institution (custodian or Organization author)
+        doc.institutionName = resource.custodian?.display
+            || resource.author?.find((a: any) => a.type === 'Organization')?.display
+            || '';
 
         // Try to find diagnosis in category or context
         const diagnosisCoding = resource.category?.find((c: any) => c.coding?.[0]?.system?.includes('icd10'))?.coding?.[0]
@@ -1148,26 +1198,55 @@ class ClinicalDocumentService {
         const oidMatch = documentUrl.match(/urn:oid:(.*)/);
         let finalUrl = documentUrl;
         let oid: string | null = null;
+        let isContentUrl = false;
 
         if (oidMatch) {
             oid = oidMatch[1];
-            // Check local DB first
-            const localDoc = this.getDocument(oid);
-            if (localDoc) return localDoc;
             
-            // If not local, construct CEZIH retrieval URL
-            finalUrl = `${config.cezih.gatewayBase}${config.cezih.services.document}/iti-68-service?id=${encodeURIComponent(oidMatch[0])}`;
+            // CEZIH ITI-68 expects: ?data=base64(documentUniqueId=urn:ietf:rfc:3986|urn:oid:...&position=0)
+            const dataParam = `documentUniqueId=urn:ietf:rfc:3986|urn:oid:${oid}&position=0`;
+            const dataB64 = Buffer.from(dataParam).toString('base64');
+            finalUrl = `${config.cezih.gatewayBase}${config.cezih.services.document}/iti-68-service?data=${dataB64}`;
+        } else if (documentUrl.includes('iti-68-service')) {
+            // Already a full CEZIH contentUrl — use directly
+            isContentUrl = true;
         }
 
         try {
             const rawHeaders = authService.getUserAuthHeaders(userToken);
             delete rawHeaders['Content-Type'];
-            const headers = { ...rawHeaders, 'Accept': 'application/fhir+json' };
+            // For constructed URLs (from urn:oid:), prefer FHIR JSON so we get the Bundle
+            // For direct contentUrls, use wildcard to avoid 406
+            const acceptHeader = isContentUrl ? '*/*' : 'application/fhir+json, application/json, */*;q=0.1';
+            const headers = { ...rawHeaders, 'Accept': acceptHeader };
             
-            console.log(`[ClinicalDocumentService] Retrieving document: ${finalUrl}`);
-            const response = await axios.get(finalUrl, { headers });
+            console.log(`[ClinicalDocumentService] Retrieving document (ITI-68): ${finalUrl}`);
+            const response = await axios.get(finalUrl, { headers, responseType: 'arraybuffer' });
 
-            let resource = response.data;
+            // Determine content type from response
+            const contentType = response.headers['content-type'] || '';
+            console.log(`[ClinicalDocumentService] ITI-68 response content-type: ${contentType}, size: ${response.data?.length || 0}`);
+
+            let resource: any;
+
+            if (contentType.includes('application/fhir+json') || contentType.includes('application/json')) {
+                // JSON response — parse directly
+                const text = Buffer.from(response.data).toString('utf8');
+                resource = JSON.parse(text);
+            } else {
+                // Binary response (could be base64-encoded FHIR JSON or PDF)
+                const text = Buffer.from(response.data).toString('utf8');
+                try {
+                    resource = JSON.parse(text);
+                } catch {
+                    // Not JSON — return as binary
+                    return {
+                        resourceType: 'Binary',
+                        contentType: contentType || 'application/octet-stream',
+                        data: Buffer.from(response.data).toString('base64'),
+                    };
+                }
+            }
 
             // If it's a Binary resource, we need to decode it
             if (resource.resourceType === 'Binary') {
@@ -1192,6 +1271,8 @@ class ClinicalDocumentService {
             return resource;
         } catch (error: any) {
             console.error('[ClinicalDocumentService] Failed to retrieve document:', error.message);
+            console.error('[ClinicalDocumentService] Response status:', error.response?.status);
+            console.error('[ClinicalDocumentService] Response data:', Buffer.isBuffer(error.response?.data) ? Buffer.from(error.response.data).toString('utf8').substring(0, 500) : JSON.stringify(error.response?.data)?.substring(0, 500));
             throw error;
         }
     }
@@ -1209,27 +1290,67 @@ class ClinicalDocumentService {
             diagnosisCode: '',
             diagnosisDisplay: '',
             createdAt: composition.date,
-            title: composition.title
+            title: composition.title,
+            authorName: '',
+            institutionName: '',
+            visitOutcome: '',
         };
 
-        // Extract narrative sections from Composition
+        // --- Extract from referenced resources in the bundle ---
+        const resources = bundle.entry?.map((e: any) => e.resource) || [];
+
+        // Anamneza: Observation with code=15
+        const anamObs = resources.find((r: any) => r.resourceType === 'Observation' && r.code?.coding?.[0]?.code === '15');
+        if (anamObs?.valueString) {
+            result.anamnesis = anamObs.valueString;
+        }
+
+        // Preporuka: CarePlan.description
+        const carePlan = resources.find((r: any) => r.resourceType === 'CarePlan');
+        if (carePlan?.description) {
+            result.recommendation = carePlan.description;
+        }
+
+        // Diagnosis: Condition resource
+        const condition = resources.find((r: any) => r.resourceType === 'Condition');
+        if (condition) {
+            result.diagnosisCode = condition.code?.coding?.[0]?.code || '';
+            result.diagnosisDisplay = condition.code?.coding?.[0]?.display || '';
+        }
+
+        // Završetak posjeta: Observation with code=24
+        const outcomeObs = resources.find((r: any) => r.resourceType === 'Observation' && r.code?.coding?.[0]?.code === '24');
+        if (outcomeObs?.valueCodeableConcept) {
+            result.visitOutcome = outcomeObs.valueCodeableConcept.coding?.[0]?.display || '';
+        } else if (outcomeObs?.valueString) {
+            result.visitOutcome = outcomeObs.valueString;
+        }
+
+        // Author: Practitioner name
+        const practitioner = resources.find((r: any) => r.resourceType === 'Practitioner');
+        if (practitioner?.name?.[0]) {
+            const n = practitioner.name[0];
+            const given = Array.isArray(n.given) ? n.given.join(' ') : '';
+            result.authorName = `${n.family || ''} ${given}`.trim();
+        }
+
+        // Institution: Organization name
+        const organization = resources.find((r: any) => r.resourceType === 'Organization');
+        if (organization?.name) {
+            result.institutionName = organization.name;
+        }
+
+        // Fallback: try Composition section text for any fields still empty
         composition.section?.forEach((sec: any) => {
             const title = sec.title?.toLowerCase() || '';
-            // Basic HTML strip for simplicity in our UI
             const text = sec.text?.div?.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() || '';
+            if (!text) return;
 
-            if (title.includes('anamneza')) result.anamnesis = text;
-            if (title.includes('status') || title.includes('nalaz')) result.finding = text;
-            if (title.includes('terapija')) result.therapy = text;
-            if (title.includes('preporuka')) result.recommendation = text;
+            if (!result.anamnesis && title.includes('anamnez')) result.anamnesis = text;
+            if (!result.finding && (title.includes('status') || title.includes('nalaz'))) result.finding = text;
+            if (!result.therapy && title.includes('terapij')) result.therapy = text;
+            if (!result.recommendation && title.includes('preporuk')) result.recommendation = text;
         });
-
-        // Extract diagnosis from Condition resource in the bundle
-        const condition = bundle.entry?.find((e: any) => e.resource?.resourceType === 'Condition')?.resource;
-        if (condition) {
-            result.diagnosisCode = condition.code?.coding?.[0]?.code;
-            result.diagnosisDisplay = condition.code?.coding?.[0]?.display;
-        }
 
         return result;
     }

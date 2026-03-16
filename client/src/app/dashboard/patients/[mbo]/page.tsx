@@ -428,6 +428,13 @@ export default function PatientChartPage() {
                                             {viewingDocument.id}
                                         </p>
                                     )}
+                                    {(viewingDocument.authorName || viewingDocument.institutionName) && (
+                                        <p className="text-[10px] text-slate-500 mt-0.5">
+                                            {viewingDocument.authorName && <span>👤 {viewingDocument.authorName}</span>}
+                                            {viewingDocument.authorName && viewingDocument.institutionName && <span> · </span>}
+                                            {viewingDocument.institutionName && <span>🏥 {viewingDocument.institutionName}</span>}
+                                        </p>
+                                    )}
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <div className="text-right">
@@ -461,34 +468,39 @@ export default function PatientChartPage() {
                                     <div className="group border-l-[3px] border-blue-500 pl-4 hover:pl-5 transition-all">
                                         <h3 className="text-[10px] uppercase font-black text-blue-600 tracking-[2px] mb-1.5 flex items-center gap-1.5">
                                             <div className="w-1.5 h-1.5 bg-blue-600 rounded-full"></div>
-                                            Anamneza i anamnestički podaci
+                                            Anamneza
                                         </h3>
                                         <p className="text-slate-700 leading-relaxed text-sm font-medium bg-slate-50 p-4 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
                                             {viewingDocument.anamnesis || 'Nema podataka.'}
                                         </p>
                                     </div>
 
-                                    {/* Klinički nalaz */}
-                                    <div className="group border-l-[3px] border-emerald-500 pl-4 hover:pl-5 transition-all">
-                                        <h3 className="text-[10px] uppercase font-black text-emerald-600 tracking-[2px] mb-1.5 flex items-center gap-1.5">
-                                            <div className="w-1.5 h-1.5 bg-emerald-600 rounded-full"></div>
-                                            Klinički nalaz i status
-                                        </h3>
-                                        <p className="text-slate-700 leading-relaxed text-sm font-medium bg-slate-50 p-4 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
-                                            {viewingDocument.finding || 'Nema podataka.'}
-                                        </p>
+                                    {/* Dijagnoze */}
+                                    <div className="flex items-center justify-between p-4 bg-slate-900 rounded-2xl text-white shadow-xl shadow-slate-200">
+                                        <div>
+                                            <p className="text-[9px] uppercase font-bold text-slate-400 leading-none mb-1 tracking-wider">Dijagnoze (MKB-10)</p>
+                                            <p className="text-lg font-black tracking-tight">
+                                                {viewingDocument.diagnosisCode ? `${viewingDocument.diagnosisCode} — ` : ''}
+                                                {viewingDocument.diagnosisDisplay || (viewingDocument.diagnosisCode ? '' : 'Nije navedena')}
+                                            </p>
+                                        </div>
+                                        <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center">
+                                            <Stethoscope className="w-6 h-6 text-white/50" />
+                                        </div>
                                     </div>
 
-                                    {/* Terapija */}
-                                    <div className="group border-l-[3px] border-purple-500 pl-4 hover:pl-5 transition-all">
-                                        <h3 className="text-[10px] uppercase font-black text-purple-600 tracking-[2px] mb-1.5 flex items-center gap-1.5">
-                                            <div className="w-1.5 h-1.5 bg-purple-600 rounded-full"></div>
-                                            Terapija
-                                        </h3>
-                                        <p className="text-slate-700 leading-relaxed text-sm font-medium bg-slate-50 p-4 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
-                                            {viewingDocument.therapy || viewingDocument.status_text || 'Nema podataka.'}
-                                        </p>
-                                    </div>
+                                    {/* Primijenjeni postupci */}
+                                    {(viewingDocument.therapy || viewingDocument.finding || !viewingDocument.isRemote) && (
+                                        <div className="group border-l-[3px] border-purple-500 pl-4 hover:pl-5 transition-all">
+                                            <h3 className="text-[10px] uppercase font-black text-purple-600 tracking-[2px] mb-1.5 flex items-center gap-1.5">
+                                                <div className="w-1.5 h-1.5 bg-purple-600 rounded-full"></div>
+                                                Primijenjeni postupci
+                                            </h3>
+                                            <p className="text-slate-700 leading-relaxed text-sm font-medium bg-slate-50 p-4 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
+                                                {viewingDocument.therapy || viewingDocument.finding || '-'}
+                                            </p>
+                                        </div>
+                                    )}
 
                                     {/* Preporuka */}
                                     <div className="group border-l-[3px] border-amber-500 pl-4 hover:pl-5 transition-all">
@@ -501,19 +513,18 @@ export default function PatientChartPage() {
                                         </p>
                                     </div>
 
-                                    {/* Diagnosis Card */}
-                                    <div className="flex items-center justify-between p-4 bg-slate-900 rounded-2xl text-white shadow-xl shadow-slate-200">
-                                        <div>
-                                            <p className="text-[9px] uppercase font-bold text-slate-400 leading-none mb-1 tracking-wider">Dijagnoza (MKB-10)</p>
-                                            <p className="text-lg font-black tracking-tight">
-                                                {viewingDocument.diagnosisCode ? `${viewingDocument.diagnosisCode} — ` : ''}
-                                                {viewingDocument.diagnosisDisplay || (viewingDocument.diagnosisCode ? '' : 'Nije navedena')}
+                                    {/* Završetak posjeta — only if available */}
+                                    {viewingDocument.visitOutcome && (
+                                        <div className="group border-l-[3px] border-emerald-500 pl-4 hover:pl-5 transition-all">
+                                            <h3 className="text-[10px] uppercase font-black text-emerald-600 tracking-[2px] mb-1.5 flex items-center gap-1.5">
+                                                <div className="w-1.5 h-1.5 bg-emerald-600 rounded-full"></div>
+                                                Završetak posjeta
+                                            </h3>
+                                            <p className="text-slate-700 leading-relaxed text-sm font-medium bg-slate-50 p-4 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
+                                                {viewingDocument.visitOutcome}
                                             </p>
                                         </div>
-                                        <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center">
-                                            <Activity className="w-6 h-6 text-emerald-400" />
-                                        </div>
-                                    </div>
+                                    )}
                                 </div>
                             ) : (
                                 <div className="h-full flex flex-col items-center justify-center text-center py-12">
@@ -707,6 +718,13 @@ export default function PatientChartPage() {
                                                                     <p className="text-[10px] font-bold uppercase text-slate-400">
                                                                         {doc.createdAt ? new Date(doc.createdAt).toLocaleDateString('hr-HR') : ''}
                                                                     </p>
+                                                                    {(doc.authorName || doc.institutionName) && (
+                                                                        <p className="text-[10px] text-slate-400 mt-0.5 truncate">
+                                                                            {doc.authorName && <span>👤 {doc.authorName}</span>}
+                                                                            {doc.authorName && doc.institutionName && <span> · </span>}
+                                                                            {doc.institutionName && <span>🏥 {doc.institutionName}</span>}
+                                                                        </p>
+                                                                    )}
                                                                     {doc.diagnosisCode && (
                                                                         <p className="text-[10px] mt-0.5 text-slate-500">
                                                                             <span className="font-mono font-bold">{doc.diagnosisCode}</span>
@@ -1274,7 +1292,7 @@ export default function PatientChartPage() {
                                                                         {statusLabel}
                                                                     </span>
                                                                     <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">
-                                                                        {cv.class || 'AMB'}
+                                                                        {cv.classDisplay || cv.class || 'AMB'}
                                                                     </span>
                                                                     <div className="w-2 h-2 bg-blue-400 rounded-full flex-shrink-0 ml-1" title="CEZIH izvor"></div>
                                                                 </div>
@@ -1282,6 +1300,13 @@ export default function PatientChartPage() {
                                                                     {cv.startTime ? new Date(cv.startTime).toLocaleDateString('hr-HR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : 'Nepoznat datum'}
                                                                     {cv.startTime && ` — ${new Date(cv.startTime).toLocaleTimeString('hr-HR', { hour: '2-digit', minute: '2-digit' })}`}
                                                                 </p>
+                                                                {(cv.practitionerName || cv.institutionName) && (
+                                                                    <p className="text-[10px] text-slate-400 mt-0.5 truncate">
+                                                                        {cv.practitionerName && <span>👤 {cv.practitionerName}</span>}
+                                                                        {cv.practitionerName && cv.institutionName && <span> · </span>}
+                                                                        {cv.institutionName && <span>🏥 {cv.institutionName}</span>}
+                                                                    </p>
+                                                                )}
                                                                 <div className="text-[10px] font-bold text-slate-400 mt-1">
                                                                     CEZIH ID: <span className="font-mono">{cv.cezihVisitId || cv.id}</span>
                                                                 </div>

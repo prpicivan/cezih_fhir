@@ -671,6 +671,7 @@ class VisitService {
             if (bundle.resourceType === 'Bundle' && bundle.entry) {
                 const visits = bundle.entry.map((e: any) => {
                     const resource = e.resource;
+                    const participant = resource.participant?.[0]?.individual;
                     return {
                         id: resource.id,
                         cezihVisitId: resource.identifier?.find((i: any) => i.system?.includes('identifikator-posjete'))?.value || resource.id,
@@ -679,7 +680,10 @@ class VisitService {
                         classDisplay: resource.class?.display || resource.class?.coding?.[0]?.display,
                         startTime: resource.period?.start,
                         endTime: resource.period?.end,
-                        practitionerId: resource.participant?.[0]?.individual?.identifier?.value,
+                        practitionerId: participant?.identifier?.value,
+                        practitionerName: participant?.display || '',
+                        institutionName: resource.serviceProvider?.display || '',
+                        institutionId: resource.serviceProvider?.identifier?.value || '',
                         isRemote: true,
                     };
                 });
