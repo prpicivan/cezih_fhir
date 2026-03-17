@@ -8,6 +8,10 @@ const nextConfig: NextConfig = {
           source: '/api/:path*',
           destination: 'http://127.0.0.1:3010/api/:path*',
         },
+        {
+          source: '/dokumentacija',
+          destination: 'http://127.0.0.1:3010/dokumentacija',
+        },
       ],
       afterFiles: [],
       fallback: [],

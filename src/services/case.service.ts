@@ -72,7 +72,10 @@ class CaseService {
         return [];
     }
     private async searchRemoteCases(patientMbo: string, userToken: string): Promise<any[]> {
-        const patientId = patientService.getPatientIdentifier(patientMbo);
+        // Dohvati pacijenta iz baze da getPatientIdentifier dobije objekt (ne goli string)
+        let patientRow: any = null;
+        try { patientRow = db.prepare('SELECT * FROM patients WHERE mbo = ? OR oib = ? OR cezihUniqueId = ?').get(patientMbo, patientMbo, patientMbo); } catch(e) {}
+        const patientId = patientService.getPatientIdentifier(patientRow || { mbo: patientMbo });
         const url = `${config.cezih.gatewayBase}${config.cezih.services.qedm}/Condition`;
         const params: Record<string, string | number> = {
             'patient:identifier': `${patientId.system}|${patientId.value}`,

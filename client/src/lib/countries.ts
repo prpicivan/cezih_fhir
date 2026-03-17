@@ -102,5 +102,5 @@ export function findCountry(code: string): Country | undefined {
 }
 
 /** Validation regexes */
-export const PASSPORT_REGEX = /^[A-Za-z0-9]{5,20}$/;
-export const EKZO_REGEX = /^[A-Za-z0-9]{1,20}$/;
+export const PASSPORT_REGEX = /^[A-Za-z0-9]{3,50}$/;
+export const EKZO_REGEX = /^[A-Za-z0-9]{3,50}$/;

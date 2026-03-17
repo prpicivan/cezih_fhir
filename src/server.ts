@@ -3,6 +3,7 @@
  * Standalone service for CEZIH private clinic certification.
  */
 import express from 'express';
+import path from 'path';
 import { config } from './config';
 import { apiRoutes } from './routes';
 import { initDatabase } from './db';
@@ -50,6 +51,11 @@ app.use((req, _res, next) => {
 
 // API Routes
 app.use('/api', apiRoutes);
+
+// Developer Portal Documentation
+app.get('/dokumentacija', (_req, res) => {
+    res.sendFile(path.join(process.cwd(), 'developer-portal.html'));
+});
 
 // ============================================================
 // OIDC Callback (Smart Card & Certilia browser-based flow)
