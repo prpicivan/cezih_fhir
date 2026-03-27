@@ -180,21 +180,28 @@ class PatientService {
             return { system: CEZIH_IDENTIFIERS.MBO, value: '999999423' };
         }
 
-        // 1. STRANCI - Apsolutni prioritet: CEZIH Unique ID (cmj...)
+        const mboValue = patient.mbo || patient.id;
+
+        // 1. DOMAĆI PACIJENTI - Apsolutni prioritet: MBO
+        // Pravi MBO se sastoji isključivo od točno 9 znamenki. Ako ga imamo, uvijek šaljemo njega.
+        if (mboValue && /^\d{9}$/.test(mboValue)) {
+            return { system: CEZIH_IDENTIFIERS.MBO, value: mboValue };
+        }
+
+        // 2. STRANCI - CEZIH Unique ID (cmj...)
         if (patient.cezihUniqueId) {
             return { system: CEZIH_IDENTIFIERS.UNIQUE_PATIENT_ID, value: patient.cezihUniqueId };
         } 
-        // 2. STRANCI - Ako nemaju UniqueID još, ali imaju putovnicu
+        // 3. STRANCI - Ako nemaju UniqueID još, ali imaju putovnicu
         else if (patient.passportNumber) {
             return { system: CEZIH_IDENTIFIERS.PASSPORT, value: patient.passportNumber };
         } 
-        // 3. STRANCI - EU kartica
+        // 4. STRANCI - EU kartica
         else if (patient.euCardNumber) {
             return { system: CEZIH_IDENTIFIERS.EU_CARD, value: patient.euCardNumber };
         }
 
-        // 4. DOMAĆI
-        const mboValue = patient.mbo || patient.id;
+        // 5. Fallback
         return { system: CEZIH_IDENTIFIERS.MBO, value: mboValue || '999999423' };
     }
 
